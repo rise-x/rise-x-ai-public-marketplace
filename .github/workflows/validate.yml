@@ -1,0 +1,33 @@
+name: validate
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Intentionally unpinned: this job validates plugins the same way a
+      # real install would, so it should track whatever version users
+      # actually get from npm. If an upstream CLI release breaks this job,
+      # fix the repo to satisfy the new validator, or pin the version here
+      # temporarily.
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: claude plugin validate . --strict
+      - name: Validate every plugin
+        run: |
+          set -e
+          for d in plugins/*/; do
+            [[ -d "$d" ]] || continue
+            claude plugin validate "$d" --strict
+          done
+      - name: Check version bump
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bash scripts/check-version.sh "origin/$BASE_REF"

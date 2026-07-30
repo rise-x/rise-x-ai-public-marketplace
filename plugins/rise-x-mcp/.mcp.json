@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "rise-x": {
+      "type": "http",
+      "url": "https://mcp.rise-x.io/mcp"
+    },
+    "rise-x-test": {
+      "type": "http",
+      "url": "https://mcp-test.rise-x.io/mcp"
+    }
+  }
+}

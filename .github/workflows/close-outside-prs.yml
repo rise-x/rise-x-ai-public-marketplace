@@ -1,0 +1,17 @@
+name: close-outside-prs
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+permissions:
+  pull-requests: write
+jobs:
+  close:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr close "$PR" --repo "${{ github.repository }}" \
+            --comment "Thanks for contributing! This repository does not accept pull requests from outside the Rise-X org — plugin changes ship through internal review. Please open an issue instead and we'll take it from there."
