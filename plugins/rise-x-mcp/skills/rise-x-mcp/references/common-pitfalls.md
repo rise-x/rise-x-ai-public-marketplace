@@ -2,13 +2,11 @@
 
 The full numbered list of traps hit when driving the Rise-X MCP server — draft /
 publish lifecycle, ID confusion, component and dashboard authoring, search and
-filter semantics, exports, and card layouts. Read it before the first write of a
-session, and re-check the relevant entry whenever a mutation returns a warning or
-a component renders empty.
+filter semantics, exports, and card layouts.
 
 Numbering is **stable**: other references and `references/troubleshooting.md`
-cite these entries by number, so retired entries keep their slot instead of being
-renumbered.
+cite these entries by number, so the 7 retired entries keep their slot instead of
+being renumbered. 56 of the 63 slots are live.
 
 1. *(retired — the server returns a structured `no_ecosystem` error envelope; run the Pre-Flight Checklist.)*
 2. **Forgot to draft** — editing a published flow/layout without `create_flow_draft`/`create_layout_draft` fails

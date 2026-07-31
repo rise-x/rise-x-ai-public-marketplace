@@ -1,6 +1,6 @@
 ---
 name: rise-x-mcp
-description: "You MUST invoke this skill BEFORE calling any Rise-X MCP server tool (set_active_ecosystem, create_flow, add_components, publish_flow, manage_action, search_flows, search_companies, search_works, search_assets, get_flow_data_schema, deploy_app, and all others). NEVER call Rise-X MCP tools without loading this skill first — skipping it breaks routing. TRIGGER when: user mentions 'Rise-X', 'rise-x', 'EOP', 'ecosystem', 'workflow', 'asset type', or any Rise-X operation ('create flow', 'build workflow', 'publish flow', 'add component', 'manage assets', 'work items', 'submit work', 'configure dropdown', 'set up approvals', 'add fields', 'add action', 'reject button', 'send back', 'search flows', 'search work items', 'search companies', 'search assets', 'filter works by data', 'find works where', 'find assets where', 'discover data fields', 'deploy an app', 'release an app version', 'upload an app bundle', 'list apps', 'integration', 'external API', 'webhook', 'API key', 'Bearer token', 'OAuth', 'OAuth2', 'client credentials', 'Postman', 'connect to <vendor>', 'JsonEndPoint activity', 'send data to <vendor>', 'pull data from <vendor>', 'call <vendor> API from a flow', 'set up <vendor> integration'). DO NOT TRIGGER when: editing the Rise-X MCP server Python code itself."
+description: "You MUST invoke this skill BEFORE calling any Rise-X MCP server tool (set_active_ecosystem, create_flow, add_components, publish_flow, manage_action, search_flows, search_companies, search_works, search_assets, get_flow_data_schema, deploy_app, and all others). NEVER call Rise-X MCP tools without loading this skill first — skipping it breaks routing. DO NOT TRIGGER when: editing the Rise-X MCP server Python code itself. TRIGGER when: user mentions 'Rise-X', 'rise-x', 'EOP', 'ecosystem', 'workflow', 'asset type', or any Rise-X operation ('create flow', 'build workflow', 'publish flow', 'add component', 'manage assets', 'work items', 'submit work', 'configure dropdown', 'set up approvals', 'add fields', 'add action', 'reject button', 'send back', 'search flows', 'search work items', 'search companies', 'search assets', 'filter works by data', 'find works where', 'find assets where', 'discover data fields', 'deploy an app', 'release an app version', 'upload an app bundle', 'list apps', 'integration', 'external API', 'webhook', 'API key', 'Bearer token', 'OAuth', 'OAuth2', 'client credentials', 'Postman', 'connect to <vendor>', 'JsonEndPoint activity', 'send data to <vendor>', 'pull data from <vendor>', 'call <vendor> API from a flow', 'set up <vendor> integration')."
 metadata:
   author: rise-x
 ---
@@ -74,8 +74,9 @@ error: {code, message, hint}      # failures (code like http_403, validation)
 4. Error envelopes carry a `code` (`http_403`, `validation`, `transient`, …)
    and usually a `hint` with the fix. A **request-side** `validation` error
    (caught before sending) means nothing was sent — fix and retry. An
-   **API-side** 4xx can still *partially* persist (see the `add_components`
-   partial-failure pitfall and the attachments-column "400 that commits"): when
+   **API-side** 4xx can still *partially* persist (pitfall #16, the
+   `add_components` partial-failure case, in `references/common-pitfalls.md`;
+   likewise the attachments-column "400 that commits"): when
    a write error is ambiguous, follow the hint and verify the target entity
    (`get_layout` / `get_work`) before assuming nothing changed.
 5. Paginated lists (`list_work`, `list_assets`) return
@@ -160,14 +161,23 @@ warning. Canonical names you'll use most: `input-text`, `input-select`,
 | Configure data pipelines / flow rules (auto data operations on watched-data change — set/copy/map paths, alerts, dates) | `references/pipelines.md` |
 | Deploy a federated-app bundle, release a new app version, or list/update/delete apps in the registry (`request_bundle_upload` → PUT zip → `deploy_app`; `list_apps`, `get_app`, `update_app`, `delete_app`) | `references/managing-apps.md` |
 | Configure, import, inspect, or test an integration (external API + endpoints called from `JsonEndPoint` activities) | `references/integrations.md` for read-only inspection (domain shape, lifecycle, pitfalls). For any *mutating* integration call (`update_integration`, `update_integration_endpoint`, `import_integrations`, `delete_integration`, `delete_integration_endpoint`, `test_integration_endpoint`, `test_integration_endpoint_in_flow`), load `references/integration-authoring.md` BEFORE calling the tool — it enforces the slot-filling + secrets protocol. Vendor/auth worked recipes (API key, Bearer, OAuth2 client credentials, webhooks, Postman imports) live in `references/integration-patterns.md`. |
+| Look up a tool's exact name, signature, or per-tool caveats | `references/tool-inventory.md` |
+| Diagnose an error, a warning, or an edit that didn't take effect | `references/troubleshooting.md` |
+| Check the numbered pitfall list before a first write, or after a surprising result | `references/common-pitfalls.md` |
 
 ## Common Pitfalls
 
-63 numbered traps with the fix for each — draft/publish lifecycle, ID confusion,
-component and dashboard authoring, search/filter semantics, exports, card
-layouts: `references/common-pitfalls.md`. Read it before the first write of a
-session; re-check the cited entry whenever a mutation warns or a tile renders
-empty. Other references cite these entries by number.
+56 traps with the fix for each, in 63 numbered slots (7 are retired stubs kept so
+the numbering stays stable — other references cite these entries by number) —
+draft/publish lifecycle, ID confusion, component and dashboard authoring,
+search/filter semantics, exports, card layouts:
+`references/common-pitfalls.md`. Read it before the first write of a session;
+re-check the cited entry whenever a mutation warns or a tile renders empty.
+
+**Irreversible — read the entry before you call either:**
+`replace_section_components` permanently deletes every component you omit, so
+send the full keep-set (pitfall #6); `delete_integration` is a physical delete
+with no undo.
 
 ## Troubleshooting
 

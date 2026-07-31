@@ -1,9 +1,10 @@
 # Troubleshooting
 
-Symptom → cause → fix for every known Rise-X MCP failure mode. Consult it the
-moment a call errors, a write reports a warning, or a change doesn't show up in
-the UI. Numbered pitfall cross-references point at
-`references/common-pitfalls.md`.
+Symptom → cause → fix for every known Rise-X MCP failure mode.
+
+A bare `Pitfall #N` below refers to `references/common-pitfalls.md`; a reference
+that names a file (e.g. "Pitfall #14 in `references/dashboards.md`") uses that
+file's own independent numbering.
 
 | Error | Cause | Fix |
 |---|---|---|

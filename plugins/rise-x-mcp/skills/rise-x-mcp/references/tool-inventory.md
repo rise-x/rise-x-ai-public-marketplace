@@ -1,7 +1,7 @@
 # Tool Inventory
 
 Every tool the Rise-X MCP server exposes, grouped by category, with signatures
-and per-tool caveats. Load it when you need an exact tool name or argument shape.
+and per-tool caveats.
 
 85 tools. Mutations accept `response_format="summary"|"full"` (summary is the
 default and carries verification warnings).
