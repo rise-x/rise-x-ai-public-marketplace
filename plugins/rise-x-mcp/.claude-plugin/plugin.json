@@ -2,7 +2,7 @@
   "name": "rise-x-mcp",
   "displayName": "Rise-X",
   "description": "Configure workflows, layouts and dashboards, query data, and manage work items on the Rise-X platform.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": { "name": "Rise-X", "url": "https://rise-x.io" },
   "homepage": "https://rise-x.io",
   "repository": "https://github.com/rise-x/rise-x-ai-public-marketplace",
