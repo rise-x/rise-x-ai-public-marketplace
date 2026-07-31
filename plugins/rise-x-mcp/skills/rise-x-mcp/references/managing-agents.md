@@ -35,7 +35,7 @@ Fields are camelCase on the wire:
 | `name` | string | required, non-blank |
 | `description` | string \| null | free text |
 | `systemPrompt` | string \| null | free text; runtime caps it at 65,536 characters — see §Writing the System Prompt |
-| `model` | string | required, non-blank; **not** validated against the runtime's model allowlist at save time — prefer the latest models, see §Choosing a Model |
+| `model` | string | required, non-blank; **not** validated against the runtime's model allowlist at save time — see §Choosing a Model |
 | `mcpServers` | list of `McpServerConfig` | max 50 entries |
 | `defaultOpenAiTools` | list of `OpenAiToolConfig` | max 50 entries |
 | `lastModified` / `lastModifiedBy` | — | server-managed, read-only |
@@ -60,11 +60,19 @@ Fields are camelCase on the wire:
 
 ## Choosing a Model
 
-Prefer the **latest generation** when creating or updating an agent: `gpt-5.6-sol`,
-`gpt-5.6-terra`, or `gpt-5.6-luna`. Use the older `gpt-5.1` / `gpt-5` only when the user asks for
-them explicitly; `gpt-5-mini` / `gpt-5-nano` are the cost- and latency-sensitive picks for simple,
-high-volume agents. The runtime enforces a server-configured allowlist at run time (default list in
-§Config API vs. Runtime Capability Matrix) — a model outside it saves fine but fails the run.
+The platform supports exactly three models — any other model name is **rejected at validation**
+when the agent runs (see §Config API vs. Runtime Capability Matrix):
+
+| model | tier | good for |
+|---|---|---|
+| `gpt-5.6-luna` | economical default | simple, high-volume agents |
+| `gpt-5.6-terra` | mid | everyday agents needing more capability |
+| `gpt-5.6-sol` | premium | demanding agents where quality matters most |
+
+All three share the same 1,050,000-token context window and 128,000-token max output, so the
+choice is about cost and capability, not window size. All three also carry a pricing cliff: prompts
+above 272,000 input tokens are billed at 2x input / 1.5x output for the **entire** request, not
+just the tokens over the line — keep prompts under that threshold where practical.
 
 ## Writing the System Prompt
 
@@ -160,7 +168,7 @@ cleanly and still fail when it's run.
 | `transport` | `"Http"` / `"Sse"` accepted; **`"Stdio"` rejected client-side** by the MCP tools (the runtime can't run Stdio servers yet) | same restriction |
 | `authType` | `"None"` / `"Bearer"` / `"ApiKey"` / `"CallerToken"` all accepted and saved | **only `"None"` and `"CallerToken"` are honored.** A saved `"Bearer"`/`"ApiKey"` MCP server fails the **entire run** — stored secrets are always redacted on read, so the runtime has no way to resolve them yet |
 | `CallerToken` reach | not checked | forwards the signed-in user's own token to the MCP server's host; the runtime only allows this to a server-configured allowlist of vetted hosts, and blocks private/loopback/link-local URLs outright |
-| `model` | any non-blank string accepted and saved | must be in a server-configured allowlist — default: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.1`, `gpt-5`, `gpt-5-mini`, `gpt-5-nano` (environments may add more). An unlisted model fails the run |
+| `model` | any non-blank string accepted and saved | must be one of the three supported models — `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`. Any other model name (including older `gpt-5`/`gpt-5.1`/`gpt-4*` names) is rejected at validation and fails the run |
 | `systemPrompt` length | any length accepted and saved | rejected at run time above 65,536 characters |
 | `defaultOpenAiTools[].name` | any non-blank string | must be one of `file_search`, `web_search`, `code_interpreter`, `image_generation` — anything else fails the run |
 | `file_search` config | `config` dict accepted as-is, no shape check | requires a non-empty `config.vector_store_ids` list (snake_case key, passed through verbatim) — missing it fails the run |
