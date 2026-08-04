@@ -125,10 +125,10 @@ delete_agent(agent_id: "11111111-1111-1111-1111-111111111111")
 ```
 
 `list_agents(search="Support Bot")` finds it by name at any point in the lifecycle. Its response
-envelope carries the same `{items, returned, skip, limit, hasMore, nextSkip, total}` shape as every
-other paginated tool in this skill — even though the *input* parameters are `page`/`page_size`, not
-`skip`/`limit`. To page forward, increment `page`; don't feed the returned `nextSkip` back in as
-`page`.
+uses the shared list envelope plus the API's full match count:
+`{items, returned, skip, limit, hasMore, nextSkip?, total}`. `nextSkip` is present only when
+`hasMore` is true. The *input* parameters are `page`/`page_size`, not `skip`/`limit`; to page
+forward, increment `page` rather than feeding `nextSkip` back in as `page`.
 
 **Always check `warnings[]`** after `create_agent`/`update_agent` — same rule as every other
 mutation tool in this skill (see main SKILL.md § Response Envelopes & Verification).
@@ -204,9 +204,9 @@ not a partial or best-effort degradation of just the offending server or tool.
 7. **Always check `warnings[]`** — same rule as every other mutation tool in this skill. A
    `dropped_property`/`dropped_item` warning means part of your `mcpServers`/`defaultOpenAiTools`
    request did not persist.
-8. **`list_agents` takes `page`/`page_size`, not `skip`/`limit`** — but the response envelope still
-   comes back in the shared `{items, skip, limit, hasMore, nextSkip, total}` shape. Increment
-   `page` to move forward; don't recompute `skip` yourself.
+8. **`list_agents` takes `page`/`page_size`, not `skip`/`limit`** — its response is
+   `{items, returned, skip, limit, hasMore, nextSkip?, total}`, with `nextSkip` only when another
+   page exists. Increment `page` to move forward; don't recompute `skip` yourself.
 9. **`agent_id` must be a real UUID** — `get_agent`/`update_agent`/`delete_agent` validate the
    format client-side and fail fast (`validation` error, no network call) on anything else, so a
    copy-paste mistake is caught immediately instead of surfacing as a confusing 404.
