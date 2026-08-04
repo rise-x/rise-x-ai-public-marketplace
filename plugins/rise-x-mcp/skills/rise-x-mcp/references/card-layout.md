@@ -143,7 +143,7 @@ another company's user.
 
 - **`statusText`** → the pill's **text**. A dataPath; rendered raw (the slot that
   crashed the board in the incident that prompted this doc — see pitfall #62 in
-  `SKILL.md`). Point it at a scalar leaf.
+  `references/common-pitfalls.md`). Point it at a scalar leaf.
 - **`statusClassName`** → the pill's **color**. If the resolved value contains
   `#` it is used as a raw hex color; otherwise it is looked up in a fixed token
   map. Accepted tokens: `primary`, `secondary`, `warning`, `danger`, `error`,
