@@ -8,7 +8,7 @@ Numbering is **stable**: other references and `references/troubleshooting.md`
 cite these entries by number, so the 7 retired entries keep their slot instead of
 being renumbered. 56 of the 63 slots are live.
 
-1. *(retired — the server returns a structured `no_ecosystem` error envelope; run the Pre-Flight Checklist.)*
+1. *(retired — the server returns a structured `no_ecosystem` error envelope; run the Pre-Flight Checklist in `SKILL.md`.)*
 2. **Forgot to draft** — editing a published flow/layout without `create_flow_draft`/`create_layout_draft` fails
 3. **Forgot to publish** — changes stay invisible until `publish_flow` is called
 4. **Asset 3-step pattern** — `create_asset` returns a workId; must call `update_work_data` then `submit_work`
@@ -19,7 +19,7 @@ being renumbered. 56 of the 63 slots are live.
 9. *(retired — wrong component type names are rejected server-side with the canonical suggestion.)*
 10. **Always check layout publishStatus before editing** — After `create_flow_draft`, the layout referenced by steps may still be Published (if a stale draft was returned). Always check via `get_layout` and call `create_layout_draft(layoutId, draftFlowId)` if the layout is Published. **But if it is already `Draft`** (the normal case — `create_flow_draft` clones step layouts as editable drafts), edit that layout id **directly**. Calling `create_layout_draft` on an already-`Draft` step layout spawns a *detached* draft the step never points to, so `publish_flow` silently republishes the unchanged layout and your edits vanish (the publish envelope still lists the old layout id). After publishing, re-fetch the live layout (`get_layout(stepLayoutId, format="components")`) and confirm your change is actually present.
 11. **Do NOT call `create_layout_draft` on new flows** — When building a new flow with `create_flow`, layouts are already in draft mode. Calling `create_layout_draft` creates orphan drafts that are disconnected from the flow.
-12. *(retired — see §Component Type Names; aliases are validated server-side.)*
+12. *(retired — see `SKILL.md` § Component Type Names; aliases are validated server-side.)*
 13. **User-invitation default is `"initiator"`** — resolved at runtime to the work initiator/task assignee. (`"@me"` does not exist; the server warns if you send it.)
 14. **Confusing asset type with asset** — An **asset type** is a template/schema (e.g. "Vessel") created with `create_flow(flow_resource_type="Entity")`; an **asset** is a record/instance (e.g. "Pacific Explorer") created with `create_asset(flow_origin_id)`. Use flow tools for asset types, asset tools for asset instances.
 15. *(retired — object options and `selectOptions` are rejected server-side before sending.)*
