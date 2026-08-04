@@ -112,7 +112,7 @@ PATCH semantics — only include changed fields.
 - `entityType` — ThingType identifier for Entity flows (e.g. `"vessel"`)
 - `displayNameTemplate` — JSONPath-based template for instance display names (e.g. `"{$.vessel.displayName} - {$.inquiry.deliveryWindow.from.date:yyyy-MM-dd}"`). Tokens are `{$.path}` or `{$.path:format}`. See `managing-asset-types.md` for details.
 - `featureFlags` — feature toggles (e.g. `{"OnlyAssetTypeOwnersCanCreateAsset": true}`)
-- `allowedStartSources` — consent allow-list for the `StartCrossEcosystemWork` activity: a list of `{"ecosystemId": "<id>", "flowOriginId": "<id>"}` objects naming the source flows permitted to start THIS flow from another ecosystem. Default-deny (absent/empty ⇒ no cross-ecosystem starts). Set this on the **target** flow. See `actions-and-statuses.md` § Start Cross Ecosystem Work.
+- `allowedStartSources` — consent allow-list for the `StartCrossEcosystemWork` activity: a list of `{"ecosystemId": "<id>", "flowOriginId": "<id>"}` objects naming the source flows permitted to start THIS flow from another ecosystem. Default-deny (absent/empty ⇒ no cross-ecosystem starts). Set this on the **target** flow — and set that flow's `environment` in the same edit, or the Related Work links back in the source ecosystem point at the wrong tenant. See `actions-and-statuses.md` § Start Cross Ecosystem Work.
 
 Example:
 ```json

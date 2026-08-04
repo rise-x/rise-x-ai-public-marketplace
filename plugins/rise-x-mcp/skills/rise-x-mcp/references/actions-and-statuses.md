@@ -165,18 +165,27 @@ draft = create_flow_draft("<target published flow id>")
 update_flow_properties(draft["id"], {
   "allowedStartSources": [
     {"ecosystemId": "<SOURCE ecosystem id>", "flowOriginId": "<SOURCE flow origin id>"}
-  ]
+  ],
+  "environment": "<target ecosystem name>"     # set this too — see warning below
 })
 publish_flow(draft["id"])
 ```
 
 With no matching entry the start is denied — the submit fails with `source-not-allow-listed`.
 
+> **⚠️ Always set the target flow's `environment` in the same edit as `allowedStartSources`.** The relationship records written back to the source work take their ecosystem **name** from the target flow's `environment` property — a denormalized label that is frequently blank, especially on flows that were themselves created cross-ecosystem. The ecosystem **id** on the relationship is always correct; only the name goes missing. When it is blank, two things break in the source ecosystem's Related Work tab: the "Ecosystem origin" line is omitted, and — the damaging part — each related-work link falls back to the **currently open** ecosystem, producing a link like `/<source-eco>/work/<id>` for a work that lives in the target ecosystem, which will not open. Set `environment` to the target ecosystem's name whenever you configure `allowedStartSources`.
+>
+> Setting it is safe: `environment` is **informational only** (its own schema description says so). The real binding is `environmentId` / `environments` — changing `environment` does not move the flow between ecosystems.
+>
+> **It is not retroactive.** Relationship records store the name at creation time, so existing related works keep their blank marker and broken link. Only works created after the change are fixed. Verify with a fresh cross-ecosystem start, not an existing one.
+>
+> Check before you rely on it: `get_flow_config(flowId, path="properties.environment")` on the target flow. A blank value (`''`) is the failure case.
+
 **Failure handling — `continueOnError`:**
 - `false` (default) — **fail mode.** Any failure (bad config, not allow-listed, target-creation error) aborts the whole source submission: nothing is persisted and the user gets the error (a 403 on submit). Use when the cross-ecosystem work is mandatory.
 - `true` — **fire-and-forget.** The failure is logged on the source work's event log and the source submission continues; no target work is created. Use when the cross-ecosystem work is best-effort.
 
-**Other behavior:** the created work's `createdBy`/assignee is the source submitter; the source and target works are related **both ways** (Related Work tab), and the relationship record carries the other work's ecosystem id when it differs (the "different ecosystem" marker).
+**Other behavior:** the created work's `createdBy`/assignee is the source submitter; the source and target works are related **both ways** (Related Work tab), and the relationship record carries the other work's ecosystem id when it differs (the "different ecosystem" marker). The matching ecosystem **name** is copied from that flow's `environment` property, so it is blank whenever that property is unset — see the warning under the allow-list above. Same-ecosystem relationships carry no marker at all (both id and name null), which is intended.
 
 **Notify on create (`notifyOnCreate`).** Creating the target work does **not** run its first-step Submit action, so the target flow's own "assigned to you" `SendEmail` never fires on creation. Set `notifyOnCreate: true` to email the assignee at creation time instead. The email uses the standard template (with `notifyEmailSubject` / `notifyEmailMessage` / `notifyEmailTemplateUri` overrides) and includes a **View** button that deep-links into the created target work. The button link needs a host: it uses the **target ecosystem's** configured host, falling back to the source app host — so in a properly-configured deployment the button resolves; if no host is configured anywhere the button link will be host-less. Notification failures never block the source submission (the created work is kept regardless).
 
