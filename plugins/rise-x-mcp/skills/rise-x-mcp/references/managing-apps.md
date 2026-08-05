@@ -5,9 +5,9 @@ the Diana shell as custom UIs. Six tools cover the app registry and bundle deplo
 release an app end-to-end from a Claude session, no manual zip upload through the shell UI.
 
 > **Scope:** these tools manage *deployment and the registry*. **Authoring** an app (scaffolding,
-> `@rise-x/apps-sdk` code, connectors) happens in the `rise-x-app` repo, which carries its own
-> local skill (`rise-x-app/.claude/skills/rise-x-app/`) — that skill also produces the bundle zip
-> these tools deploy. Requires a server with the federated-apps release; deploying requires the
+> `@rise-x/apps-sdk` code, connectors) is covered by the `rise-x-apps` skill in this marketplace's
+> `rise-x-apps` plugin — that skill also produces the bundle zip these tools deploy. Requires a
+> server with the federated-apps release; deploying requires the
 > **environment-orchestrator** role.
 
 ## Tool inventory
@@ -98,5 +98,5 @@ cleaned, but redeploying with the same `app_id` restores the app.
    upload — fix the manifest field (e.g. bump `version` after a 409) and call `deploy_app` again
    with the **same `upload_id`**. Only a successful deploy consumes it (and the TTL still
    applies).
-5. **These tools don't build anything** — produce the bundle in `rise-x-app` (its local skill
-   covers `yarn build` + zipping) and hand the zip to this flow.
+5. **These tools don't build anything** — produce the bundle with the `rise-x-apps` skill (its build phase
+   covers the production build + zipping) and hand the zip to this flow.
