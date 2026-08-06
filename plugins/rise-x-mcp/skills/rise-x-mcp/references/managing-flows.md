@@ -82,6 +82,8 @@ All structural and property changes require draft mode.
 
 **`publishStatus` enum** (the flow's publication lifecycle, mapped from `DianaPublishStatus`): `"Draft"` | `"Published"` | `"Revised"` | `"Deleted"`. A draft becomes `"Published"` on `publish_flow`. The previous published version transitions to `"Revised"`. A fifth value `"Publishing"` exists as a transient internal state during the publish flip — callers don't normally see it. Filter on `publishStatus` via `search_flows` to find e.g. all `"Draft"` flows in the ecosystem.
 
+**`publishMode` enum** (PascalCase; filterable via `search_flows` — see `references/advanced-search.md`): `"Default"` | `"UpdateOpenItems"` | `"DoNotUpdateOpenItems"`. Controls how a publish propagates to already-open items — and it gates **every** published config change (layouts, features, relationships, …), not just UI tabs. Work flows default to `"DoNotUpdateOpenItems"`: open works stay pinned to the flow version they were created on, so a published change is visible **only on works created after the publish** — always verify a published change against a fresh work item, never an existing one. Entity flows default to `"UpdateOpenItems"` (open items migrate to the new version on publish). Changing a flow's `publishMode` is itself a property edit that needs the draft cycle (unverified via MCP).
+
 **CRITICAL — Draft ID Rule:** `create_flow_draft` returns a **new draft ID**. All subsequent operations MUST use this draft ID, not the original. Editing the original published flow returns 403 Forbidden.
 
 **Stale-id trap after re-publish:** once a draft is published, the previously published id is superseded. Calls against the stale id are inconsistent: some 403 with "is in 'Deleted' mode", but property edits can **silently succeed (200 + `changed`)** — the write lands on the dead version and never appears in the live flow. Always take the current id from the publish envelope or re-resolve via `list_flows` (the `flowOriginId` is the only id stable across republishes).
@@ -212,33 +214,58 @@ publish_flow(draftId)                               # commit; re-resolve new pub
 
 `get_schema` does **not** surface `createAndDuplicateWork` — it's a `flowFeatures` sub-key, not a schema-registered resource. This doc is the source of truth for its shape.
 
-### Left Panel Tabs
+### Left Panel (`leftPanel`)
 
-Controls which tabs appear in the work item side panel:
+Controls the tab strip in the side panel of a work item or asset. Shape: `{"tabs": [{tab, label?}, …], "defaultTab": "<tab>"}` under `flowFeatures.leftPanel` — set it **on a draft, then publish**, with read-modify-write (see the two ⚠️ warnings at the top of the Flow Features section above).
+
+> **⚠️ `tabs` REPLACES the default set — it does not add to it.** When `leftPanel.tabs` is present, the panel shows exactly those entries, in array order; the defaults are discarded, with no merge. Defaults when `tabs` is absent: `workflow` + `activities` on work items, `contents` on assets. The natural "minimal" edit silently removes tabs:
+>
+> ```json
+> // WRONG — adds Related Work but silently REMOVES Workflow and Activities:
+> {"leftPanel": {"tabs": [{"tab": "relatedWork"}]}}
+>
+> // RIGHT — always list every tab you want visible:
+> {"leftPanel": {"tabs": [{"tab": "workflow"}, {"tab": "activities"}, {"tab": "relatedWork"}]}}
+> ```
 
 ```
-update_flow_properties(flow_id, {
+draftId = create_flow_draft(published_flow_id)
+features = get_flow_config(draftId, path="properties.flowFeatures")   # read-modify-write
+update_flow_properties(draftId, {
   "flowFeatures": {
+    "…existing sibling features…": {},
     "leftPanel": {
       "tabs": [
         {"tab": "workflow"},
         {"tab": "activities"},
         {"tab": "relatedWork"}
-      ]
+      ],
+      "defaultTab": "relatedWork"
     }
   }
-})
+})                                                  # expect changed: [flowFeatures]
+publish_flow(draftId)                               # commit; re-resolve new published id via list_flows
 ```
 
-**Available tabs:**
+**Available tabs** (the `FlowTab` enum — exactly five values, camelCase):
 
-| Tab | Description |
-|---|---|
-| `"workflow"` | Step/task progress view |
-| `"activities"` | Activity log |
-| `"relatedWork"` | Related work items and assets (required for relationships — see `references/relationships.md`) |
+| Tab | Description | Renders on |
+|---|---|---|
+| `"workflow"` | Step/task progress view | work items only |
+| `"activities"` | Activity/audit log | work items and assets |
+| `"relatedWork"` | Related work items and assets (required for browsing relationships — see `references/relationships.md`) | work items only |
+| `"navigation"` | Sibling browser — lists all works/assets of the same flow, with grouping/sorting/search | work items and assets |
+| `"contents"` | The entity's data sections | assets only |
 
-**Note:** The `relatedWork` tab must be enabled for the Related Work panel to appear in the UI. Without it, configured relationships still function at the data level but users can't browse them in the side panel.
+**Nothing validates tab values** — neither the API (schemaless `flowFeatures` blob) nor the UI. A typo'd tab name is stored and renders as a broken tab (raw i18n-key caption, empty body); a tab listed on the wrong page type (e.g. `contents` on a workflow) renders an empty body; `"tabs": []` removes every tab. Check your spelling against the table — no error will tell you.
+
+**Per-tab `label`** (optional string) overrides the tab's translated caption; omit it for the default name. An empty string is honoured and renders a blank caption — omit the key instead. The `navigation` tab additionally accepts grouping/sorting/search config on its entry (not documented here; unverified via MCP).
+
+**`defaultTab`** selects which tab opens first. Resolution order: `leftPanel.defaultTab` if set → else the first entry of `tabs` → else the page default (`workflow` for work items, `contents` for assets). `defaultTab` is **not** validated against `tabs` — pointing it at a tab that isn't listed leaves the panel with no visible selection.
+
+> **⚠️ Publish-mode caveat — "configured the tab but it doesn't show".** Work flows default to `publishMode: "DoNotUpdateOpenItems"` (see § Draft/Edit/Publish Sequence above — this gates every published config change, not just tabs): works already open stay pinned to the flow version they were created on, so a published `leftPanel` change appears **only on works created after the publish**. The config is not broken. Confirm persistence from MCP with `get_flow_config(newPublishedId, path="properties.flowFeatures")`; whether the tab *renders* can only be checked in the app — on a work created **after** the publish, never an existing one. Asset pages always read the latest flow version, so asset-side changes show on existing assets immediately.
+
+**Verification status:** `relatedWork` rendering and the publish-mode pinning were verified in-app; `tabs` replace-not-merge, `navigation` / `contents` / `defaultTab` / `label`, and the no-validation behaviour are confirmed from the panel implementation but have not been exercised end-to-end via MCP.
 
 ### Layout Panel Config
 
