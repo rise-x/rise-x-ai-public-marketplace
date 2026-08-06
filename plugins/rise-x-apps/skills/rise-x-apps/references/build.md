@@ -306,9 +306,9 @@ environment-orchestrator role.
 
 1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
 2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
-3. `deploy_app(upload_id, name, version, app_scope, app_id?)` — omit `app_id`
-   for a brand-new app (a GUID is generated and returned); pass the existing
-   GUID to release a new version. `version` comes from the app's
+3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` —
+   omit `app_id` for a brand-new app (a GUID is generated and returned); pass
+   the existing GUID to release a new version. `version` comes from the app's
    `package.json` and must be unique per app — bump it every release.
    `app_scope` is snake_case and **must match the `name` set by the app's
    webpack `ModuleFederationPlugin`**.

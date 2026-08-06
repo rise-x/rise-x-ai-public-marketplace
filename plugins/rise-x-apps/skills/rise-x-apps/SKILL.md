@@ -22,7 +22,7 @@ phase you're in *before* acting.
 
 | Phase | What happens | Read |
 | --- | --- | --- |
-| 1. Design | Interview the user: understand the problem first, then ask targeted questions about the gaps. Pick the mobile UX level from the personas' devices. Build an HTML design mock on `@rise-x/ui` and iterate until **explicit approval**. | `references/design.md` |
+| 1. Design | Interview the user: understand the problem first, then ask targeted questions about the gaps. Pick the mobile UX level from the personas' devices. Build an HTML design mock on the Rise-X design system (`@rise-x/apps-sdk/ui`) and iterate until **explicit approval**. | `references/design.md` |
 | 2. Integrate | Ask whether the app connects to existing flows/assets/agents; if nothing exists, offer to build them via the Rise-X MCP first. Record origin ids. | `references/design.md` |
 | 3. Implement | Scaffold with the CLI, write app code on `@rise-x/apps-sdk`. | `references/build.md` |
 | 4. Deploy | Ask whether to deploy, then deploy via the Rise-X MCP — **test environment unless the user names another**. | `references/build.md` §Build and deploy |
