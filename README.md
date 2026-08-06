@@ -64,6 +64,29 @@ verifies with a single call, then the same steps repeat for production. See
 `plugins/rise-x-mcp/skills/setup/SKILL.md` for the full walkthrough,
 including troubleshooting for OAuth and authorization failures.
 
+### rise-x-apps
+
+Design, build, and deploy federated apps for the Rise-X platform with
+[`@rise-x/apps-sdk`](https://www.npmjs.com/package/@rise-x/apps-sdk) (public
+npm). The skill drives the full app lifecycle: a design interview, a
+single-file HTML design mock on the Rise-X design system iterated to explicit
+approval, scaffolding via the SDK's CLI (`npx @rise-x/apps-sdk init`),
+implementation on the SDK's shell hooks / connectors / query layer / UI
+components, and deployment to a Rise-X environment.
+
+**What's inside:** the `rise-x-apps` skill with reference docs for each phase
+(design, build, upgrade) plus the Rise-X experience principles — the visual
+language and interaction rules every Rise-X app is held to.
+
+**Requirements:**
+- Claude Code or Cowork
+- Node.js ≥ 18.19 (for the scaffolder CLI and app builds)
+- The **rise-x-mcp** plugin from this marketplace — used for integration
+  discovery (flows, assets, agents) and for deploying app bundles; without
+  it, deploys fall back to manual upload in the Rise-X Apps UI
+- A Rise-X tenant account for deploys (deploying requires the
+  environment-orchestrator role)
+
 ## Versioning
 
 Each plugin's version lives only in its own

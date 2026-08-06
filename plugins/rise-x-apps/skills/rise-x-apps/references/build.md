@@ -1,0 +1,388 @@
+# Build phase — scaffold, app code, deploy
+
+## When to bootstrap vs. write code
+
+| Intent | Action |
+| --- | --- |
+| "Create a new app called X" / "Scaffold an app" | Design phase first (`references/design.md`). After approval, run the `init` CLI (see below). |
+| "Add a feature to app <x>" / "Use shell user/env in my app" | Skip bootstrap. If the feature adds or changes UI, design phase first (`references/design.md`, mock → approval); then edit files under the app's `src/` using the patterns below. |
+| "Wire installation behaviour" / "Migrate data on update" | Edit the app's `src/lifecycle.ts`. |
+| "Build/deploy the app" | `pnpm build` in the app folder, then deploy via the Rise-X MCP (default: **test**) — see Build and deploy. |
+
+## Bootstrap a new app
+
+**Detect where you are first.** Apps are built both inside the rise-x-app
+monorepo and by partners in their own projects — check whether the cwd is
+inside rise-x-app (repo root has a `pnpm-workspace.yaml` listing `apps/*`).
+Confirm naming with the user if unclear.
+
+**Inside rise-x-app** — scaffold under `apps/<name>/`:
+
+```bash
+cd apps
+npx @rise-x/apps-sdk init <name> --pm=pnpm
+cd <name>
+pnpm start
+```
+
+In-repo apps are pnpm workspace members (`apps/*` in `pnpm-workspace.yaml`).
+The scaffolder writes a registry version for `@rise-x/apps-sdk` — change it to
+`"workspace:*"` in the new app's `package.json` and run `pnpm install` at the
+repo root so the app links to `packages/apps-sdk` directly. The repo's own
+git conventions apply — commit only when the user asks.
+
+**Outside the repo (partner project)** — scaffold wherever the user keeps
+their code; `@rise-x/apps-sdk` resolves from the registry, so keep the
+version the scaffolder writes:
+
+```bash
+npx @rise-x/apps-sdk init <name> --pm=pnpm   # drop --pm if pnpm isn't installed
+cd <name>
+git init && git add -A && git commit -m "chore: scaffold <name> Rise-X app"
+```
+
+Initialize git right after scaffolding (the template ships a `.gitignore`)
+and maintain the app's history with **conventional commits** from the first
+commit on (`type(scope?): summary`). The template ships
+`commitlint.config.js` — verify with `npx commitlint --last`.
+
+**Right after scaffolding, write the new app's `APP.md`** from the design
+phase: a general description of the app and the problem it solves, the
+personas, and their full user journeys. It's the app's living context — the
+scaffolded `AGENTS.md` and `README.md` point at it, and every later change
+reads and maintains it (see Writing app code).
+
+CLI flags worth knowing:
+
+| Flag | Default | Use |
+| --- | --- | --- |
+| `--pm=<npm\|yarn\|pnpm>` | auto | Force a package manager. **Prefer `pnpm` whenever it's available** — it's what Rise-X uses, and the commands throughout this guide assume it. Without the flag the CLI auto-detects from lockfiles in the cwd (falling back to npm), so pass it explicitly when scaffolding into an empty directory. |
+| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — in the rise-x-app monorepo check what's taken with `grep -n "port:" apps/*/webpack.config.js`. |
+| `--skip-install` | off | Skip install (faster scaffold; the user installs later). |
+| `--json` | off | Emit `{ path, slug, scope, pkgName, port, pm }` to stdout — useful for automation. |
+
+What the scaffolder creates:
+
+```
+<name>/
+├── AGENTS.md              # agent guide: architecture in the Rise host, stack, commands, APP.md discipline
+├── CLAUDE.md              # one-line @AGENTS.md import so Claude Code loads the same guide — edit AGENTS.md
+├── README.md              # app readme; points at APP.md and AGENTS.md
+├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod
+├── tsconfig.json          # jsx: "react-jsx", strict
+├── webpack.config.js      # MF: exposes ./App and ./lifecycle, shares react/react-dom/jsx-runtime as singleton+import:false
+├── webpack.local.config.js # standalone dev config — what `pnpm start` runs (no shell needed)
+├── public/index.html
+└── src/
+    ├── index.tsx          # `import('./bootstrap')` — MF async boundary
+    ├── bootstrap.tsx      # standalone-only entrypoint; createMockShell
+    ├── App.tsx            # THE CANONICAL APP LAYOUT (left-rail chrome + screens), exposed as ./App
+    └── lifecycle.ts       # the module exposed as ./lifecycle
+```
+
+After scaffold, **do not** modify `webpack.config.js` shares for react-family — the singleton+`import: false` pattern is load-bearing. (The shell provides them eagerly; bundling a local fallback causes duplicate-React bugs.) Adding *other* shares is fine.
+
+The scaffolded `src/App.tsx` **is the canonical app layout** (left rail from
+the Nav primitives, PageHeader + content screens, no user UI). Build the app
+by extending it — add screens, swap the stubs for real content — and preserve
+its chrome composition; don't flatten it back to a bare component.
+
+## Writing app code
+
+**APP.md first.** Before changing an existing app, read its `APP.md`
+(problem, personas, journeys) for context. When a change alters what the app
+does or how a journey works, update `APP.md` in the same change. If the file
+is missing, the app predates the convention — study the app and write one,
+and check the other old-app signals too (`references/upgrade.md`): ask the
+user about migrating to the current SDK + design system before piling new
+work on old foundations.
+
+### Runtime APIs from `@rise-x/apps-sdk`
+
+```ts
+import {
+  // React hooks — call inside components
+  useShellUser,
+  useShellEnvironment,
+  useShellNavigate,
+  // Non-hook accessors — call outside React render path
+  getShell,
+  getShellUser,
+  getShellEnvironment,
+  getShellApi,           // legacy Diana axios instance
+  getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment'
+  getShellAi,            // rise-x-ai gateway handle (bridge v3+), or null
+  // Standalone dev
+  createMockShell,
+} from '@rise-x/apps-sdk';
+
+// Domain connectors — typed wrappers over the raw clients (separate entry):
+import {
+  flows, work, assets, agents, ConnectorError,
+  streamAgentReply, collectAgentReply, // consume agents.run/chat.send streams (accumulated)
+} from '@rise-x/apps-sdk/connectors';
+
+// react-query layer over the connectors — cached/deduped hooks (separate entry):
+import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sdk/query';
+```
+
+**Hooks vs accessors:**
+- Hooks (`useShell*`) subscribe to changes — use inside components when you want re-renders on user/env switch.
+- Accessors (`getShell*`) snapshot — use in event handlers, effects, non-React code (data stores, etc.).
+
+**API calls** — prefer the typed connectors from `@rise-x/apps-sdk/connectors`; fall back to `getShellApiV4(name)` for endpoints they don't cover. Never instantiate your own axios.
+
+| Connector | Domain | Key methods |
+| --- | --- | --- |
+| `flows` | flow discovery (read-only) | `list`, `get`, `findTask`/`findTaskIn`, `getConfig`, `getLayout`, `flattenLayoutFields` |
+| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `listRelated`, `getAudit` |
+| `assets` | typed records ("entities"/"things") | `types`, `get`, `search`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
+| `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
+
+```ts
+// Connectors (preferred) — flows discovery, work items, assets, configurable agents.
+// Ship the flow's ORIGIN ID in app config; resolve everything else at runtime:
+const FLOW_REF = '7732039e-…'; // flowOriginId (a concrete flow id also works here)
+const flow = await flows.get(FLOW_REF); // resolves to the latest published version
+
+const created = await work.start({ flowId: flow.id, data: { title: 'New' } });
+await work.patchData(created.id, { originId: created.flowOriginId!, path: '$.title', value: 'Renamed' });
+const action = (await work.get(created.id)).actions[0];
+await work.submit({ workId: created.id, actionName: action.eventName ?? action.name! });
+await work.delete(created.id); // permanent, no server-side undo
+
+// Listing filters STRICTLY by flowOriginId — pass the flow object (or a bare
+// origin id string). A concrete flow id here silently returns an empty list.
+for await (const row of work.iterate({ flow, maxItems: 100 })) { /* … */ }
+
+// Assets: prefer typeOriginId / the AssetType object over the type name.
+const supplier = (await assets.types()).find((t) => t.entityType === 'Supplier')!;
+const hits = await assets.search({ typeOriginId: supplier.flow!.flowOriginId, search: 'acme' });
+
+const chat = agents.createChat({ agentId }); // memory is server-persisted
+// streamAgentReply does the loop + delta accumulation; each snapshot.text is the
+// full reply so far. (Assistant text streams as DELTAS — never read evt.data by
+// hand.) For a one-shot answer: const { text } = await collectAgentReply(...).
+try {
+  for await (const s of streamAgentReply(chat.send('Summarize my open work'))) {
+    setReply(s.text);                            // already accumulated
+    // Report once, on end: agent error message, else a non-COMPLETED reason.
+    if (s.done) {
+      if (s.error) showError(s.error);           // mid-stream agent failure
+      else if (s.reason !== 'COMPLETED') showError(s.reason); // TIMEOUT|CANCELLED|ERROR
+    }
+  }
+} catch (err) {
+  showError(String(err)); // transport/HTTP/abort failures THROW (not s.error)
+}
+// end_of_stream carries chat_id, captured on chat.chatId (and snapshot.chatId).
+// Reopen later: agents.listChats({ agentId }) → createChat({ agentId, chatId })
+// → getChatMessages(chatId) for the full transcript. useHistory:false = one-shot.
+// Need reasoning/tool-call frames? Read the raw stream + agentMessageText/…readers.
+
+// Raw client (fallback):
+const apps = getShellApiV4('apps');
+const { data } = await apps.get('/api/v4/config/apps');
+```
+
+**Reference by id, not by name.** Users rename flows, steps, tasks, and asset types freely (`displayName`), and internal `name`s change when a flow is rebuilt — ids are the only rename-proof reference. Bake `flowOriginId` (and task/step ids where needed) into app config; never hardcode display names. `flows.findTask({ flow, task })` matches by id, exact name, or case-insensitive displayName — the name forms are for dev-time exploration, not shipped code. When the user's input *is* a name (a search box), go through `flows.list({ search })` and let them pick.
+
+**flowId vs flowOriginId.** A flow has one stable `flowOriginId` across versions plus a concrete `id` per published version — a bare "flow id" copied from a URL is usually the concrete one. `flows.get`/`getConfig` and `work.start` accept either and resolve to the latest published version, but `work.list`/`iterate` and `assets.list`/`iterate` filter strictly by origin id and return an **empty list, not an error**, when given a concrete id. When unsure, resolve first: `(await flows.get(ref)).flowOriginId`.
+
+**Asset writes go through a draft work item** (the platform's edit model). `assets.create({ type })` and `assets.startEdit({ assetId, flowOriginId })` return the draft as a `WorkDetail` — fill it with `work.patchData()` and **save it with `work.submit()`**; nothing persists until the submit. An already-open draft is on `assets.get(id).draftWorkId` — resume it with `work.get()` instead of starting another. Asset types come from `assets.types()`; pass the whole `AssetType` (or its flow's origin id) as the `type` ref.
+
+All connector failures normalize to `ConnectorError` (`code: 'SHELL_UNAVAILABLE' | 'SHELL_TOO_OLD' | 'AI_UNAVAILABLE' | 'HTTP_ERROR' | 'NOT_FOUND' | 'NETWORK_ERROR' | 'ABORTED' | 'PARSE_ERROR' | 'INVALID_ARG'`). `agents.run`/`createChat` need bridge v3 (`getAi`) and an environment with the AI gateway enabled — handle `SHELL_TOO_OLD`/`AI_UNAVAILABLE` gracefully. Chat memory is server-persisted: clients only handle `chatId` (`useHistory` defaults true; `chatId` + `useHistory:false` → `INVALID_ARG`). `listChats`/`getChat`/`renameChat`/`deleteChat`/`getChatMessages` read the chat store at `/api/v4/ai/agent-chat`.
+
+### Fetching data in components — use the query layer
+
+For component data, **default to `@rise-x/apps-sdk/query`** (react-query v5 over the connectors) instead of hand-rolling `useState`/`useEffect` fetches — caching, dedupe, refetch, and abort come free. The raw connectors remain the tool for event handlers, lifecycle hooks, and non-React code.
+
+```tsx
+import { useFlows, useWorkRows, useSubmitWork, dedupeRows } from '@rise-x/apps-sdk/query';
+
+const { data: flows, error, isFetching } = useFlows();
+const rows = useWorkRows({ flow: FLOW_ORIGIN_ID, pageSize: 50 }); // infinite; flatten with dedupeRows(rows.data)
+const submit = useSubmitWork(); // submit.mutate({ workId, actionName }) — invalidates the right caches
+```
+
+Rules:
+- **Never mount a `QueryClientProvider` in the app.** Federated apps get a per-app client from the host; standalone/older shells fall back to a per-bundle client automatically.
+- **Keep `'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' }` in the webpack `shared` block** (the scaffold has it, WITHOUT `import: false` — the bundled fallback is deliberate). Removing it breaks shell-managed caching.
+- Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
+- Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
+- Keys are environment-scoped (`['rise-apps-sdk', envId, …]`) — ecosystem switches refetch automatically; `queryKeys` is exported for targeted invalidation. Advanced react-query features (select/suspense/prefetch) go through the factories: `useQuery(flowQueries.list(args))`.
+- SSE streams (`agents.run`, chat `send`) and the async iterators stay on the connectors — don't wrap them in queries.
+
+### UI components (`@rise-x/apps-sdk/ui`)
+
+`import { Button, Dialog, cn } from '@rise-x/apps-sdk/ui'` — the Rise-X design
+system (`@rise-x/ui`), and the **only allowed source of app UI: you MUST build
+the UI exclusively from these components** — no hand-rolled markup for things
+the system covers, no other component libraries, no one-off styles — they keep
+every app on the shared Rise-X design. Only build custom when
+the design system has no fitting primitive, and compose it from `cn` + the
+existing pieces. Uphold the Rise-X experience principles
+(`references/experience-principles.md`). Typings come from the SDK; the runtime
+and its Tailwind CSS come from the **host** (the Diana app) via the Module
+Federation share scope (`@rise-x/ui` in the template's `shared`, no bundled
+fallback) when running federated, and components follow the host's
+light/dark theme automatically (tokens switch on a root-level `dark` class
+the host controls). In standalone dev (`pnpm start`) the template aliases
+`@rise-x/ui` to the SDK's compiled standalone bundle instead — a
+self-contained snapshot with its own CSS injected, so components render for
+real without a host. It's a snapshot, not the source of truth: verify in a
+host (or deployed) before release. Don't import `@rise-x/ui` directly and
+don't add your own copies of its Radix/shadcn dependencies.
+
+**App navigation lives on the LEFT — never in a top bar.** The host renders
+its own top-bar navigation above every app, so an in-app top bar stacks two
+nav bars and is not allowed. Put the app's navigation in a left sidebar/rail
+(compose it from the design-system primitives) and keep the app's top edge
+for content. On mobile widths, a **bottom tab bar** is the native pattern —
+implement the mobile UX level chosen in the design phase (see
+`references/design.md` §2 and the app's `APP.md`); the no-top-bar rule holds
+at every width.
+
+### Lifecycle hooks (`src/lifecycle.ts`)
+
+Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently. They run inside the shell page, so all the SDK accessors work from inside them.
+
+```ts
+import type { InstallHook, UpdateHook, UninstallHook } from '@rise-x/apps-sdk';
+import localforage from 'localforage';   // or whatever you persist with
+
+export const onInstall: InstallHook = async ({ manifest, user, environment }) => {
+  // First time this device sees the app — seed defaults, pre-warm caches.
+};
+
+export const onUpdate: UpdateHook = async (ctx, { from, to }) => {
+  // Version bumped in registry — migrate persisted data here.
+};
+
+export const onUninstall: UninstallHook = async ({ manifest }) => {
+  // Drop anything you persisted. Be exhaustive — there's no second chance.
+  await localforage.dropInstance({ name: `diana-app-${manifest.id}` });
+};
+```
+
+If you change which hooks are exported, ensure `webpack.config.js` still has `'./lifecycle': './src/lifecycle'` in `exposes` (the scaffolder includes it; never remove it).
+
+### Standalone dev (outside the shell)
+
+The scaffolded `src/bootstrap.tsx` already calls `createMockShell` when the standalone-root div is present, so `pnpm start` Just Works for local iteration without running the full Diana shell.
+
+To customize the mock:
+
+```ts
+window.__DIANA_SHELL__ = createMockShell({
+  user: { id: 'dev-user', name: 'Test User' },
+  environment: { id: 'env-1', slug: 'dev', name: 'Dev Env' },
+});
+```
+
+### Persistence
+
+**Persist to the platform first.** App data belongs in the app's flow / asset / work-item integration (via the connectors) — that's where it's durable, shared, permissioned, and visible to the rest of the ecosystem. Reach for local persistence only for small device-local state (UI preferences, drafts, caches): install `localforage` (or use IndexedDB/Cache API directly) as a *direct* dep of your app, not via the SDK, and always clean up in `onUninstall` using a namespace tied to `manifest.id`.
+
+## Build and deploy
+
+```bash
+cd <name>
+pnpm build                                    # produces dist/
+(cd dist && zip -r ../<name>-bundle.zip .)    # zip the CONTENTS of dist/, not the folder
+```
+
+**Why zip the contents, not the `dist/` folder itself:** the deploy pipeline extracts the archive under the app's served path. `remoteEntry.js` must be at the archive root so the shell can fetch it at runtime.
+
+When the bundle is ready, **ask the user whether to deploy**. Two paths:
+
+### Preferred — deploy via the Rise-X MCP
+
+Load the `rise-x-mcp` skill first (mandatory before any Rise-X MCP call), then
+pick the server for the target environment: **`rise-x-test` → test,
+`rise-x` → production. If the user doesn't name an environment, deploy to
+test** — most users want to try the app there first. Deploying requires the
+environment-orchestrator role.
+
+1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
+2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
+3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` —
+   omit `app_id` for a brand-new app (a GUID is generated and returned); pass
+   the existing GUID to release a new version. `version` comes from the app's
+   `package.json` and must be unique per app — bump it every release.
+   `app_scope` is snake_case and **must match the `name` set by the app's
+   webpack `ModuleFederationPlugin`**.
+
+The result carries the app `id` and the canonical manifest (`remoteUrl`,
+`version`, `scope`, `deployedAt`). Confirm the app loads in the shell after.
+
+### Fallback — deploy from the Apps UI (manual)
+
+If the MCP isn't connected or the user prefers manual, the deploy dialog
+lives on the **Apps page itself** (`/<environment>/apps`) → **New App** —
+visible only to environment owners/orchestrators. (Under a local/localforage
+registry this opens the register-manifest dialog instead — no upload.)
+
+Provide these values for the user to copy/paste into the dialog:
+
+| Field | Value | Notes |
+| --- | --- | --- |
+| `name` * | human-readable name |  |
+| `version` * | from the app's `package.json` |  |
+| `app_scope` * | `app_<slug_with_underscores>` | Must match the `name` set by the app's webpack `ModuleFederationPlugin`. Regex: `^[a-z][a-z0-9_]*$`. |
+| `bundle` * | the `.zip` you produced |  |
+| `description` | short description of the app |  |
+| `icon` | optional |  |
+
+The app id is generated by the dialog (a Regenerate control on new deploys).
+The host `POST`s to `/api/v4/config/apps/:id/deploy`; the server returns the
+manifest with the live `remoteUrl` and `module` (defaults to `./App`).
+
+## Don'ts
+
+- **Don't** bundle your own React. The scaffolder's `import: false` on react/react-dom/jsx-runtime is intentional. If you remove it, you'll get cross-React-instance hook crashes when the app mounts inside the shell.
+- **Don't** import shell internals. The contract is `@rise-x/apps-sdk` — full stop. If you need something the SDK doesn't expose, propose it as an SDK addition in a separate PR (or request it from the Rise-X team) — don't reach into the host.
+- **Don't** wire your own auth or call backend services directly. Go through the connectors (`@rise-x/apps-sdk/connectors`) or `getShellApiV4`.
+- **Don't** hand-roll UI or pull in another component library — the app UI is built exclusively from `@rise-x/apps-sdk/ui` (see UI components).
+- **Don't** put navigation in a top bar. The host already renders top-bar nav above the app; app navigation belongs in a left sidebar/rail.
+- **Don't** assume the user or environment is non-null inside lifecycle hooks — accept the typed `ctx` and check.
+- **Don't** modify `src/index.tsx`'s `import('./bootstrap')` line. That async dynamic import is the Module Federation boundary; the shell-side `eager: true` shares depend on it.
+
+## Wrap-up — do this before reporting done
+
+Whether you scaffolded a new app or modified an existing one, the user can't see the change in the running Diana shell until the bundle is deployed. **Always finish the task with build + zip + the deploy question** — never claim "done" without it.
+
+1. **Verify the dev server still works.** `pnpm start` succeeds and the standalone app — rendering the real design system via the SDK's bundled snapshot — shows without console errors in the browser.
+2. **Verify against the approved design.** Open the approved
+   `design/<app>.v<n>.html` next to the running app and compare screen by
+   screen — layout, spacing, states, dark mode, and the mobile frame if the
+   UX level has one. Fix drift in the app (or get the user's OK for the
+   deviation) before going further.
+3. **Run a code review.** Invoke the `code-review` skill with `--fix`
+   (`/code-review --fix`) over the new app code and apply the fixes it
+   confirms. If the skill isn't available, say so instead of skipping
+   silently.
+4. **Build.** `pnpm build` succeeds and produces `dist/remoteEntry.js`.
+5. **Zip `dist/` contents** into `<name>-bundle.zip` (see Build and deploy above for the exact command — must zip the contents, not the folder).
+6. **Ask the user whether to deploy.** If yes, deploy via the Rise-X MCP —
+   **test environment unless the user names another** — following the steps in
+   Build and deploy, and report the returned manifest (`id`, `version`,
+   `remoteUrl`). If the MCP isn't available or the user prefers manual, output
+   the deploy values for copy-paste:
+
+   ```
+   Deploy bundle ready: <name>/<name>-bundle.zip
+
+   Open the Apps page (/<environment>/apps) → New App, and paste:
+
+     name:       <human name>
+     version:    <from package.json>
+     app_scope:  app_<slug_with_underscores>
+     bundle:     <name>/<name>-bundle.zip
+     description: <short app description>
+     icon:       (optional)
+   ```
+
+7. **Confirm the deploy landed.** Don't mark the task complete until the app loads in the shell — verify it yourself after an MCP deploy, or ask the user to confirm after a manual one.
+
+If any of steps 1–3 fail, stop and fix before reaching out to the user. A failing build is not a "done" — it's a regression to be reported and resolved.
