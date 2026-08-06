@@ -25,7 +25,7 @@
 
 **Key concept:** relationship links are **two-sided by default**. When a work is submitted, the engine evaluates the `relatedFlows` entries on **that work's own flow**; a matching entry writes relationship records onto **both** items — source and target — unless `isOneWayRelationship: true`. So a single side's config is enough to create both ends of a link. Mirror the config on both flows anyway (see below): links are only established/refreshed when the **configured** side submits, and named related-work lookups only resolve on a flow that has its own matching entry.
 
-**Not every relationship comes from `relatedFlows`.** Runtime activities — e.g. `StartCrossEcosystemWork` with `sourceRelationshipName`/`targetRelationshipName` set — create relationship records directly when they run, with no `relatedFlows` config on either flow. A populated Related Work tab therefore does not imply any `relatedFlows` entries exist (verified: two flows with zero `relatedFlows` on both sides showed related work created by `StartCrossEcosystemWork`).
+**Not every relationship comes from `relatedFlows`.** Runtime activities — e.g. `StartCrossEcosystemWork` with `sourceRelationshipName`/`targetRelationshipName` set — create relationship records directly when they run, with no `relatedFlows` config on either flow. A populated Related Work tab therefore does not imply any `relatedFlows` entries exist.
 
 ## The Bidirectional Rule
 
