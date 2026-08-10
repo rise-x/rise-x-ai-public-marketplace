@@ -11,29 +11,41 @@ Rise-X's AI public plugin marketplace for Claude Code and Cowork (`rise-x-public
 ```
 
 Then install whichever plugin you need from the list below, with
-`/plugin install <plugin-name>@rise-x-public`, followed by `/reload-plugins`
-so its skills and MCP servers load into the current session — no restart
-needed.
+`/plugin install <plugin-name>@rise-x-public`. Recent Claude Code versions
+activate the plugin as part of the install and say so (`Plugin is now
+active.`); if the summary says `Run /reload-plugins to activate.` instead,
+run that and its skills and MCP servers load into the current session, with
+no restart needed.
 
-**Desktop app:** the `/plugin` slash commands are terminal-only and won't run
-in the desktop app. Add the marketplace once from any terminal instead:
+**Desktop app (Code tab):** the `/plugin` slash commands are terminal-only
+and won't run in the desktop app. Add the marketplace once from your own
+terminal instead:
 
 ```
 claude plugin marketplace add rise-x/rise-x-ai-public-marketplace
 ```
 
-Then, back in the desktop app, install plugins through the plugin browser:
-click **Customize** in the sidebar → **Plugins** → **Add plugin** (in a Code
-session, the **+** button next to the prompt box → **Plugins** → **Add
-plugin** also works), and pick the plugin from this marketplace. If the app
-points you to the Claude CLI instead, run the marketplace command above in a
-terminal first, then retry. If the plugin's skills don't appear afterwards,
-run `/reload-plugins` — or, if your app version doesn't have it, close and
-reopen the app.
+Then, back in a Code session, click the **+** button next to the prompt box →
+**Plugins** → **Add plugin** to open the plugin browser, and pick the plugin
+from this marketplace. (The **+** button is unavailable in cloud and WSL
+sessions.) If the app points you to the Claude CLI instead, run the
+marketplace command above in a terminal first, then retry. If the plugin's
+skills don't appear afterwards, run `/reload-plugins`, or, if your app
+version doesn't have it, close and reopen the app.
 
-If your organization distributes these plugins centrally (Claude admin
-console → Plugins), you can skip both steps — the plugins arrive
-automatically.
+**Cowork tab:** Cowork sources its plugins from the claude.ai-synced
+**Customize** configuration, not from the CLI's local state, so the terminal
+command above does not reach it. If these plugins don't appear under
+**Customize → Plugins**, the supported route is central distribution by your
+organization (below).
+
+**Organization-distributed:** if your organization already delivers these
+plugins, skip the steps above; they arrive automatically. Admins: Claude's
+organization plugin sync (**Organization settings → Plugins**, Team and
+Enterprise plans) accepts **private or internal repositories only**, so it
+cannot sync this public repo directly. Mirror or fork it into a private or
+internal repository and point the organization marketplace at that copy.
+Cowork and Skills must be enabled for the organization first.
 
 ## Keeping plugins up to date
 
@@ -45,9 +57,10 @@ this one have it **disabled by default**. Pick one of these:
 - **Enable auto-update (recommended, one-time):** in a terminal session run
   `/plugin`, open the **Marketplaces** tab, select `rise-x-public`, and
   choose **Enable auto-update**. Claude Code then refreshes the marketplace
-  and updates installed plugins in the background shortly after a session
-  starts; when something updated, it prompts you to run `/reload-plugins`
-  (otherwise the new versions load on your next launch).
+  and updates installed plugins in the background after a session starts, on
+  a random delay of up to ten minutes, so the running session keeps the
+  versions it launched with. When something updated, it prompts you to run
+  `/reload-plugins` (otherwise the new versions load on your next launch).
 - **Update manually:**
 
   ```
@@ -57,18 +70,22 @@ this one have it **disabled by default**. Pick one of these:
 
   Slash-command equivalents work inside a terminal session; restart the
   session or run `/reload-plugins` to apply.
-- **Organization-managed (zero-touch):** admins can deliver this marketplace
-  through managed settings — an `extraKnownMarketplaces` entry with
-  `"autoUpdate": true` — or distribute the plugins centrally from the Claude
-  admin console (Plugins). Users then receive updates without doing
-  anything.
+- **Organization-managed (zero-touch):** admins can register this marketplace
+  through managed settings, as an `extraKnownMarketplaces` entry with
+  `"autoUpdate": true`, and users then receive updates without doing
+  anything. This works with the public repo as-is. Distributing through
+  **Organization settings → Plugins** instead requires a private or internal
+  mirror of this repository (see
+  [Install the marketplace](#install-the-marketplace)); members then pick up
+  changes on their next session or plugin refresh.
 
-Notes: the Cowork tab sources plugins from the claude.ai-synced Customize
-configuration rather than the CLI's local state, so for Cowork users the
-admin-console route is the dependable update channel. And if your
-environment sets `DISABLE_AUTOUPDATER`, plugin auto-updates are disabled
-too — set `FORCE_AUTOUPDATE_PLUGINS=1` alongside it to keep plugin updates
-while managing Claude Code updates manually.
+Notes: Cowork sources plugins from the claude.ai-synced Customize
+configuration rather than the CLI's local state, so neither the terminal
+commands nor the `/plugin` toggle above affect it; organization distribution
+of a private mirror is the update channel there. And if your environment
+sets `DISABLE_AUTOUPDATER`, plugin auto-updates are disabled too: set
+`FORCE_AUTOUPDATE_PLUGINS=1` alongside it to keep plugin updates while
+managing Claude Code updates manually.
 
 ## Connecting to Rise-X from Claude
 
@@ -83,22 +100,29 @@ drives in-session: after installing, you can just tell Claude "set up rise-x".
   a tenant account, authentication fails no matter how carefully you follow
   the steps below. If your organization doesn't have one, contact Rise-X via
   <https://rise-x.io> before starting.
-- **Claude Code (terminal) or the Claude desktop app.** Plugins aren't
-  available in the claude.ai web chat.
+- **Claude Code (terminal) or the Claude desktop app.** A plugin you install
+  yourself doesn't reach claude.ai web chat; only plugins your organization
+  distributes centrally appear there, in the Chat tab, and in Cowork.
 - **Network access.** Corporate environments should allowlist:
   - `mcp.rise-x.io` and `mcp-test.rise-x.io` — the MCP servers; their OAuth
     authorization and token endpoints live on these same hosts
   - the Rise-X sign-in page your browser is redirected to during OAuth — if
     your IT team needs the exact hostname, ask your Rise-X contact
   - `github.com` — this marketplace is fetched from GitHub
+  - `mcp-proxy.anthropic.com` — only if you connect the servers as claude.ai
+    custom connectors (the desktop and Cowork route below); that traffic is
+    routed through Anthropic's connector proxy
   - Anthropic's own domains — see
-    [Claude's network requirements](https://code.claude.com/docs/en/desktop)
+    [network access requirements](https://code.claude.com/docs/en/desktop#network-access-requirements)
+    for the desktop app, and
+    [network configuration](https://code.claude.com/docs/en/network-config)
+    for the standalone CLI, proxies, and custom certificate authorities
 
 ### 1. Install the plugin
 
 Add the marketplace and install `rise-x-mcp` as described in
 [Install the marketplace](#install-the-marketplace) above — slash commands in
-a terminal session, or the plugin browser in the desktop app.
+a terminal session, or the plugin browser in a desktop Code session.
 
 ### 2. Sign in to both servers
 
@@ -125,9 +149,9 @@ claude mcp list                                   # expect plugin:rise-x-mcp:ris
 claude mcp login plugin:rise-x-mcp:rise-x-test
 ```
 
-**Claude desktop app (Cowork):** the desktop app has no `/mcp` command, and
-the plugin's bundled servers don't currently surface an in-app sign-in prompt.
-Add each server as a **custom connector** instead:
+**Claude desktop app (Code tab and Cowork):** the desktop app has no `/mcp`
+command, and the plugin's bundled servers don't currently surface an in-app
+sign-in prompt. Add each server as a **custom connector** instead:
 
 > Settings → Connectors → **Add custom connector** → name `rise-x-test`, URL
 > `https://mcp-test.rise-x.io/mcp`, no headers — then complete sign-in in
