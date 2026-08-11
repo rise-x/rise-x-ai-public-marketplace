@@ -2,16 +2,80 @@
 
 Rise-X's AI public plugin marketplace for Claude Code and Cowork (`rise-x-public`).
 
-## Install the marketplace
+## Install
+
+Paste this into any Claude Code session and let Claude do the installable
+part:
+
+```
+Set up the Rise-X plugins from the public marketplace.
+
+1. Run: claude plugin list
+   For each of these that appears in the output, uninstall it:
+     claude plugin uninstall rise-x-mcp@rise-x
+     claude plugin uninstall rise-x-apps@rise-x
+   Those are the old private marketplace. Skip any that is not listed.
+
+2. Run: claude plugin marketplace list
+   If rise-x-public does not appear in the output, run:
+   claude plugin marketplace add rise-x/rise-x-ai-public-marketplace
+
+3. Run: claude plugin install rise-x-mcp@rise-x-public
+4. Run: claude plugin install rise-x-apps@rise-x-public
+
+Then stop and give me this checklist to complete myself, because you
+cannot do these:
+
+  - run /reload-plugins to activate the plugins in this session
+  - open /plugin -> Marketplaces -> rise-x-public and look at
+    auto-update. If it is not already enabled, enable it. Without it
+    I will never receive any future version.
+  - run /rise-x-mcp:setup to sign in to the Rise-X MCP servers
+
+Do not attempt those three yourself, and do not ask me for any
+credentials or tokens.
+```
+
+Step 1 only applies if you previously installed these plugins from Rise-X's
+internal marketplace; if `claude plugin list` shows neither, skip it. If
+step 3 or 4 reports that a plugin is already installed, that is expected —
+carry on. Install only `rise-x-mcp` if you don't need `rise-x-apps`; each
+installed plugin costs context in every session.
+
+Then finish the three steps Claude hands back, yourself:
+
+1. **`/reload-plugins`** — loads the skills and MCP servers into the current
+   session. No restart needed.
+2. **Enable auto-update.** Open `/plugin` → **Marketplaces** →
+   `rise-x-public` and enable auto-update if it isn't already on.
+   Third-party marketplaces have it **off by default**, and without it you
+   never receive another version of either plugin.
+3. **`/rise-x-mcp:setup`** — signs you in to the two Rise-X MCP servers
+   (`rise-x-test` first, then `rise-x`). You complete the OAuth flow in your
+   own browser; Claude verifies each server with a single call. See
+   [Getting started](#getting-started) below for what to expect, and
+   `plugins/rise-x-mcp/skills/setup/SKILL.md` for troubleshooting.
+
+Finally, ask Claude to perform one real Rise-X operation to confirm the
+whole chain works.
+
+**On Claude Desktop:** open the integrated terminal with `` Ctrl+` `` (or the
+Views menu) and paste there, or use **+** → **Plugins** → **Add plugin**.
+Plugins are not available in WSL sessions. The Cowork tab is configured
+separately, through **Customize** in the sidebar.
+
+### Manual equivalent
+
+If you'd rather run it yourself, the whole thing is five slash commands plus
+the auto-update toggle:
 
 ```
 /plugin marketplace add rise-x/rise-x-ai-public-marketplace
+/plugin install rise-x-mcp@rise-x-public
+/plugin install rise-x-apps@rise-x-public
+/reload-plugins
+/rise-x-mcp:setup
 ```
-
-Then install whichever plugin you need from the list below, with
-`/plugin install <plugin-name>@rise-x-public`, followed by `/reload-plugins`
-so its skills and MCP servers load into the current session — no restart
-needed.
 
 ## Available plugins
 
@@ -37,30 +101,14 @@ and a `setup` skill for first-time connection. Bundles two HTTP MCP servers —
   organization's Rise-X ecosystem — without a tenant, authentication will fail)
 - Network access to `mcp.rise-x.io` and `mcp-test.rise-x.io`
 
-**Quick start** — paste this into a fresh Claude Code session to install and
-connect the plugin:
+#### Getting started
 
-```
-Help me install and set up the Rise-X plugin:
-
-1. Run `claude plugin marketplace add rise-x/rise-x-ai-public-marketplace` and then
-   `claude plugin install rise-x-mcp@rise-x-public` using your terminal tool. If
-   the `claude` CLI isn't available to you, give me those two commands as
-   `/plugin …` slash commands to run myself, and wait until I confirm.
-2. Ask me to run `/reload-plugins` (only I can run slash commands) and wait for
-   my confirmation.
-3. Verify the plugin is installed and enabled; if anything failed, show me the
-   exact error and how to fix it before going further.
-4. Then follow the plugin's `setup` skill to connect the two Rise-X MCP servers.
-   I'll complete the OAuth steps in my browser myself when you tell me to.
-```
-
-**Getting started manually:** after installing and reloading, ask Claude to
-run the setup skill (or just say "set up rise-x") to walk through connecting
-the MCP servers. Onboarding always starts with the **test** server — the user
-authenticates it via `/mcp` (or, from a terminal,
-`claude mcp login plugin:rise-x-mcp:rise-x-test`), Claude
-verifies with a single call, then the same steps repeat for production. See
+Install as described under [Install](#install), then run `/rise-x-mcp:setup`
+— or just say "set up rise-x" and Claude runs the setup skill for you.
+Onboarding always starts with the **test** server: you authenticate it via
+`/mcp` (or, from a terminal,
+`claude mcp login plugin:rise-x-mcp:rise-x-test`), Claude verifies with a
+single call, then the same steps repeat for production. See
 `plugins/rise-x-mcp/skills/setup/SKILL.md` for the full walkthrough,
 including troubleshooting for OAuth and authorization failures.
 
