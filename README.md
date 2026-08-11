@@ -10,18 +10,12 @@ part:
 ```
 Set up the Rise-X plugins from the public marketplace.
 
-1. Run: claude plugin list
-   For each of these that appears in the output, uninstall it:
-     claude plugin uninstall rise-x-mcp@rise-x
-     claude plugin uninstall rise-x-apps@rise-x
-   Those are the old private marketplace. Skip any that is not listed.
-
-2. Run: claude plugin marketplace list
+1. Run: claude plugin marketplace list
    If rise-x-public does not appear in the output, run:
    claude plugin marketplace add rise-x/rise-x-ai-public-marketplace
 
-3. Run: claude plugin install rise-x-mcp@rise-x-public
-4. Run: claude plugin install rise-x-apps@rise-x-public
+2. Run: claude plugin install rise-x-mcp@rise-x-public
+3. Run: claude plugin install rise-x-apps@rise-x-public
 
 Then stop and give me this checklist to complete myself, because you
 cannot do these:
@@ -36,11 +30,8 @@ Do not attempt those three yourself, and do not ask me for any
 credentials or tokens.
 ```
 
-Step 1 only applies if you previously installed these plugins from Rise-X's
-internal marketplace; if `claude plugin list` shows neither, skip it. If
-step 3 or 4 reports that a plugin is already installed, that is expected —
-carry on. Install only `rise-x-mcp` if you don't need `rise-x-apps`; each
-installed plugin costs context in every session.
+Drop the `rise-x-apps` line if you only need `rise-x-mcp` — each installed
+plugin costs context in every session.
 
 Then finish the three steps Claude hands back, yourself:
 
@@ -67,7 +58,7 @@ separately, through **Customize** in the sidebar.
 ### Manual equivalent
 
 If you'd rather run it yourself, the whole thing is five slash commands plus
-the auto-update toggle:
+the auto-update toggle — skip the third if you don't need `rise-x-apps`:
 
 ```
 /plugin marketplace add rise-x/rise-x-ai-public-marketplace
