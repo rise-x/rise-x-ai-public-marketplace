@@ -33,7 +33,7 @@ Users are assumed to be on the **Claude Desktop app** or the **terminal CLI**. R
 
 - `claude-desktop` → Desktop app
 - `cli` → terminal CLI
-- anything else, or empty → **do not guess** — ask the user which one they're using (one question), then continue
+- anything else, or empty → **do not guess** — ask the user which one they're using (one question), then continue. A user on **Cowork** follows the Desktop-app path throughout.
 
 This variable is undocumented/internal (the official env-vars reference only lists `CLAUDECODE=1`), so it may change without notice. Treat it as a best-effort hint, not a guarantee: if it ever stops matching one of the two values above, fall back to asking — never to guessing wrong.
 
@@ -42,7 +42,7 @@ This variable is undocumented/internal (the official env-vars reference only lis
 **You (Claude) cannot perform these steps — never attempt to complete OAuth yourself; guide the user and wait.** Only the user can sign in through the browser.
 
 Ask the user to, based on their surface (§2):
-- **Desktop app:** add the server as a **custom connector** — Settings → Connectors → **Add custom connector** → name `rise-x-test`, URL `https://mcp-test.rise-x.io/mcp`, no headers — then complete OAuth in the browser when prompted. (The desktop app has no `/mcp` command, and plugin-bundled servers don't surface an in-app sign-in prompt of their own.)
+- **Desktop app:** add the server as a **custom connector** — Settings → Connectors → **Add custom connector** → name `rise-x-test`, URL `https://mcp-test.rise-x.io/mcp`, no headers — then complete OAuth in the browser when prompted. (The desktop app has no `/mcp` command, and plugin-bundled servers don't surface an in-app sign-in prompt of their own.) The same custom-connector route covers **Cowork** — connectors sync through the claude.ai account.
 - **CLI:** run `/mcp` (an interactive panel — arrow keys select `rise-x-test`); if `/mcp` is unavailable (e.g. non-interactive), authenticate from a terminal instead: plugin-bundled servers register under a scoped name, so run `claude mcp list` to confirm it (expect `plugin:rise-x-mcp:rise-x-test`), then `claude mcp login plugin:rise-x-mcp:rise-x-test`.
 
 The `claude mcp` fallback must run in the **user's own terminal** — never through your Bash tool, and never in a cloud session's shell: that sandbox is not the user's machine, so the command appears to succeed while changing nothing the user's client can see.
@@ -58,7 +58,7 @@ Make exactly **one** call to confirm the connection works: `list_ecosystems`.
 - **Healthy response**: one or more ecosystems come back — the account is authenticated *and* attached to a tenant.
 - **No-tenant failure**: the call errors with an authorization/permission failure, or returns an **empty list**. This means the account authenticated but has no Rise-X tenant access — see §0.
 
-Do **not** verify with `whoami` or `get_active_ecosystem`: both report `ecosystem: null` on a perfectly healthy connection, because the active ecosystem is a per-session value that nothing sets until §6. They tell you *which* account and deployment the session is bound to — not whether access works.
+Do **not** verify with `whoami` or `get_active_ecosystem`: on an account that has never selected an ecosystem, both report `ecosystem: null` even when access is perfectly fine — nothing sets the active ecosystem until §6 (once set, it persists server-side across sessions, so a returning user may see one already). They tell you *which* account and deployment the session is bound to — not whether access works.
 
 Do not proceed to production until `list_ecosystems` comes back non-empty.
 
@@ -74,7 +74,7 @@ Once they confirm, re-run `list_ecosystems` yourself against `rise-x` and confir
 
 ## 6. Select an ecosystem
 
-The connection isn't usable yet: **every Rise-X tool except the session tools requires an active ecosystem**, and nothing sets one automatically. On the server the user will work with:
+The connection isn't usable yet: **every Rise-X tool except the session tools requires an active ecosystem**, and on a new account nothing has set one yet (once set, it persists server-side across sessions). On the server the user will work with:
 
 1. `list_ecosystems` — discover what the account can reach.
 2. If exactly one comes back, `set_active_ecosystem` with it and tell the user which one is active.
@@ -82,13 +82,15 @@ The connection isn't usable yet: **every Rise-X tool except the session tools re
 
 You're fully connected once both servers return ecosystems and an active ecosystem is set. From here, normal Rise-X operations (building flows, managing work items, configuring layouts, etc.) are covered by the main `rise-x-mcp` skill — it loads automatically whenever the conversation touches Rise-X.
 
+Before wrapping up, suggest one piece of housekeeping: if the plugin was installed from the CLI or the desktop plugin browser, the user should enable auto-update for the `rise-x-public` marketplace — third-party marketplaces have it **disabled by default**, so without this one-time step plugin fixes never arrive. It's an interactive panel only the user can drive, in a terminal session: `/plugin` → **Marketplaces** tab → select `rise-x-public` → **Enable auto-update**. (Not applicable to installs that came through claude.ai's Customize page or organization distribution — those update through claude.ai.)
+
 ## 7. Troubleshooting
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | OAuth login loops or is rejected outright | No Rise-X account, or wrong account signed in to the browser | Confirm which account the user intended to use; if none exists, contact Rise-X support (§0) |
 | OAuth succeeds but every tool call 401s / 403s | Token is for the wrong environment (test vs. prod), or the account has no tenant/ecosystem access | Re-check which server the user authenticated (`rise-x-test` vs `rise-x`); if tenant access is the issue, contact Rise-X support |
-| `whoami` / `get_active_ecosystem` shows identity with `ecosystem: null` | **Normal** — the active ecosystem is per-session and unset until §6 | Run `list_ecosystems`, then `set_active_ecosystem` |
+| `whoami` / `get_active_ecosystem` shows identity with `ecosystem: null` | **Normal** — no active ecosystem has been selected yet (§6) | Run `list_ecosystems`, then `set_active_ecosystem` |
 | `list_ecosystems` returns an empty list | Account exists but isn't attached to a tenant | Contact Rise-X support — this isn't something Claude Code can fix locally |
 | No `/mcp` command; servers absent from Connectors | Desktop app — bundled servers don't surface an in-app sign-in prompt | Add each server as a custom connector (§3/§5) |
 | `claude mcp …` reports success but nothing changes | The command ran in a session's sandbox shell, not the user's machine | Have the user run it in their own terminal, or use the custom-connector route |

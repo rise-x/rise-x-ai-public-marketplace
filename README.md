@@ -17,6 +17,12 @@ active.`); if the summary says `Run /reload-plugins to activate.` instead,
 run that and its skills and MCP servers load into the current session, with
 no restart needed.
 
+While you're at it, enable auto-update for the marketplace — it's **off by
+default** for third-party marketplaces like this one, and without it you
+won't receive plugin fixes: run `/plugin`, open the **Marketplaces** tab,
+select `rise-x-public`, choose **Enable auto-update**. Details in
+[Keeping plugins up to date](#keeping-plugins-up-to-date).
+
 **Desktop app (Code tab):** the `/plugin` slash commands are terminal-only
 and won't run in the desktop app. Add the marketplace once from your own
 terminal instead:
@@ -31,13 +37,19 @@ from this marketplace. (The **+** button is unavailable in cloud and WSL
 sessions.) If the app points you to the Claude CLI instead, run the
 marketplace command above in a terminal first, then retry. If the plugin's
 skills don't appear afterwards, run `/reload-plugins`, or, if your app
-version doesn't have it, close and reopen the app.
+version doesn't have it, close and reopen the app. Finally, enable
+auto-update for the marketplace once, from a terminal session (see
+[Keeping plugins up to date](#keeping-plugins-up-to-date)) — the desktop app
+installs plugins from the same local state, so it picks updates up too.
 
 **Cowork tab:** Cowork sources its plugins from the claude.ai-synced
 **Customize** configuration, not from the CLI's local state, so the terminal
-command above does not reach it. If these plugins don't appear under
-**Customize → Plugins**, the supported route is central distribution by your
-organization (below).
+command above does not reach it. Add the marketplace in-app instead: open
+**Customize → Plugins**, select **Add marketplace**, and enter
+`rise-x/rise-x-ai-public-marketplace` (the GitHub `owner/repo` shorthand —
+public repositories work for marketplaces you add yourself), then install
+the plugin from its listing. Your organization may also distribute these
+plugins centrally (below), in which case they arrive without any of this.
 
 **Organization-distributed:** if your organization already delivers these
 plugins, skip the steps above; they arrive automatically. Admins: Claude's
@@ -81,11 +93,12 @@ this one have it **disabled by default**. Pick one of these:
 
 Notes: Cowork sources plugins from the claude.ai-synced Customize
 configuration rather than the CLI's local state, so neither the terminal
-commands nor the `/plugin` toggle above affect it; organization distribution
-of a private mirror is the update channel there. And if your environment
-sets `DISABLE_AUTOUPDATER`, plugin auto-updates are disabled too: set
-`FORCE_AUTOUPDATE_PLUGINS=1` alongside it to keep plugin updates while
-managing Claude Code updates manually.
+commands nor the `/plugin` toggle above affect it. Update there by opening
+**Customize → Plugins** and clicking **Update** on this marketplace — or, if
+your organization distributes the plugins centrally, new versions arrive on
+their own. And if your environment sets `DISABLE_AUTOUPDATER`, plugin
+auto-updates are disabled too: set `FORCE_AUTOUPDATE_PLUGINS=1` alongside it
+to keep plugin updates while managing Claude Code updates manually.
 
 ## Connecting to Rise-X from Claude
 
@@ -100,9 +113,11 @@ drives in-session: after installing, you can just tell Claude "set up rise-x".
   a tenant account, authentication fails no matter how carefully you follow
   the steps below. If your organization doesn't have one, contact Rise-X via
   <https://rise-x.io> before starting.
-- **Claude Code (terminal) or the Claude desktop app.** A plugin you install
-  yourself doesn't reach claude.ai web chat; only plugins your organization
-  distributes centrally appear there, in the Chat tab, and in Cowork.
+- **Claude Code (terminal) or the Claude desktop app.** A plugin installed
+  via the Claude Code CLI doesn't reach claude.ai web chat, the Chat tab, or
+  Cowork — those surfaces take their plugins from the claude.ai-synced
+  **Customize** configuration instead (installed there yourself, or
+  distributed by your organization).
 - **Network access.** Corporate environments should allowlist:
   - `mcp.rise-x.io` and `mcp-test.rise-x.io` — the MCP servers; their OAuth
     authorization and token endpoints live on these same hosts
@@ -171,10 +186,11 @@ Ask Claude to run **`list_ecosystems`** against the server you just connected.
   the account signed in but isn't attached to a Rise-X tenant. Contact Rise-X
   rather than retrying; there is no local fix.
 
-Don't use `whoami` as the health check: it reports `ecosystem: null` on a
-perfectly healthy connection, because the active ecosystem isn't set until
-step 5. `whoami` answers *which* account and environment you're on, not
-whether access works.
+Don't use `whoami` as the health check: on an account that has never
+selected an ecosystem it reports `ecosystem: null` even when access is fine
+— the active ecosystem stays unset until step 5 (and once set, it persists
+server-side across sessions). `whoami` answers *which* account and
+environment you're on, not whether access works.
 
 ### 4. Repeat for production
 
@@ -196,7 +212,7 @@ You're connected once both servers return ecosystems and you've selected one.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `whoami` returns your identity but `ecosystem: null` | **Normal** — the active ecosystem is per-session and unset until you set it | Run `list_ecosystems`, then `set_active_ecosystem` |
+| `whoami` returns your identity but `ecosystem: null` | **Normal** — no active ecosystem has been selected yet | Run `list_ecosystems`, then `set_active_ecosystem` |
 | No `/mcp` command; servers absent from Connectors | Claude desktop app — bundled servers don't surface an in-app sign-in | Add each server as a custom connector (URLs above) |
 | `claude mcp …` reports success but nothing changes | The command ran inside a cloud session's sandbox shell, not on your machine | Run it in your own terminal, or use the custom-connector route |
 | Servers connected but no Rise-X tools appear | Connector disabled, or the session predates the connection | Enable/re-enable the connector, or start a fresh session |
@@ -249,6 +265,9 @@ Help me install and set up the Rise-X plugin:
    exact error and how to fix it before going further.
 4. Then follow the plugin's `setup` skill to connect the two Rise-X MCP servers.
    I'll complete the OAuth steps in my browser myself when you tell me to.
+5. Once everything works, remind me to enable auto-update for the marketplace
+   so plugin fixes arrive automatically — I'll run `/plugin`, open the
+   Marketplaces tab, select rise-x-public, and choose Enable auto-update.
 ```
 
 **Getting started manually:** follow
