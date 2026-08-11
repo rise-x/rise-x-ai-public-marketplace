@@ -135,7 +135,7 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 | Connector | Domain | Key methods |
 | --- | --- | --- |
 | `flows` | flow discovery (read-only) | `list`, `get`, `findTask`/`findTaskIn`, `getConfig`, `getLayout`, `flattenLayoutFields` |
-| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `listRelated`, `getAudit` |
+| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `listRelated`, `getAudit` |
 | `assets` | typed records ("entities"/"things") | `types`, `get`, `search`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
 | `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
 
@@ -155,9 +155,60 @@ await work.delete(created.id); // permanent, no server-side undo
 // origin id string). A concrete flow id here silently returns an empty list.
 for await (const row of work.iterate({ flow, maxItems: 100 })) { /* … */ }
 
+// Listing that needs each item's status, state, assignee or timestamps — or a
+// filtered/sorted slice — belongs on work.search (SDK >= 0.7.0), not on
+// list/iterate. The v4 index returns those ON the row, so you never fetch each
+// item to derive them (the N+1 that makes dashboards slow), and the filter tree
+// replaces client-side narrowing.
+const page = await work.search({
+  filter: { and: [
+    { field: 'flowOriginId', operator: 'equals', values: [FLOW_REF] },
+    // status values: Open/Closed/Completed/Deleted/Ok. Step-level values like
+    // 'InProgress' live on flowState — a DIFFERENT field; filtering status by
+    // them matches nothing.
+    { field: 'status', operator: 'in', values: ['Open'] },
+  ] },
+  // Projection. A `data.*` path REQUIRES the flowOriginId condition above so the
+  // server can resolve the flow's schema, and arrives under row.data with the
+  // `data.` prefix stripped.
+  fields: ['status', 'assignedUsers', 'statusDisplay', 'data.total'],
+  sort: [{ field: 'created', direction: 'desc' }],
+  pageSize: 50,
+});
+// row.status / row.flowState / row.assignedUsers / row.created / row.workCode /
+// row.data — and row.statusDisplay carries the status label plus the active
+// step's roleName. page.hasMore drives the next page.
+// row.created / row.lastModified are ISO strings, but DATE VALUES INSIDE
+// row.data arrive as {date, ticks, offset} objects — use the .date property,
+// never new Date(row.data.x) directly.
+
 // Assets: prefer typeOriginId / the AssetType object over the type name.
 const supplier = (await assets.types()).find((t) => t.entityType === 'Supplier')!;
-const hits = await assets.search({ typeOriginId: supplier.flow!.flowOriginId, search: 'acme' });
+
+// assets.search (SDK >= 0.7.0) is the same v4 grammar as work.search, over the
+// asset index — every reason to prefer it over list/iterate applies here too.
+// It is also the indexed replacement for the v3 field search, which times out
+// on large types.
+const assetPage = await assets.search({
+  filter: { and: [
+    { field: 'flowOriginId', operator: 'equals', values: [supplier.flow!.flowOriginId] },
+    // Asset status values: Open/Closed/Deleted ONLY. Work's Completed/Ok do not
+    // exist here, and filtering by them matches nothing.
+    { field: 'status', operator: 'equals', values: ['Open'] },
+    { field: 'displayName', operator: 'contains', values: ['acme'] },
+  ] },
+  // Same projection rule as work.search: a `data.*` path REQUIRES the
+  // flowOriginId condition above.
+  fields: ['status', 'code', 'statusDisplay', 'data.supplier.rating'],
+  sort: [{ field: 'created', direction: 'desc' }],
+  pageSize: 50,
+});
+// row.code / row.entityType / row.status / row.created / row.data — same page
+// envelope and the same in-data date caveat as work.search.
+
+// Fuzzy type-ahead across display fields is the one thing search can't do —
+// that is assets.quickSearch (the v3 endpoint), and only for that.
+const hits = await assets.quickSearch({ typeOriginId: supplier.flow!.flowOriginId, search: 'acme' });
 
 const chat = agents.createChat({ agentId }); // memory is server-persisted
 // streamAgentReply does the loop + delta accumulation; each snapshot.text is the
@@ -206,9 +257,10 @@ const submit = useSubmitWork(); // submit.mutate({ workId, actionName }) — inv
 ```
 
 Rules:
-- **Never mount a `QueryClientProvider` in the app.** Federated apps get a per-app client from the host; standalone/older shells fall back to a per-bundle client automatically.
+- **Never mount a `QueryClientProvider` with a client of your own** — that shadows the per-app client the shell mounts and breaks shell-managed caching. The SDK hooks need no provider at all: they pass the resolved client explicitly (host client when federated, per-bundle fallback standalone).
+- **If the app calls react-query directly, wrap it in `<AppQueryProvider>`** (SDK ≥ 0.7.0, from `@rise-x/apps-sdk/query`; the scaffold's `App.tsx` already does). Plain APIs — `useQuery(flowQueries.list(args))`, `useQueryClient()`, devtools — read the client from context, and standalone dev has no provider, so they throw *"No QueryClient set"* the moment you leave the SDK hooks. `AppQueryProvider` publishes the *resolved* client, so it re-publishes the host's client when federated and the fallback when standalone.
 - **Keep `'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' }` in the webpack `shared` block** (the scaffold has it, WITHOUT `import: false` — the bundled fallback is deliberate). Removing it breaks shell-managed caching.
-- Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
+- Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useWorkSearch/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetQuickSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
 - Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
 - Keys are environment-scoped (`['rise-apps-sdk', envId, …]`) — ecosystem switches refetch automatically; `queryKeys` is exported for targeted invalidation. Advanced react-query features (select/suspense/prefetch) go through the factories: `useQuery(flowQueries.list(args))`.
 - SSE streams (`agents.run`, chat `send`) and the async iterators stay on the connectors — don't wrap them in queries.
@@ -269,16 +321,67 @@ If you change which hooks are exported, ensure `webpack.config.js` still has `'.
 
 ### Standalone dev (outside the shell)
 
-The scaffolded `src/bootstrap.tsx` already calls `createMockShell` when the standalone-root div is present, so `pnpm start` Just Works for local iteration without running the full Diana shell.
+The scaffolded `src/bootstrap.tsx` already calls `createMockShell` when the standalone-root div is present, so `pnpm start` renders the app without running the full Diana shell.
 
-To customize the mock:
+**The mock has no backend.** Out of the box every connector call throws
+`SHELL_UNAVAILABLE`, so a data-backed screen renders only its empty / loading /
+error state locally — the content path (tables, charts, totals) never executes
+until the app is deployed into a host. That is how content-path rendering bugs
+reach production: standalone dev cannot see them, so their first real execution
+is in front of a user.
+
+**Seed `fixtures` so the real screens render before you deploy** (SDK ≥ 0.7.0).
+This matters most when building **outside the `rise-x-app` monorepo** — the
+common case — because there is no shell to run locally, which makes fixtures the
+only pre-deploy test of the data path.
 
 ```ts
 window.__DIANA_SHELL__ = createMockShell({
   user: { id: 'dev-user', name: 'Test User' },
   environment: { id: 'env-1', slug: 'dev', name: 'Dev Env' },
+  fixtures: {
+    // Rows are keyed by flowOriginId; '*' serves any flow. Served with the
+    // request's paging, so pagination and work.iterate() behave as they would live.
+    workRows: { '*': [{ id: 'w1', displayName: 'Q3 pricing review — Northline Industrial', workCode: 'PRC-2026-0184' }] },
+    workSearch: [{ id: 'w1', workCode: 'PRC-2026-0184', status: 'Open', flowState: 'InProgress', created: '2026-01-31T09:14:00Z' }],
+    workDetail: { w1: { id: 'w1', displayName: 'Q3 pricing review — Northline Industrial', actions: [] } },
+    workData: { w1: { pricing: { rate: 1.425, currency: 'AUD' } } },
+    // assets.types() is its own key — seed it whenever the screen resolves an
+    // asset type before listing (the documented path).
+    assetTypes: [{ id: 't1', entityType: 'Pump', flow: { flowOriginId: 'origin-a' } }],
+    assetRows: { '*': [{ id: 'a1', displayName: 'Centrifugal pump 200mm — Bay 4' }] },
+    // assets.search() rows; paged with the request's page/pageSize.
+    assetSearch: [{ id: 'a1', displayName: 'Centrifugal pump 200mm — Bay 4', code: 'PMP-00184', status: 'Open', created: '2025-11-02T04:31:00Z' }],
+    assetDetail: { a1: { id: 'a1', displayName: 'Centrifugal pump 200mm — Bay 4' } },
+  },
 });
 ```
+
+Only seeded reads are served: an unseeded call throws `SHELL_UNAVAILABLE` naming
+the fixture key that would have answered it, and writes always throw. Both are
+deliberate — a mock that returned empty data, or pretended a write persisted,
+would make a broken app look like a working one.
+
+**Fixture data must look like real records, not `Item 1` / `foo` / `test`.** A
+placeholder row renders a layout that live data will break. Specifically:
+
+- **Real field names and shapes** — read an actual record via the Rise-X MCP or
+  the platform UI and copy its structure; invented shapes test the app against a
+  fiction.
+- **The server's own enum values** — `status: 'Open'` (work: Open/Closed/
+  Completed/Deleted/Ok; assets: Open/Closed/Deleted), step state on `flowState`.
+  A made-up `'active'` renders a badge that never appears in production.
+- **Plausible lengths and characters** — a name long enough to wrap or truncate,
+  a code with its real format, non-ASCII where the domain has it. Uniformly
+  short strings hide every overflow bug.
+- **ISO timestamps**, and dates inside `data` in the platform's
+  `{date, ticks, offset}` shape — otherwise date formatting is untested exactly
+  where it is most likely wrong.
+- **Enough rows to page** (more than one `pageSize`), plus at least one row with
+  optional fields **missing** — that is the row that crashes a naive `.map()`.
+
+To develop against a live backend instead, pass `api` / `apiV4` axios instances —
+see the SDK README's standalone-dev section.
 
 ### Persistence
 
@@ -352,7 +455,7 @@ manifest with the live `remoteUrl` and `module` (defaults to `./App`).
 
 Whether you scaffolded a new app or modified an existing one, the user can't see the change in the running Diana shell until the bundle is deployed. **Always finish the task with build + zip + the deploy question** — never claim "done" without it.
 
-1. **Verify the dev server still works.** `pnpm start` succeeds and the standalone app — rendering the real design system via the SDK's bundled snapshot — shows without console errors in the browser.
+1. **Verify the dev server still works.** `pnpm start` succeeds and the standalone app — rendering the real design system via the SDK's bundled snapshot — shows without console errors in the browser. For every data-backed screen, seed `fixtures` with **real-world-shaped** data (§Standalone dev) and confirm the **content** renders — rows, charts, totals — not just the empty state. A screen you have only ever seen empty is untested, and one you have only seen with `Item 1` placeholders is barely better; the deployed host is a customer environment, not a test bench.
 2. **Verify against the approved design.** Open the approved
    `design/<app>.v<n>.html` next to the running app and compare screen by
    screen — layout, spacing, states, dark mode, and the mobile frame if the
