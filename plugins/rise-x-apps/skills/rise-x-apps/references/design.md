@@ -71,7 +71,7 @@ or agents**:
 If the Rise-X MCP isn't available (the `rise-x-mcp` plugin isn't installed or
 its servers aren't connected), don't invent ids: either ask the user to
 connect the MCP, or have them create the flow / asset / agent in the Rise-X
-app (Diana) and paste the resulting id back here.
+app and paste the resulting id back here.
 
 Before any Rise-X MCP call, load the `rise-x-mcp` skill — it is mandatory and
 covers server selection, ecosystems, and routing.
