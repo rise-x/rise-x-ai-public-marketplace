@@ -78,6 +78,7 @@ this one have it **disabled by default**. Pick one of these:
   ```
   claude plugin marketplace update rise-x-public
   claude plugin update rise-x-mcp@rise-x-public
+  claude plugin update rise-x-apps@rise-x-public   # one per installed plugin
   ```
 
   Slash-command equivalents work inside a terminal session; restart the
@@ -188,9 +189,10 @@ Ask Claude to run **`list_ecosystems`** against the server you just connected.
 
 Don't use `whoami` as the health check: on an account that has never
 selected an ecosystem it reports `ecosystem: null` even when access is fine
-— the active ecosystem stays unset until step 5 (and once set, it persists
-server-side across sessions). `whoami` answers *which* account and
-environment you're on, not whether access works.
+— the active ecosystem stays unset until step 5 (and once set, the server
+remembers your selection, so it may already be populated in a later
+session). `whoami` answers *which* account and environment you're on, not
+whether access works.
 
 ### 4. Repeat for production
 
@@ -201,12 +203,15 @@ production is a separate identity store, so passing test doesn't carry over.
 
 ### 5. Choose your ecosystem
 
-Ask Claude to run `set_active_ecosystem` with the ecosystem you want. If
+Ask Claude to run `set_active_ecosystem` with the ecosystem you want. The
+selection is **per server**: setting it on `rise-x-test` sets nothing on
+`rise-x`, so repeat this on each server you'll work with. If
 `list_ecosystems` returned more than one, confirm which is correct before
 proceeding — **nothing warns you when you're pointed at the wrong tenant**,
 and every Rise-X tool except the session tools requires an active ecosystem.
 
-You're connected once both servers return ecosystems and you've selected one.
+You're connected once both servers return ecosystems and you've selected an
+ecosystem on the server you'll work with.
 
 ### Troubleshooting
 
@@ -220,6 +225,7 @@ You're connected once both servers return ecosystems and you've selected one.
 | Sign-in loops or is rejected | No Rise-X account, or the wrong account signed in to the browser | Check the browser's signed-in account; if no account exists, contact Rise-X |
 | Sign-in works, tool calls return 401/403 | Wrong environment, or no tenant access | Confirm which server you signed in to; otherwise contact Rise-X |
 | `list_ecosystems` returns an empty list | Account exists but isn't attached to a tenant | Contact Rise-X — there is no local fix |
+| First call on the other server fails with "No ecosystem selected" | **Normal** — ecosystem selection is per server | Run `list_ecosystems`, then `set_active_ecosystem` on that server too |
 | Tools return unfamiliar data | Wrong ecosystem selected in a multi-tenant account | Re-run `list_ecosystems` and `set_active_ecosystem` |
 
 ## Available plugins

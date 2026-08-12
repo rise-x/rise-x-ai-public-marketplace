@@ -58,7 +58,7 @@ Make exactly **one** call to confirm the connection works: `list_ecosystems`.
 - **Healthy response**: one or more ecosystems come back — the account is authenticated *and* attached to a tenant.
 - **No-tenant failure**: the call errors with an authorization/permission failure, or returns an **empty list**. This means the account authenticated but has no Rise-X tenant access — see §0.
 
-Do **not** verify with `whoami` or `get_active_ecosystem`: on an account that has never selected an ecosystem, both report `ecosystem: null` even when access is perfectly fine — nothing sets the active ecosystem until §6 (once set, it persists server-side across sessions, so a returning user may see one already). They tell you *which* account and deployment the session is bound to — not whether access works.
+Do **not** verify with `whoami` or `get_active_ecosystem`: on an account that has never selected an ecosystem, both report `ecosystem: null` even when access is perfectly fine — nothing sets the active ecosystem until §6 (once set, the server remembers the selection per user, best-effort, so a returning user may see one already). They tell you *which* account and deployment the session is bound to — not whether access works.
 
 Do not proceed to production until `list_ecosystems` comes back non-empty.
 
@@ -74,7 +74,7 @@ Once they confirm, re-run `list_ecosystems` yourself against `rise-x` and confir
 
 ## 6. Select an ecosystem
 
-The connection isn't usable yet: **every Rise-X tool except the session tools requires an active ecosystem**, and on a new account nothing has set one yet (once set, it persists server-side across sessions). On the server the user will work with:
+The connection isn't usable yet: **every Rise-X tool except the session tools requires an active ecosystem**, and on a new account nothing has set one yet (once set, the server remembers it per user, best-effort). The selection is **per server** — setting an ecosystem on `rise-x-test` sets nothing on `rise-x`; repeat this section on each server the user will work with. On each such server:
 
 1. `list_ecosystems` — discover what the account can reach.
 2. If exactly one comes back, `set_active_ecosystem` with it and tell the user which one is active.
@@ -92,6 +92,7 @@ Before wrapping up, suggest one piece of housekeeping: if the plugin was install
 | OAuth succeeds but every tool call 401s / 403s | Token is for the wrong environment (test vs. prod), or the account has no tenant/ecosystem access | Re-check which server the user authenticated (`rise-x-test` vs `rise-x`); if tenant access is the issue, contact Rise-X support |
 | `whoami` / `get_active_ecosystem` shows identity with `ecosystem: null` | **Normal** — no active ecosystem has been selected yet (§6) | Run `list_ecosystems`, then `set_active_ecosystem` |
 | `list_ecosystems` returns an empty list | Account exists but isn't attached to a tenant | Contact Rise-X support — this isn't something Claude Code can fix locally |
+| First call on the other server fails with "No ecosystem selected" | **Normal** — ecosystem selection is per server | Run `list_ecosystems`, then `set_active_ecosystem` on that server too (§6) |
 | No `/mcp` command; servers absent from Connectors | Desktop app — bundled servers don't surface an in-app sign-in prompt | Add each server as a custom connector (§3/§5) |
 | `claude mcp …` reports success but nothing changes | The command ran in a session's sandbox shell, not the user's machine | Have the user run it in their own terminal, or use the custom-connector route |
 | Works on `rise-x-test` but not `rise-x` (or vice versa) | Only one server was authenticated | Repeat the auth flow (§3/§5) for the other server |
