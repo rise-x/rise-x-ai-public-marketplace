@@ -62,8 +62,16 @@ or agents**:
   at them.
 - **Nothing suitable exists yet** — ask whether to **build the flow / assets /
   agent first using the Rise-X MCP**, so the app has something real to
-  integrate with, then come back here.
+  integrate with, then come back here. For an agent, create the configuration
+  with the agent-management tools (`create_agent` — the `rise-x-mcp` skill's
+  managing-agents reference covers it): the returned `id` **is** the agent id
+  the app integrates against — record it.
 - **No integration** — fine; note it and move on.
+
+If the Rise-X MCP isn't available (the `rise-x-mcp` plugin isn't installed or
+its servers aren't connected), don't invent ids: either ask the user to
+connect the MCP, or have them create the flow / asset / agent in the Rise-X
+app and paste the resulting id back here.
 
 Before any Rise-X MCP call, load the `rise-x-mcp` skill — it is mandatory and
 covers server selection, ecosystems, and routing.
