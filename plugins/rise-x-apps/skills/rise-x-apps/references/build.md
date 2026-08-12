@@ -134,9 +134,9 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 
 | Connector | Domain | Key methods |
 | --- | --- | --- |
-| `flows` | flow discovery (read-only) | `list`, `get`, `findTask`/`findTaskIn`, `getConfig`, `getLayout`, `flattenLayoutFields` |
+| `flows` | flow discovery (read-only) | `list` (**work flows only**), `get`, `findTask`/`findTaskIn`, `getConfig`, `getLayout`, `flattenLayoutFields` |
 | `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `listRelated`, `getAudit` |
-| `assets` | typed records ("entities"/"things") | `types`, `get`, `search`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
+| `assets` | typed records ("entities"/"things") | `types` (**asset-type flows**), `get`, `search`, `quickSearch`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
 | `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
 
 ```ts
@@ -160,18 +160,24 @@ for await (const row of work.iterate({ flow, maxItems: 100 })) { /* … */ }
 // list/iterate. The v4 index returns those ON the row, so you never fetch each
 // item to derive them (the N+1 that makes dashboards slow), and the filter tree
 // replaces client-side narrowing.
+// EVERY v4 search (work AND asset) MUST pin flowOriginId with equals/in.
+// Environment-wide search is not supported: the server 400s on an unpinned
+// search regardless of what else the filter says. The SDK types `filter` as
+// required on both for this reason.
 const page = await work.search({
   filter: { and: [
+    // Required, always. `in` with several origin ids works too.
     { field: 'flowOriginId', operator: 'equals', values: [FLOW_REF] },
     // status values: Open/Closed/Completed/Deleted/Ok. Step-level values like
     // 'InProgress' live on flowState — a DIFFERENT field; filtering status by
     // them matches nothing.
     { field: 'status', operator: 'in', values: ['Open'] },
   ] },
-  // Projection. A `data.*` path REQUIRES the flowOriginId condition above so the
-  // server can resolve the flow's schema, and arrives under row.data with the
-  // `data.` prefix stripped.
+  // Projection. A `data.*` path resolves against the PINNED flow's schema and
+  // arrives under row.data with the `data.` prefix stripped.
   fields: ['status', 'assignedUsers', 'statusDisplay', 'data.total'],
+  // sort and the createdBy/lastModifiedBy filters need a pinned search; on an
+  // older API build they may fail, so pin first before assuming they're broken.
   sort: [{ field: 'created', direction: 'desc' }],
   pageSize: 50,
 });
@@ -189,6 +195,7 @@ const supplier = (await assets.types()).find((t) => t.entityType === 'Supplier')
 // asset index — every reason to prefer it over list/iterate applies here too.
 // It is also the indexed replacement for the v3 field search, which times out
 // on large types.
+// Same mandatory flowOriginId pin as work.search — see above.
 const assetPage = await assets.search({
   filter: { and: [
     { field: 'flowOriginId', operator: 'equals', values: [supplier.flow!.flowOriginId] },
@@ -197,14 +204,16 @@ const assetPage = await assets.search({
     { field: 'status', operator: 'equals', values: ['Open'] },
     { field: 'displayName', operator: 'contains', values: ['acme'] },
   ] },
-  // Same projection rule as work.search: a `data.*` path REQUIRES the
-  // flowOriginId condition above.
+  // Projection: a `data.*` path must EXIST in the pinned flow's data schema or
+  // the request 400s naming the field (GET /api/v4/config/flow/{originId}/data-schema
+  // lists them). Bare `data` skips that check and returns the whole document.
   fields: ['status', 'code', 'statusDisplay', 'data.supplier.rating'],
   sort: [{ field: 'created', direction: 'desc' }],
   pageSize: 50,
 });
 // row.code / row.entityType / row.status / row.created / row.data — same page
-// envelope and the same in-data date caveat as work.search.
+// envelope as work.search. `id` and `status` come back on every row even when
+// `fields` omits them; other scalars drop out once `fields` is set.
 
 // Fuzzy type-ahead across display fields is the one thing search can't do —
 // that is assets.quickSearch (the v3 endpoint), and only for that.
@@ -239,6 +248,8 @@ const { data } = await apps.get('/api/v4/config/apps');
 **Reference by id, not by name.** Users rename flows, steps, tasks, and asset types freely (`displayName`), and internal `name`s change when a flow is rebuilt — ids are the only rename-proof reference. Bake `flowOriginId` (and task/step ids where needed) into app config; never hardcode display names. `flows.findTask({ flow, task })` matches by id, exact name, or case-insensitive displayName — the name forms are for dev-time exploration, not shipped code. When the user's input *is* a name (a search box), go through `flows.list({ search })` and let them pick.
 
 **flowId vs flowOriginId.** A flow has one stable `flowOriginId` across versions plus a concrete `id` per published version — a bare "flow id" copied from a URL is usually the concrete one. `flows.get`/`getConfig` and `work.start` accept either and resolve to the latest published version, but `work.list`/`iterate` and `assets.list`/`iterate` filter strictly by origin id and return an **empty list, not an error**, when given a concrete id. When unsure, resolve first: `(await flows.get(ref)).flowOriginId`.
+
+**`flows.list()` lists WORK flows only; asset-type flows come from `assets.types()`.** The two listings are **disjoint** — neither is a superset, and neither enumerates "all flows", so don't treat either as exhaustive. Only `flows.get()`/`findTask()` resolve a flow of either kind by id. This bites when sourcing the mandatory `flowOriginId` search pin: a work origin id in `assets.search` (or an asset origin id in `work.search`) is a valid guid of the wrong flow family, so it matches nothing and returns an **empty page with no error**. Work pin → `flows.list()`; asset pin → `assets.types()` (`type.flow.flowOriginId`).
 
 **Asset writes go through a draft work item** (the platform's edit model). `assets.create({ type })` and `assets.startEdit({ assetId, flowOriginId })` return the draft as a `WorkDetail` — fill it with `work.patchData()` and **save it with `work.submit()`**; nothing persists until the submit. An already-open draft is on `assets.get(id).draftWorkId` — resume it with `work.get()` instead of starting another. Asset types come from `assets.types()`; pass the whole `AssetType` (or its flow's origin id) as the `type` ref.
 
@@ -343,6 +354,9 @@ window.__DIANA_SHELL__ = createMockShell({
     // Rows are keyed by flowOriginId; '*' serves any flow. Served with the
     // request's paging, so pagination and work.iterate() behave as they would live.
     workRows: { '*': [{ id: 'w1', displayName: 'Q3 pricing review — Northline Industrial', workCode: 'PRC-2026-0184' }] },
+    // Both search fixtures are served only when the request pins flowOriginId —
+    // they reject an unpinned search exactly as the live endpoints do, so
+    // standalone dev cannot pass where every host would 400.
     workSearch: [{ id: 'w1', workCode: 'PRC-2026-0184', status: 'Open', flowState: 'InProgress', created: '2026-01-31T09:14:00Z' }],
     workDetail: { w1: { id: 'w1', displayName: 'Q3 pricing review — Northline Industrial', actions: [] } },
     workData: { w1: { pricing: { rate: 1.425, currency: 'AUD' } } },
