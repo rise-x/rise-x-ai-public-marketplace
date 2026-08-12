@@ -9,7 +9,10 @@
    - Check with `get_active_ecosystem()` which also returns deployment info
 
 2. **Ecosystem** (workspace / tenant name)
-   - Set per-session via `set_active_ecosystem`
+   - Set via `set_active_ecosystem`; the server remembers the selection
+     **per user** (best-effort, in memory), so it can carry across sessions
+     or be lost on a server restart — check `get_active_ecosystem()` rather
+     than assuming either way
    - All API calls include it as the `Environment` HTTP header (the backend
      header name is unchanged — only the MCP-facing terminology is "ecosystem")
    - Determines which workspace's data is accessed
