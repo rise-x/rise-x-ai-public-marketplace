@@ -160,10 +160,11 @@ for await (const row of work.iterate({ flow, maxItems: 100 })) { /* … */ }
 // list/iterate. The v4 index returns those ON the row, so you never fetch each
 // item to derive them (the N+1 that makes dashboards slow), and the filter tree
 // replaces client-side narrowing.
-// EVERY v4 search (work AND asset) MUST pin flowOriginId with equals/in.
-// Environment-wide search is not supported: the server 400s on an unpinned
-// search regardless of what else the filter says. The SDK types `filter` as
-// required on both for this reason.
+// EVERY v4 search (work AND asset) MUST pin flowOriginId with equals/in, at
+// the top level or under `and` groups — an or-nested pin doesn't narrow and
+// is rejected too. Environment-wide search is not supported: the server 400s
+// on an unpinned search regardless of what else the filter says. The SDK
+// types `filter` as required on both for this reason.
 const page = await work.search({
   filter: { and: [
     // Required, always. `in` with several origin ids works too.
