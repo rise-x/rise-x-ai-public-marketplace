@@ -4,11 +4,24 @@ Rise-X's AI public plugin marketplace for Claude Code and Cowork (`rise-x-public
 
 ## Install
 
-Paste this into any Claude Code session and let Claude do the installable
-part:
+Paste this into a Claude Code session running **on your own machine** — a
+terminal session, or the Claude Desktop integrated terminal — and let Claude
+do the installable part. Don't use a cloud session (claude.ai on the web) for
+this: its shell is a disposable sandbox, so the install commands report
+success while changing nothing your client can see. Install from your own
+terminal instead, or use the plugin browser
+([Other surfaces](#other-surfaces)).
 
 ```
 Set up the Rise-X plugins from the public marketplace.
+
+First, confirm your shell is my own machine and not a cloud or sandboxed
+session. If it is a sandbox, stop and tell me instead of running anything:
+the commands below would look like they worked and install nothing.
+
+If you have no shell at all, or the claude CLI is not on your PATH, don't
+improvise: hand me back the commands below as /plugin slash commands for me
+to run myself, and wait for me to confirm before going on.
 
 1. Run: claude plugin marketplace list
    If rise-x-public does not appear in the output, run:
@@ -53,10 +66,11 @@ Finally, ask Claude to perform one real Rise-X operation to confirm the
 whole chain works.
 
 **On Claude Desktop:** open the integrated terminal with `` Ctrl+` `` (or the
-Views menu) and paste there, or use **+** → **Plugins** → **Add plugin**.
-Plugins are not available in WSL sessions. The Cowork tab is configured
-separately, through **Customize** in the sidebar. See
-[Other surfaces](#other-surfaces) for the details of each route.
+Views menu) and paste there, or use **+** → **Plugins** → **Add plugin** —
+that button is unavailable in cloud and WSL sessions, where the terminal
+route is the one to use. The Cowork tab is configured separately, through
+**Customize** in the sidebar. See [Other surfaces](#other-surfaces) for the
+details of each route.
 
 ### Manual equivalent
 
