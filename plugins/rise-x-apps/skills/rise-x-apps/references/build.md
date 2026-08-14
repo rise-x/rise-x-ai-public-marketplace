@@ -167,8 +167,10 @@ for await (const row of work.iterate({ flow, maxItems: 100 })) { /* … */ }
 // types `filter` as required on both for this reason.
 const page = await work.search({
   filter: { and: [
-    // Required, always. `in` with several origin ids works too.
-    { field: 'flowOriginId', operator: 'equals', values: [FLOW_REF] },
+    // Required, always. `in` with several origin ids works too. Pin the
+    // RESOLVED origin id, never FLOW_REF — that may hold a concrete version id,
+    // which is a valid guid the index simply never matches (see below).
+    { field: 'flowOriginId', operator: 'equals', values: [flow.flowOriginId] },
     // status values: Open/Closed/Completed/Deleted/Ok. Step-level values like
     // 'InProgress' live on flowState — a DIFFERENT field; filtering status by
     // them matches nothing.
@@ -203,7 +205,9 @@ const assetPage = await assets.search({
     // Asset status values: Open/Closed/Deleted ONLY. Work's Completed/Ok do not
     // exist here, and filtering by them matches nothing.
     { field: 'status', operator: 'equals', values: ['Open'] },
-    { field: 'displayName', operator: 'contains', values: ['acme'] },
+    // startsWith, NOT contains: substring matching on work/asset strings is
+    // rejected with a 400 (see the operator restrictions below).
+    { field: 'displayName', operator: 'startsWith', values: ['acme'] },
   ] },
   // Projection: a `data.*` path must EXIST in the pinned flow's data schema or
   // the request 400s naming the field (GET /api/v4/config/flow/{originId}/data-schema
@@ -252,7 +256,7 @@ const { data } = await apps.get('/api/v4/config/apps');
 
 **`flows.list()` lists WORK flows only; asset-type flows come from `assets.types()`.** The two listings are **disjoint** — neither is a superset, and neither enumerates "all flows", so don't treat either as exhaustive. Only `flows.get()`/`findTask()` resolve a flow of either kind by id. This bites when sourcing the mandatory `flowOriginId` search pin: a work origin id in `assets.search` (or an asset origin id in `work.search`) is a valid guid of the wrong flow family, so it matches nothing and returns an **empty page with no error**. Work pin → `flows.list()`; asset pin → `assets.types()` (`type.flow.flowOriginId`).
 
-**Search grammar limits** — identical for `work.search` and `assets.search`, since one server-side service backs both. Operators are a closed set: `equals`, `notEquals`, `in`, `notIn`, `contains`, `startsWith`, `endsWith`, `greaterThan`, `greaterThanOrEqual`, `lessThan`, `lessThanOrEqual`, `between`, `exists`, `notExists`. Anything else 400s, so don't reach for SQL-ish spellings (`like`, `gt`, `>=`). Arity differs by operator: `between` takes exactly two `values`, `exists`/`notExists` take none. **`pageSize` defaults to 25 and the server caps it at 100** — a larger value is clamped silently, so "fetch them all in one page" truncates with no error; page through `hasMore` instead. `hasMore` is always populated, an exact count is not: pass `includeTotalCount: true` to get `page.totalCount` when the UI shows "25 of 340", and leave it off otherwise — it runs a separate count facet over the whole match set on every request.
+**Search grammar limits** — identical for `work.search` and `assets.search`, since one server-side service backs both. The grammar's whole vocabulary is `equals`, `notEquals`, `in`, `notIn`, `contains`, `startsWith`, `endsWith`, `greaterThan`, `greaterThanOrEqual`, `lessThan`, `lessThanOrEqual`, `between`, `exists`, `notExists` — anything else 400s, so don't reach for SQL-ish spellings (`like`, `gt`, `>=`). **What a given field accepts is narrower than that, and knowing the list is not enough.** On work and asset search: **strings take `equals`/`notEquals`/`in`/`notIn`/`startsWith` only, and `contains`/`endsWith` are rejected with a 400** (unanchored regex is non-indexable, so they are allowed only on flow and company search); numbers and dates take equality and membership plus the four range operators and `between`; guid and array fields take equality and membership only; booleans take `equals`/`notEquals`. `data.*` string paths are cut back the same way as work/asset strings, on every resource. `exists`/`notExists` work on any field and take no `values`; `between` takes exactly two. **`pageSize` defaults to 25 and the server caps it at 100** — a larger value is clamped silently, so "fetch them all in one page" truncates with no error; page through `hasMore` instead. `hasMore` is always populated, an exact count is not: pass `includeTotalCount: true` to get `page.totalCount` when the UI shows "25 of 340", and leave it off otherwise — it runs a separate count facet over the whole match set on every request.
 
 **Filter tree shape.** A node is either a leaf (`field` + `operator` + `values`) or a group (`and` **or** `or`) — never both, and never both group keys on the same node. `{ field: 'status', …, and: [...] }` and `{ and: [...], or: [...] }` are each rejected with a message naming the problem; wrap the leaf in its own group, or nest one group inside the other. Group nesting is capped at **5 levels** — a sixth returns `Filter group nesting exceeds maximum depth of 5`. Hand-written filters never approach that; it bites filter-builder UIs that let a user add nested condition groups without bounding the depth. All three arrive as a `ConnectorError` with `code: 'HTTP_ERROR'` — the server rejects the request rather than silently dropping conditions.
 
