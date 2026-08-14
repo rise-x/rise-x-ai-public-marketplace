@@ -3,11 +3,7 @@ name: sync-internal-marketplace
 # (rise-x/rise-x-ai-marketplace) still mirrors each externalized entry's version —
 # org sync only fires when a version bump merges to that repo's default branch.
 # This workflow opens the follow-up PR there so releases propagate without a
-# manual step (rise-x-eop#1605).
-#
-# Requires the PRIVATE_MARKETPLACE_TOKEN secret: a fine-grained PAT (or GitHub
-# App token) scoped to rise-x/rise-x-ai-marketplace with Contents and
-# Pull requests read/write.
+# manual step.
 on:
   push:
     branches: [main]
@@ -72,8 +68,6 @@ jobs:
             echo "$SUMMARY"
             echo
             echo "Source: rise-x/rise-x-ai-public-marketplace@${SOURCE_SHA}"
-            echo
-            echo "Ref: rise-x/rise-x-eop#1605"
           } > "$RUNNER_TEMP/commit-msg"
           git commit -F "$RUNNER_TEMP/commit-msg"
 
@@ -92,8 +86,6 @@ jobs:
               echo '```'
               echo
               echo "Source: rise-x/rise-x-ai-public-marketplace@${SOURCE_SHA}"
-              echo
-              echo "Ticket: https://github.com/rise-x/rise-x-eop/issues/1605"
             } > "$RUNNER_TEMP/pr-body"
             gh pr create --repo rise-x/rise-x-ai-marketplace \
               --base main --head "$branch" \
