@@ -100,13 +100,22 @@ How to build the mock:
   `node_modules/@rise-x/apps-sdk/build/ui/styles.css`, or
   `packages/apps-sdk/build/ui/styles.css` in the rise-x-app monorepo
   (rebuild apps-sdk there if the design system changed).
-- **Reuse component markup and class strings** from the design-system source
+- **Copy markup from the design-system demo** — `build/ui/demo.html` in the
+  SDK (`node_modules/@rise-x/apps-sdk/build/ui/demo.html`, or
+  `packages/apps-sdk/build/ui/demo.html` in the rise-x-app monorepo): every
+  `@rise-x/ui` component pre-rendered with its real markup and classnames,
+  linking its own complete stylesheet (`demo.css`, next to it — a superset of
+  `styles.css` that also styles the demo page's own layout; your mock still
+  inlines `styles.css`). It's the ground truth for
+  rendered HTML — copy markup straight from it rather than reconstructing it
+  by hand; every element carries `data-slot`.
+- **Fall back to the component source** for props or variants the demo
+  doesn't exercise
   (`node_modules/@rise-x/apps-sdk/build/ui/reference/components/*`;
-  `packages/ui/src/components/*` in the rise-x-app monorepo; every element
-  carries `data-slot`).
-  The stylesheet contains utilities for every class used in that source, so
-  copied markup renders pixel-identical to the implemented app. Never
-  hand-roll a look-alike of a component or restyle one.
+  `packages/ui/src/components/*` in the rise-x-app monorepo). The stylesheet
+  contains utilities for every class used across both, so copied markup
+  renders pixel-identical to the implemented app either way. Never hand-roll
+  a look-alike of a component or restyle one.
 - **Layout glue may be plain CSS** in the mock's own `<style>` block (page
   scaffolding, columns, spacing): the stylesheet only ships utilities used
   inside the design-system source, so mock-level utility classes won't apply
@@ -117,7 +126,7 @@ How to build the mock:
   "native-feel adaptation", include a mobile-width frame alongside the
   desktop one, so the user approves both.
 
-Component inventory (browse
+Component inventory (see them rendered in `build/ui/demo.html`; browse
 `node_modules/@rise-x/apps-sdk/build/ui/reference/components/` — or
 `packages/ui/src/components/` in the rise-x-app monorepo — for
 props/variants):
