@@ -74,7 +74,7 @@ jobs:
             echo
             echo "Source: rise-x/rise-x-ai-public-marketplace@${SOURCE_SHA}"
             echo
-            echo "Ref: #1605"
+            echo "Ref: rise-x/rise-x-eop#1605"
           } > "$RUNNER_TEMP/commit-msg"
           git commit -F "$RUNNER_TEMP/commit-msg"
 
@@ -101,3 +101,7 @@ jobs:
               --title "chore(marketplace): sync externalized plugin versions from public marketplace" \
               --body-file "$RUNNER_TEMP/pr-body"
           fi
+
+          # Arm auto-merge (idempotent): the PR merges on its own once the
+          # required approval and checks are satisfied.
+          gh pr merge "$branch" --repo rise-x/rise-x-ai-marketplace --auto --merge
