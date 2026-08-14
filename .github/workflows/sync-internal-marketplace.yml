@@ -1,0 +1,102 @@
+name: sync-internal-marketplace
+# When a release merges to main here, the internal marketplace
+# (rise-x/rise-x-ai-marketplace) still mirrors each externalized entry's version —
+# org sync only fires when a version bump merges to that repo's default branch.
+# This workflow opens the follow-up PR there so releases propagate without a
+# manual step (rise-x-eop#1605).
+#
+# Requires the PRIVATE_MARKETPLACE_TOKEN secret: a fine-grained PAT (or GitHub
+# App token) scoped to rise-x/rise-x-ai-marketplace with Contents and
+# Pull requests read/write.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/*/.claude-plugin/plugin.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-internal-marketplace
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: rise-x/rise-x-ai-marketplace
+          token: ${{ secrets.PRIVATE_MARKETPLACE_TOKEN }}
+          path: internal
+
+      - name: Sync externalized entry versions
+        id: sync
+        run: |
+          summary="$(bash scripts/sync-internal-versions.sh internal)"
+          if [[ -n "$summary" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "summary<<SUMMARY_EOF"
+              echo "$summary"
+              echo "SUMMARY_EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No version drift — nothing to sync."
+          fi
+
+      - name: Commit, push, and open PR
+        if: steps.sync.outputs.changed == 'true'
+        working-directory: internal
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_MARKETPLACE_TOKEN }}
+          SUMMARY: ${{ steps.sync.outputs.summary }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          branch="chore/sync-externalized-plugin-versions"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add .claude-plugin/marketplace.json
+
+          {
+            echo "chore(marketplace): sync externalized plugin versions from public marketplace"
+            echo
+            echo "$SUMMARY"
+            echo
+            echo "Source: rise-x/rise-x-ai-public-marketplace@${SOURCE_SHA}"
+            echo
+            echo "Ref: #1605"
+          } > "$RUNNER_TEMP/commit-msg"
+          git commit -F "$RUNNER_TEMP/commit-msg"
+
+          # Force-push a fixed branch: if an earlier sync PR is still open, this
+          # run recomputed the full drift against main, so the new commit
+          # supersedes it and the open PR just updates in place.
+          git push --force origin "HEAD:$branch"
+
+          state="$(gh pr view "$branch" --repo rise-x/rise-x-ai-marketplace --json state -q .state 2>/dev/null || echo NONE)"
+          if [[ "$state" != "OPEN" ]]; then
+            {
+              echo "Automated sync from the public marketplace: mirrors each externalized entry's \`version\` to the released \`plugin.json\` value (plus the required \`metadata.version\` patch bump) so the org sync picks up the release."
+              echo
+              echo '```'
+              echo "$SUMMARY"
+              echo '```'
+              echo
+              echo "Source: rise-x/rise-x-ai-public-marketplace@${SOURCE_SHA}"
+              echo
+              echo "Ticket: https://github.com/rise-x/rise-x-eop/issues/1605"
+            } > "$RUNNER_TEMP/pr-body"
+            gh pr create --repo rise-x/rise-x-ai-marketplace \
+              --base main --head "$branch" \
+              --title "chore(marketplace): sync externalized plugin versions from public marketplace" \
+              --body-file "$RUNNER_TEMP/pr-body"
+          fi
