@@ -44,12 +44,21 @@ write_json() {
 }
 
 changed=0
+matched=0
 
 # Entries whose git-subdir source points at this repo, as "name<TAB>path<TAB>version".
+# The url test covers both https and SSH forms.
 while IFS=$'\t' read -r name path entry_version; do
   [[ -z "$name" ]] && continue
+  matched=$((matched + 1))
   plugin_file="${public_root}/${path}/.claude-plugin/plugin.json"
-  [[ -f "$plugin_file" ]] || die "entry '$name' references '$path' but ${plugin_file} does not exist"
+  if [[ ! -f "$plugin_file" ]]; then
+    # Stale entry (plugin gone from this repo): skip it so the others still
+    # sync; stdout stays clean for the caller's drift summary.
+    printf 'sync-internal-versions.sh: warning: entry '\''%s'\'' references '\''%s'\'' but %s does not exist — skipping\n' \
+      "$name" "$path" "$plugin_file" >&2
+    continue
+  fi
   public_version="$(jq -r '.version // empty' "$plugin_file")"
   is_semver "$public_version" || die "entry '$name': public version '$public_version' is not valid semver"
   [[ "$public_version" == "$entry_version" ]] && continue
@@ -61,9 +70,13 @@ done < <(jq -r '
   .plugins[]
   | select((.source | type) == "object"
       and .source.source == "git-subdir"
-      and (.source.url // "" | test("github\\.com/rise-x/rise-x-ai-public-marketplace")))
+      and (.source.url // "" | test("github\\.com[:/]rise-x/rise-x-ai-public-marketplace")))
   | [.name, .source.path, .version // ""] | @tsv
 ' "$marketplace_file")
+
+# Zero matches means the internal marketplace no longer references this repo (or
+# the url form changed) — fail loudly rather than report "no drift" forever.
+(( matched > 0 )) || die "no externalized entries referencing this repo found in $marketplace_file"
 
 # The internal repo's check-versions.sh requires a strictly-greater metadata.version
 # whenever an entry changes.

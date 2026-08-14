@@ -76,8 +76,10 @@ jobs:
           # supersedes it and the open PR just updates in place.
           git push --force origin "HEAD:$branch"
 
-          state="$(gh pr view "$branch" --repo rise-x/rise-x-ai-marketplace --json state -q .state 2>/dev/null || echo NONE)"
-          if [[ "$state" != "OPEN" ]]; then
+          # gh pr list distinguishes "no open PR" (count 0) from an API failure
+          # (non-zero exit, which fails the run) — gh pr view conflates the two.
+          open_count="$(gh pr list --repo rise-x/rise-x-ai-marketplace --head "$branch" --state open --json number --jq length)"
+          if [[ "$open_count" == "0" ]]; then
             {
               echo "Automated sync from the public marketplace: mirrors each externalized entry's \`version\` to the released \`plugin.json\` value (plus the required \`metadata.version\` patch bump) so the org sync picks up the release."
               echo
