@@ -81,9 +81,9 @@ A filter node is exactly **one** of: a leaf condition (`field` + `operator` + `v
 | `notEquals` | all types | 1 | |
 | `in` | all except boolean | 1+ | Set membership. Rejected on boolean (use `equals`/`notEquals`) — listing both values of a 2-valued type is a no-op → 400. |
 | `notIn` | all except boolean | 1+ | Rejected on boolean. |
-| `contains` | Flow strings only | 1 | Substring match. **Flow resource only** — `search_companies` / `search_works` / `search_assets` reject it, and it is never allowed on `data.*` (use `startsWith`). Not allowed on guid / number / date / boolean. |
+| `contains` | Flow / Company strings | 1 | Substring match. **Flow and Company only** (their whitelist columns are indexed) — `search_works` / `search_assets` reject it, and it is never allowed on `data.*` (use `startsWith`). Not allowed on guid / number / date / boolean. |
 | `startsWith` | string only | 1 | Leading-anchored, case-insensitive prefix match. Allowed on all string fields (whitelist + `data.*`) on every resource. |
-| `endsWith` | Flow strings only | 1 | Trailing-anchored, case-insensitive suffix match. **Flow resource only** — `search_companies` / `search_works` / `search_assets` reject it, and it is never allowed on `data.*`. |
+| `endsWith` | Flow / Company strings | 1 | Trailing-anchored, case-insensitive suffix match. **Flow and Company only** — `search_works` / `search_assets` reject it, and it is never allowed on `data.*`. |
 | `between` | number / date | exactly 2 | Inclusive range |
 | `greaterThan` | number / date | 1 | NOT `gt` |
 | `greaterThanOrEqual` | number / date | 1 | NOT `gte` |
@@ -94,7 +94,7 @@ A filter node is exactly **one** of: a leaf condition (`field` + `operator` + `v
 
 Strings on `data.*` paths also support wildcard `prefix*` and `*suffix` via `equals` (server converts to bounded regex). Double wildcards (`*both*`) return 400.
 
-`contains` and `endsWith` are **Flow-resource-only**: accepted on `search_flows` string fields, and **rejected with 400** everywhere else — on `search_companies`, `search_works`, and `search_assets` (whitelist) strings, and on **all** `data.*` string paths (unanchored / trailing-anchored regex is non-indexable on dynamic fields). The portable string operators — valid on every resource and on `data.*` — are `equals` / `notEquals` / `in` / `notIn` / `startsWith`. The simple `prefix*` / `*suffix` wildcard form above is a separate, non-operator-gated path and still works on `data.*` strings (including for Work).
+`contains` and `endsWith` are **Flow- and Company-only**: accepted on `search_flows` and `search_companies` string fields, whose whitelist columns are indexed, and **rejected with 400** everywhere else — on `search_works` and `search_assets` (whitelist) strings, and on **all** `data.*` string paths (unanchored / trailing-anchored regex is non-indexable on dynamic fields). The portable string operators — valid on every resource and on `data.*` — are `equals` / `notEquals` / `in` / `notIn` / `startsWith`. The simple `prefix*` / `*suffix` wildcard form above is a separate, non-operator-gated path and still works on `data.*` strings (including for Work).
 
 > ⚠️ **Empty `contains` / `startsWith` / `endsWith` values are rejected.** Passing `{"operator": "endsWith", "values": [""]}` or `[" "]` (whitespace) — likewise for `contains` / `startsWith` — returns 400 from the validator — previously this silently produced a match-everything regex that scanned every document. If the caller's intent is "any/no value", use `exists` / `notExists` instead.
 
@@ -151,7 +151,7 @@ The simple-search query-string equivalent works the same way: `?status=Deleted` 
 
 ## Work Search and `data.*` Fields
 
-> ⚠️ **REQUIRED whenever the request touches any `data.*` path (filter, sort, OR projection): the same `filter` MUST contain a `flowOriginId` leaf — `equals` for one flow, `in` for multiple.** Without it the server returns 400 referencing the discovery URL. Workflow: (1) call `get_flow_data_schema(flow_origin_id)` to discover the valid paths, (2) compose `search_works` with the `flowOriginId` leaf AND your `data.*` condition under the same `and` group.
+> ⚠️ **EVERY `search_works` request MUST carry a `flowOriginId` leaf — `equals` for one flow, `in` for multiple — on the AND-spine of the filter.** This is not a `data.*` rule: the server checks the pin *before* it resolves any schema, so an unpinned search returns 400 referencing the discovery URL no matter which fields it names. Only `equals`/`in` count toward it, and a pin nested solely inside an `or` does not (an OR branch does not guarantee every returned row was filtered by it). A `data.*` path needs the pin for the additional reason that the server resolves the flow's schema from it. Workflow: (1) call `get_flow_data_schema(flow_origin_id)` to discover the valid paths, (2) compose `search_works` with the `flowOriginId` leaf AND your `data.*` condition under the same `and` group.
 
 **Wrong** — `data.*` filter with no `flowOriginId` leaf:
 
@@ -177,11 +177,11 @@ result = await search_works(
 )
 ```
 
-The ONLY exception is the bare `"data"` key in `fields` (no dot, whole-tree projection — see the [whole-data escape hatch](#whole-data-escape-hatch-data-key-no-dot) below). It bypasses schema resolution so no `flowOriginId` is needed.
+The bare `"data"` key in `fields` (no dot, whole-tree projection — see the [whole-data escape hatch](#whole-data-escape-hatch-data-key-no-dot) below) is the one path that skips **schema resolution**, so it needs no `get_flow_data_schema` call. It does not skip the **pin**: the `flowOriginId` leaf is still required, because that check runs ahead of schema resolution.
 
 ---
 
-Works carry per-flow user-defined data alongside the static POCO fields. The static whitelist below is always searchable WITHOUT a `flowOriginId` filter:
+Works carry per-flow user-defined data alongside the static POCO fields. The static whitelist below is searchable without a `get_flow_data_schema` call — it is **not** exempt from the `flowOriginId` pin, which every `search_works` request needs:
 
 | Field key | Type | Notes |
 |---|---|---|
@@ -244,7 +244,7 @@ Dynamic fields live under the `data.*` namespace. They're discovered per-flow vi
 ### Required workflow for `data.*` (always — no exceptions besides the bare `"data"` key)
 
 1. **Discover** — call `get_flow_data_schema(flow_origin_id)` to get the flat list of valid paths. Skip this only if you already know the exact path from a prior call in the same session.
-2. **Filter — flowOriginId is mandatory** — every `search_works` payload that names any `data.*` path (in `filter`, `sort`, OR `fields`) MUST include a `flowOriginId` leaf under the same `and` group: `equals` for one flow, `in [...]` for multiple. The server uses it to resolve the schema. Missing → 400 with the discovery URL.
+2. **Filter — flowOriginId is mandatory** — every `search_works` payload MUST include a `flowOriginId` leaf on the AND-spine: `equals` for one flow, `in [...]` for multiple. A payload naming any `data.*` path (in `filter`, `sort`, OR `fields`) must put it under the same `and` group as that path, since the server also resolves the schema from it. Missing → 400 with the discovery URL.
 3. **Compose** — reference `data.*` paths exactly as returned by step 1.
 
 End-to-end example showing both leaves under one `and`:
@@ -278,11 +278,14 @@ result = await search_works(
 
 ### Whole-data escape hatch (`"data"` key, no dot)
 
-Add the bare `"data"` key to `fields` to project the **entire** data sub-tree of each work — no schema lookup, no `flowOriginId` requirement:
+Add the bare `"data"` key to `fields` to project the **entire** data sub-tree of each work — no schema lookup. The `flowOriginId` pin is still required, as on every search; use `in [...]` to span several flows in one query:
 
 ```python
 result = await search_works(
-    filter={"field": "status", "operator": "equals", "values": ["Open"]},
+    filter={"and": [
+        {"field": "flowOriginId", "operator": "equals", "values": ["aaaa-bbbb-..."]},
+        {"field": "status", "operator": "equals", "values": ["Open"]},
+    ]},
     fields=["id", "displayName", "data"],
     enforce_fields=True,   # required to project the bare "data" sub-tree
 )
@@ -304,11 +307,11 @@ result = await search_works(
 
 `search_assets` (POST `/api/v4/asset/search`) queries **assets** — the `DianaCompanyEntity` records created from an asset type. It shares the **entire** filter grammar, operator set, `enforce_fields` behaviour, paging, and the `data.*` + `flowOriginId` contract with `search_works` — the notes here are the **asset-specific deltas only**. When in doubt, the Work rules above apply.
 
-> ⚠️ **Same `data.*` rule as Work: any SPECIFIC `data.*` path (filter, sort, OR projection) REQUIRES a `flowOriginId` leaf** (`equals` for one asset type, `in` for several) under the same `and` group — the server uses it to resolve which asset type's schema to validate against. Missing → 400. Discover paths with `get_flow_data_schema(flow_origin_id)` first (the asset type's `flowOriginId` comes from `search_flows` with `flowResourceType=Entity`, or `list_asset_types`). The bare `"data"` projection key is the one exception (whole-data hatch, no pin — see below).
+> ⚠️ **Same rule as Work: EVERY `search_assets` request REQUIRES a `flowOriginId` leaf** (`equals` for one asset type, `in` for several) on the AND-spine, whether or not it touches `data.*`. A specific `data.*` path (filter, sort, OR projection) must additionally carry it under the same `and` group as that path, so the server can resolve which asset type's schema to validate against. Missing → 400. Discover paths with `get_flow_data_schema(flow_origin_id)` first (the asset type's `flowOriginId` comes from `search_flows` with `flowResourceType=Entity`, or `list_asset_types`). The bare `"data"` projection key skips the schema lookup but not the pin (whole-data hatch — see below).
 
 ### Asset filterable fields (static whitelist)
 
-Always searchable WITHOUT a `flowOriginId` filter:
+Searchable without a `get_flow_data_schema` call — but still inside the mandatory `flowOriginId` pin, like every other asset search:
 
 | Field key | Type | Notes |
 |---|---|---|
@@ -329,7 +332,7 @@ Always searchable WITHOUT a `flowOriginId` filter:
 | `statusDisplay` | object — projection-only | whole-sub-doc escape hatch; rejects filter / sort with 400 |
 | `data` | object — projection-only | whole-data escape hatch; rejects filter / sort with 400 (see below) |
 
-Operators, casing, the Object-root-can't-be-a-filter/sort-leaf rule, and the empty-`startsWith` guard are all **identical to Work**. `contains` / `endsWith` are **Flow-only** — `search_assets` rejects them with 400 (use `startsWith`). Mixed-type tolerance and the date/number quirks are identical too (see the Work [§ Date and number quirks](#date-and-number-quirks-on-data)).
+Operators, casing, the Object-root-can't-be-a-filter/sort-leaf rule, and the empty-`startsWith` guard are all **identical to Work**. `contains` / `endsWith` are **Flow- and Company-only** — `search_assets` rejects them with 400 (use `startsWith`). Mixed-type tolerance and the date/number quirks are identical too (see the Work [§ Date and number quirks](#date-and-number-quirks-on-data)).
 
 ### Asset `data.*` projection trims like Work — with one shape caveat
 
@@ -339,7 +342,7 @@ Granular projection matches Work: listing `data.foo.bar` in `fields` (with `enfo
 
 ### Bare `data` whole-data hatch (no dot)
 
-Identical to Work: add the bare `"data"` key to `fields` (with `enforce_fields=True`) to project the whole folded `data` sub-document with **no `flowOriginId` pin** and no schema lookup — bounded only by the per-document ACL. Projection-only: filtering or sorting on bare `data` returns 400. Bare `data` differs from a specific `data.*` projection only in scope: bare `data` returns the whole doc and needs **no pin** (and works across mixed asset types in one query), whereas a specific `data.*` trims to that path and **requires** the `flowOriginId` pin.
+Identical to Work: add the bare `"data"` key to `fields` (with `enforce_fields=True`) to project the whole folded `data` sub-document with no schema lookup — bounded only by the per-document ACL. The `flowOriginId` pin is still required; `in [...]` several asset types to span them in one query. Projection-only: filtering or sorting on bare `data` returns 400. Bare `data` differs from a specific `data.*` projection in scope and in schema handling: bare `data` returns the whole doc and skips schema resolution, whereas a specific `data.*` trims to that path and must resolve the pinned type's schema.
 
 ### Multi-flow (multi-asset-type) merge
 
@@ -379,7 +382,7 @@ The static whitelist for `search_companies`. No enum fields — all strings are 
 | Field key | Type | Notes |
 |---|---|---|
 | `id` | guid | direct lookup |
-| `name`, `displayName`, `shortCode`, `companyNumber` | string | free-form, user-supplied. `startsWith` supported (`contains` / `endsWith` are Flow-only — `search_companies` returns 400). |
+| `name`, `displayName`, `shortCode`, `companyNumber` | string | free-form, user-supplied. `contains` / `startsWith` / `endsWith` all supported — Company shares Flow's indexed-column allowance, unlike Work and Asset. |
 | `domains` | string array | user-supplied domain names; `in` matches any element |
 | `lastModified`, `created` | date | range / comparison ops supported |
 
@@ -540,7 +543,7 @@ await search_assets(
 )
 ```
 
-`contains` / `endsWith` are Flow-only — assets use `startsWith`. Requesting a specific `data.*` path trims the folded `data` object to just that path; bare `data` returns the whole sub-document (no pin). See [§ Asset Search and data.* Fields](#asset-search-and-data-fields).
+`contains` / `endsWith` are Flow- and Company-only — assets use `startsWith`. Requesting a specific `data.*` path trims the folded `data` object to just that path; bare `data` returns the whole sub-document (still pinned, but no schema lookup). See [§ Asset Search and data.* Fields](#asset-search-and-data-fields).
 
 ## Common Pitfalls
 
