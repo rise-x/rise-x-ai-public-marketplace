@@ -9,6 +9,11 @@ on:
     branches: [main]
     paths:
       - "plugins/*/.claude-plugin/plugin.json"
+  # Daily self-heal: the sync is idempotent and no-ops without drift, so this
+  # converts any missed push run (expired token, transient API failure, branch
+  # conflict) from "silently missed forever" into "recovers within a day".
+  schedule:
+    - cron: "17 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -83,6 +88,8 @@ jobs:
             {
               echo "Automated sync from the public marketplace: mirrors each externalized entry's \`version\` to the released \`plugin.json\` value (plus the required \`metadata.version\` patch bump) so the org sync picks up the release."
               echo
+              echo "Do not hand-edit this branch — the next sync force-pushes over it."
+              echo
               echo '```'
               echo "$SUMMARY"
               echo '```'
@@ -96,5 +103,8 @@ jobs:
           fi
 
           # Arm auto-merge (idempotent): the PR merges on its own once the
-          # required approval and checks are satisfied.
-          gh pr merge "$branch" --repo rise-x/rise-x-ai-marketplace --auto --merge
+          # required approval and checks are satisfied. Non-fatal: by this point
+          # the sync itself succeeded (branch pushed, PR open), and a red run
+          # here would teach everyone to ignore red runs.
+          gh pr merge "$branch" --repo rise-x/rise-x-ai-marketplace --auto --merge \
+            || echo "::warning::could not arm auto-merge — merge the sync PR manually"

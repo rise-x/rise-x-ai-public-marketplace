@@ -28,8 +28,11 @@ Exempt: a PR whose changes under `plugins/<name>/` are limited to
 `plugins/<name>/test/` does not require a bump.
 
 A PR that adds a brand-new plugin must also add it to the "Which plugin?"
-dropdown in `.github/ISSUE_TEMPLATE/bug_report.yml`, and add it to the
-"Which MCP server?" dropdown there too if the plugin bundles MCP servers.
+dropdown in `.github/ISSUE_TEMPLATE/bug_report.yml`, add it to the
+"Which MCP server?" dropdown there too if the plugin bundles MCP servers,
+and get a matching `git-subdir` entry added in the private marketplace
+(see "Private marketplace sync" below) — without that entry its releases
+never reach the org.
 
 CI enforces this — `scripts/check-version.sh`, run inside the `validate`
 job, does two independent things: (1) for each plugin with non-exempt
@@ -39,6 +42,27 @@ entries and `plugins/<name>/` directories stay consistent with each other
 (every local-source entry has a matching directory and vice versa) — this
 check does not involve version numbers at all, since marketplace.json never
 carries one.
+
+## Private marketplace sync
+
+Merging a version bump to `main` is only half a release: Rise-X org members
+receive these plugins through the private `rise-x/rise-x-ai-marketplace`,
+which mirrors each plugin's version in an externalized (`git-subdir`) entry,
+and its org sync only fires when that mirror moves.
+`.github/workflows/sync-internal-marketplace.yml` automates the mirror: on
+every push to `main` touching `plugins/*/.claude-plugin/plugin.json` (plus a
+daily self-heal cron and manual dispatch) it opens or updates an
+auto-merging version-sync PR there via `scripts/sync-internal-versions.sh`.
+
+- The `PRIVATE_MARKETPLACE_TOKEN` repo secret is a release-blocking
+  dependency: a fine-grained PAT (or GitHub App token) scoped to
+  `rise-x/rise-x-ai-marketplace` with Contents and Pull requests read/write.
+  If it expires, releases stop propagating until it is reprovisioned.
+- The sync PR still needs one approval in the private repo (from someone
+  other than the token owner) and resolved review threads before auto-merge
+  lands it.
+- A plugin with no `git-subdir` entry in the private marketplace is skipped
+  with a warning, not an error — check the run log when adding plugins.
 
 ## Validate before any PR
 
