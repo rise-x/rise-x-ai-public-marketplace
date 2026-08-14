@@ -110,7 +110,7 @@ import {
   getShellUser,
   getShellEnvironment,
   getShellApi,           // legacy Diana axios instance
-  getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment'
+  getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment' | 'asset'
   getShellAi,            // rise-x-ai gateway handle (bridge v3+), or null
   // Standalone dev
   createMockShell,
@@ -251,6 +251,10 @@ const { data } = await apps.get('/api/v4/config/apps');
 **flowId vs flowOriginId.** A flow has one stable `flowOriginId` across versions plus a concrete `id` per published version — a bare "flow id" copied from a URL is usually the concrete one. `flows.get`/`getConfig` and `work.start` accept either and resolve to the latest published version, but `work.list`/`iterate` and `assets.list`/`iterate` filter strictly by origin id and return an **empty list, not an error**, when given a concrete id. When unsure, resolve first: `(await flows.get(ref)).flowOriginId`.
 
 **`flows.list()` lists WORK flows only; asset-type flows come from `assets.types()`.** The two listings are **disjoint** — neither is a superset, and neither enumerates "all flows", so don't treat either as exhaustive. Only `flows.get()`/`findTask()` resolve a flow of either kind by id. This bites when sourcing the mandatory `flowOriginId` search pin: a work origin id in `assets.search` (or an asset origin id in `work.search`) is a valid guid of the wrong flow family, so it matches nothing and returns an **empty page with no error**. Work pin → `flows.list()`; asset pin → `assets.types()` (`type.flow.flowOriginId`).
+
+**Search grammar limits** — identical for `work.search` and `assets.search`, since one server-side service backs both. Operators are a closed set: `equals`, `notEquals`, `in`, `notIn`, `contains`, `startsWith`, `endsWith`, `greaterThan`, `greaterThanOrEqual`, `lessThan`, `lessThanOrEqual`, `between`, `exists`, `notExists`. Anything else 400s, so don't reach for SQL-ish spellings (`like`, `gt`, `>=`). Arity differs by operator: `between` takes exactly two `values`, `exists`/`notExists` take none. **`pageSize` defaults to 25 and the server caps it at 100** — a larger value is clamped silently, so "fetch them all in one page" truncates with no error; page through `hasMore` instead. `hasMore` is always populated, an exact count is not: pass `includeTotalCount: true` to get `page.totalCount` when the UI shows "25 of 340", and leave it off otherwise — it runs a separate count facet over the whole match set on every request.
+
+**Filter tree shape.** A node is either a leaf (`field` + `operator` + `values`) or a group (`and` **or** `or`) — never both, and never both group keys on the same node. `{ field: 'status', …, and: [...] }` and `{ and: [...], or: [...] }` are each rejected with a message naming the problem; wrap the leaf in its own group, or nest one group inside the other. Group nesting is capped at **5 levels** — a sixth returns `Filter group nesting exceeds maximum depth of 5`. Hand-written filters never approach that; it bites filter-builder UIs that let a user add nested condition groups without bounding the depth. All three arrive as a `ConnectorError` with `code: 'HTTP_ERROR'` — the server rejects the request rather than silently dropping conditions.
 
 **Asset writes go through a draft work item** (the platform's edit model). `assets.create({ type })` and `assets.startEdit({ assetId, flowOriginId })` return the draft as a `WorkDetail` — fill it with `work.patchData()` and **save it with `work.submit()`**; nothing persists until the submit. An already-open draft is on `assets.get(id).draftWorkId` — resume it with `work.get()` instead of starting another. Asset types come from `assets.types()`; pass the whole `AssetType` (or its flow's origin id) as the `type` ref.
 
