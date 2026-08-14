@@ -201,6 +201,12 @@ manage_card_layout(flow_id=<draft>, action="update", card_layout={
 publish_flow(<draft>)                          # commits the card layout
 ```
 
+For work flows, `publishMode: "DoNotUpdateOpenItems"` leaves existing work
+items pinned to their old flow version. A card-layout repair then applies only
+to newly created works. To repair an active board immediately, set
+`publishMode` to `"UpdateOpenItems"` on the draft before publishing, or correct
+the affected work items separately.
+
 - `action="update"` **deep-merges** onto the current layout, so omitted keys
   (`title`, `cardConfig.*` you didn't touch) are preserved — send only what you
   change.

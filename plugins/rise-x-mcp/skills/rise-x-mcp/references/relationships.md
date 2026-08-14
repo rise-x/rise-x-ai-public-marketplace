@@ -23,11 +23,13 @@
 
 **Relationships** connect work items to other work items or to assets. They are configured in the `relatedFlows` array on each flow's configuration. When a work item is submitted, the flow engine evaluates the `relatedFlows` config and establishes links to matching target work items or assets.
 
-**Key concept:** Relationships are **bidirectional by default**. Both flows must have a `relatedFlows` entry pointing to each other. Configuring only one side will not work — the engine creates relationship entries on both work items during submission.
+**Key concept:** relationship links are **two-sided by default**. When a work is submitted, the engine evaluates the `relatedFlows` entries on **that work's own flow**; a matching entry writes relationship records onto **both** items — source and target — unless `isOneWayRelationship: true`. So a single side's config is enough to create both ends of a link. Mirror the config on both flows anyway (see below): links are only established/refreshed when the **configured** side submits, and named related-work lookups only resolve on a flow that has its own matching entry.
+
+**Not every relationship comes from `relatedFlows`.** Runtime activities — e.g. `StartCrossEcosystemWork` with `sourceRelationshipName`/`targetRelationshipName` set — create relationship records directly when they run, with no `relatedFlows` config on either flow. A populated Related Work tab therefore does not imply any `relatedFlows` entries exist.
 
 ## The Bidirectional Rule
 
-When Flow A needs to relate to Flow B, you must configure **both sides**:
+When Flow A needs to relate to Flow B via `relatedFlows`, configure **both sides** — not because one entry can't create the link (it can, on both items — see Key concept above), but so the link is established no matter which side submits, and so related-work lookups by relationship name resolve from either flow:
 
 ```
 Flow A relatedFlows:                     Flow B relatedFlows:
@@ -43,7 +45,7 @@ Flow A relatedFlows:                     Flow B relatedFlows:
 ```
 
 **Rules:**
-- Both flows MUST have a `relatedFlows` entry pointing to each other
+- Give both flows a `relatedFlows` entry pointing to each other (one side alone works only when that side submits, and only that side can query by name)
 - `sourceName` on Flow A corresponds to the relationship name stored on Flow A's work items
 - `targetName` on Flow A corresponds to the relationship name stored on Flow B's work items
 - `workFilters` are mirrored — `targetPath` and `valuePath` swap between sides
@@ -265,26 +267,18 @@ The `relatedWork-select` component renders a UI widget that lets users manually 
 
 ## Enabling the Related Work Panel
 
-For the "Related Work" tab to appear in the work item side panel, the flow must have it configured in `flowFeatures`:
+For the "Related Work" tab to appear in the work item side panel, the flow's `flowFeatures.leftPanel.tabs` must include `{"tab": "relatedWork"}`. Without the tab, configured relationships still function at the data level (links, data sync, invitations) — only the side-panel browsing UI is missing. `relatedWork` is work-item-only: for a Work↔Asset relationship, put the browsing tab on the work flow and keep the asset flow's `contents` tab. The canonical reference for `leftPanel` (all five tab values, `defaultTab`, per-tab `label`, publish-mode caveat) is `references/managing-flows.md` § Left Panel — three traps from there apply directly here:
 
-```json
-{
-  "flowFeatures": {
-    "leftPanel": {
-      "tabs": [
-        { "tab": "workflow" },
-        { "tab": "activities" },
-        { "tab": "relatedWork" }
-      ]
-    }
-  }
-}
-```
+- **`tabs` REPLACES the default set** (`workflow` + `activities`) — sending only `{"tab": "relatedWork"}` silently removes the Workflow and Activities tabs. Always list every tab you want visible.
+- **`flowFeatures` writes need the draft→publish cycle** — a write to a published flow id returns 200 but persists nothing.
+- **`flowFeatures` is a whole-object write** — read-modify-write or you clobber sibling features.
 
-Set this via `update_flow_properties`:
 ```
-update_flow_properties(flow_id, {
+draft_id = create_flow_draft(flow_id)
+features = get_flow_config(draft_id, path="properties.flowFeatures")  # read existing
+update_flow_properties(draft_id, {
   "flowFeatures": {
+    # Preserve every sibling feature returned by the read above.
     "leftPanel": {
       "tabs": [
         {"tab": "workflow"},
@@ -293,14 +287,17 @@ update_flow_properties(flow_id, {
       ]
     }
   }
-})
+})                                                                    # expect changed: [flowFeatures]
+publish_flow(draft_id)                       # re-resolve the new published id via list_flows
 ```
+
+**If the tab doesn't appear after publishing:** work flows default to `publishMode: "DoNotUpdateOpenItems"`, so already-open works stay pinned to their creation-time flow version — the new tab shows only on works created **after** the publish. Verify with a fresh work item.
 
 ## How to Read Relationships
 
 Use `get_flow_config(flow_id)` — the response includes a `relatedFlows` array with all configured relationships. Each entry shows the target flow, filter rules, data operations, and options.
 
-The `relationships` array (separate from `relatedFlows`) contains runtime relationship instances on work items — these are populated by the engine, not configured manually.
+The `relationships` array (separate from `relatedFlows`) contains runtime relationship instances on work items — these are populated by the engine (from `relatedFlows` evaluation at submit, or directly by runtime activities such as `StartCrossEcosystemWork`), not configured manually. The Related Work tab renders from this per-work array, which is why it can be populated even on flows with no `relatedFlows` entries.
 
 ## Complete Example: Configure Work ↔ Asset Relationship
 
@@ -323,11 +320,11 @@ invoice_draft = create_flow_draft(invoice_flow_id)
 contracts_draft = create_flow_draft(contracts_asset_id)
 ```
 
+> The writes in Steps 3–4 are shown against flows with **no existing config**. On real flows, **read-modify-write `flowFeatures`** (§ Enabling the Related Work Panel above) so sibling features are preserved. Add or update each relationship with `manage_related_flow`; its updates are partial PATCHes, so omit fields you are not changing.
+
 **Step 3: Configure the Invoice side**
 ```
-update_flow_properties(invoice_draft_id, {
-  "relatedFlows": [
-    {
+manage_related_flow(invoice_draft, action="add", related_flow={
       "name": "InvoiceToContract",
       "flowName": "MyEcosystem/Finance/Contracts",
       "sourceName": "Invoices",
@@ -343,8 +340,9 @@ update_flow_properties(invoice_draft_id, {
         "includeAttachments": false,
         "inviteCurrentUserToTargetWork": false
       }
-    }
-  ],
+})
+
+update_flow_properties(invoice_draft, {
   "flowFeatures": {
     "leftPanel": {
       "tabs": [
@@ -359,9 +357,7 @@ update_flow_properties(invoice_draft_id, {
 
 **Step 4: Configure the Contracts side (mirror)**
 ```
-update_flow_properties(contracts_draft_id, {
-  "relatedFlows": [
-    {
+manage_related_flow(contracts_draft, action="add", related_flow={
       "name": "ContractToInvoice",
       "flowName": "MyEcosystem/Finance/Invoices",
       "sourceName": "Contracts",
@@ -377,33 +373,22 @@ update_flow_properties(contracts_draft_id, {
         "includeAttachments": false,
         "inviteCurrentUserToTargetWork": false
       }
-    }
-  ],
-  "flowFeatures": {
-    "leftPanel": {
-      "tabs": [
-        {"tab": "workflow"},
-        {"tab": "activities"},
-        {"tab": "relatedWork"}
-      ]
-    }
-  }
 })
 ```
 
 **Step 5: Publish both**
 ```
-publish_flow(invoice_draft_id)
-publish_flow(contracts_draft_id)
+publish_flow(invoice_draft)
+publish_flow(contracts_draft)
 ```
 
 ## Common Mistakes
 
-1. **Configuring only one side** — relationships require `relatedFlows` entries on BOTH flows. Missing the mirror config means the relationship won't be established.
+1. **Configuring only one side** (`relatedFlows` mechanism) — a single entry does create both ends of the link, but only when the **configured** side's work is submitted, and related-work lookups by relationship name return empty on a flow without its own matching entry. Mirror the config on both flows unless one-sided establishment is intentional. (Relationships created at runtime by activities such as `StartCrossEcosystemWork` are exempt — they need no `relatedFlows` entries at all.)
 2. **Mismatched `sourceName`/`targetName`** — the `sourceName` on Flow A should correspond to the `targetName` on Flow B. Swapping them breaks the bidirectional link.
 3. **Forgetting to mirror `workFilters`** — `targetPath` and `valuePath` must be swapped between the two sides. If Flow A filters `targetPath: $.id, valuePath: $.ref.id`, Flow B must filter `targetPath: $.ref.id, valuePath: $.id`.
 4. **Missing `relatedWork` tab** — the Related Work panel won't appear unless `flowFeatures.leftPanel.tabs` includes `{"tab": "relatedWork"}` on the flow.
 5. **Wrong `flowName`** — must be the full flow path (e.g. `"Ecosystem/Category/FlowName"`), not the display name.
-6. **Overwriting existing `relatedFlows`** — `update_flow_properties` with `relatedFlows` replaces the entire array. Always read existing config first and include all entries.
+6. **Using `update_flow_properties` for `relatedFlows`** — it rejects that key before sending the request. Use `manage_related_flow` instead; its updates are partial PATCHes, so omitted fields are preserved.
 7. **Forgetting to publish both flows** — both flows must be published after configuration changes.
 8. **Using `related-work-select` instead of `relatedWork-select`** — the component name uses camelCase W.
