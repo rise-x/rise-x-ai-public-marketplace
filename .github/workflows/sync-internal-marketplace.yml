@@ -6,14 +6,11 @@ name: sync-internal-marketplace
 # manual step.
 on:
   push:
-    branches: [main]
-    paths:
-      - "plugins/*/.claude-plugin/plugin.json"
-  # Daily self-heal: the sync is idempotent and no-ops without drift, so this
-  # converts any missed push run (expired token, transient API failure, branch
-  # conflict) from "silently missed forever" into "recovers within a day".
-  schedule:
-    - cron: "17 6 * * *"
+    # TEMP: feature branch added and paths filter suspended only to test the
+    # workflow — revert to `branches: [main]` + the paths filter before merge.
+    branches: [main, feature/1605-sync-private-marketplace]
+    # paths:
+    #   - "plugins/*/.claude-plugin/plugin.json"
   workflow_dispatch:
 
 permissions:
