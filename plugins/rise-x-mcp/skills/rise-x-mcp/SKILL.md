@@ -148,6 +148,7 @@ warning. Canonical names you'll use most: `input-text`, `input-select`,
 | Create, get, submit, or update work items | `references/managing-work-items.md` |
 | Add/edit/remove UI form fields or layouts | `references/layouts-and-components.md` |
 | Configure how a work item / asset renders as a card on a board (`cardConfig` — title, subtitle, status pill, items, icon) | `references/card-layout.md` |
+| Configure the side-panel tabs on work items / assets (`flowFeatures.leftPanel` — tabs, `defaultTab`, per-tab label) | `references/managing-flows.md` § Left Panel |
 | Add actions (Reject, Send Back), attach activities (StartWork, Start Cross Ecosystem Work), or configure grid columns/statuses | `references/actions-and-statuses.md` |
 | Add validation rules to fields or data-grid columns | `references/validation.md` |
 | Author or debug expression-valued properties (chart formulas, tooltip values, action conditions, validation rules, computed labels) | `references/dynamicValue.md` |
@@ -168,7 +169,7 @@ warning. Canonical names you'll use most: `input-text`, `input-select`,
 
 ## Common Pitfalls
 
-56 traps with the fix for each, in 63 numbered slots (7 are retired stubs kept so
+57 traps with the fix for each, in 64 numbered slots (7 are retired stubs kept so
 the numbering stays stable — other references cite these entries by number) —
 draft/publish lifecycle, ID confusion, component and dashboard authoring,
 search/filter semantics, exports, card layouts:
