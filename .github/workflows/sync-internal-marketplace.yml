@@ -10,8 +10,7 @@ name: sync-internal-marketplace
 # Pull requests read/write.
 on:
   push:
-    # TEMP: feature branch added only to test the workflow — revert before merge.
-    branches: [main, feature/1605-sync-private-marketplace]
+    branches: [main]
     paths:
       - "plugins/*/.claude-plugin/plugin.json"
   workflow_dispatch:
