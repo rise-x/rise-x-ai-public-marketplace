@@ -50,9 +50,11 @@ receive these plugins through the private `rise-x/rise-x-ai-marketplace`,
 which mirrors each plugin's version in an externalized (`git-subdir`) entry,
 and its org sync only fires when that mirror moves.
 `.github/workflows/sync-internal-marketplace.yml` automates the mirror: on
-every push to `main` touching `plugins/*/.claude-plugin/plugin.json` (plus a
-daily self-heal cron and manual dispatch) it opens or updates an
-auto-merging version-sync PR there via `scripts/sync-internal-versions.sh`.
+every push to `main` touching `plugins/*/.claude-plugin/plugin.json` (or via
+manual dispatch) it opens or updates an auto-merging version-sync PR there
+via `scripts/sync-internal-versions.sh`. There is no scheduled retry: if a
+push-triggered run fails, the release does not propagate until someone
+re-runs it or triggers a manual dispatch.
 
 - The `PRIVATE_MARKETPLACE_TOKEN` repo secret is a release-blocking
   dependency: a fine-grained PAT (or GitHub App token) scoped to
