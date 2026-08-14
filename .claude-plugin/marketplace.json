@@ -3,6 +3,7 @@
   "description": "Rise-X platform tooling for Claude Code and Cowork",
   "owner": { "name": "Rise-X", "url": "https://rise-x.io" },
   "plugins": [
-    { "name": "rise-x-mcp", "source": "./plugins/rise-x-mcp" }
+    { "name": "rise-x-mcp", "source": "./plugins/rise-x-mcp" },
+    { "name": "rise-x-apps", "source": "./plugins/rise-x-apps" }
   ]
 }

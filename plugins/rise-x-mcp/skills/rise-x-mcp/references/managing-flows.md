@@ -82,7 +82,7 @@ All structural and property changes require draft mode.
 
 **`publishStatus` enum** (the flow's publication lifecycle, mapped from `DianaPublishStatus`): `"Draft"` | `"Published"` | `"Revised"` | `"Deleted"`. A draft becomes `"Published"` on `publish_flow`. The previous published version transitions to `"Revised"`. A fifth value `"Publishing"` exists as a transient internal state during the publish flip — callers don't normally see it. Filter on `publishStatus` via `search_flows` to find e.g. all `"Draft"` flows in the ecosystem.
 
-**`publishMode` enum** (PascalCase; filterable via `search_flows` — see `references/advanced-search.md`): `"Default"` | `"UpdateOpenItems"` | `"DoNotUpdateOpenItems"`. Controls how a publish propagates to already-open items — and it gates **every** published config change (layouts, features, relationships, …), not just UI tabs. Work flows default to `"DoNotUpdateOpenItems"`: open works stay pinned to the flow version they were created on, so a published change is visible **only on works created after the publish** — always verify a published change against a fresh work item, never an existing one. Entity flows default to `"UpdateOpenItems"` (open items migrate to the new version on publish). Read it with `get_flow_config(id, path="properties.publishMode")`; change it with `update_flow_properties(draftId, {"publishMode": "UpdateOpenItems"})` **on a draft** (expect `changed: [publishMode]`), then publish.
+**`publishMode` enum** (PascalCase; filterable via `search_flows` — see `references/advanced-search.md`): `"Default"` | `"UpdateOpenItems"` | `"DoNotUpdateOpenItems"`. Controls how a publish propagates to already-open items — and it gates **every** published config change (layouts, features, relationships, …), not just UI tabs. Work flows default to `"DoNotUpdateOpenItems"`: open works stay pinned to the flow version they were created on, so a published change is visible **only on works created after the publish** — always verify a published change against a fresh work item, never an existing one. Entity flows default to `"UpdateOpenItems"` (open items migrate to the new version on publish). Read it with `get_flow_config(id, path="properties.publishMode")`; change it with `update_flow_properties(draftId, {"publishMode": "UpdateOpenItems"})` **on a draft** (expect `changed: [publishMode]`), then publish. This applies to card-layout fixes too: for an immediate repair on existing work items, publish with `"UpdateOpenItems"` or correct the affected works separately.
 
 **CRITICAL — Draft ID Rule:** `create_flow_draft` returns a **new draft ID**. All subsequent operations MUST use this draft ID, not the original. Editing the original published flow returns 403 Forbidden.
 
@@ -233,7 +233,7 @@ draftId = create_flow_draft(published_flow_id)
 features = get_flow_config(draftId, path="properties.flowFeatures")   # read-modify-write
 update_flow_properties(draftId, {
   "flowFeatures": {
-    "…existing sibling features…": {},
+    // Preserve every sibling feature returned by the read above.
     "leftPanel": {
       "tabs": [
         {"tab": "workflow"},
