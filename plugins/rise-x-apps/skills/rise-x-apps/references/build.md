@@ -110,7 +110,7 @@ import {
   getShellUser,
   getShellEnvironment,
   getShellApi,           // legacy Diana axios instance
-  getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment'
+  getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment' | 'asset'
   getShellAi,            // rise-x-ai gateway handle (bridge v3+), or null
   // Standalone dev
   createMockShell,
@@ -134,9 +134,9 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 
 | Connector | Domain | Key methods |
 | --- | --- | --- |
-| `flows` | flow discovery (read-only) | `list`, `get`, `findTask`/`findTaskIn`, `getConfig`, `getLayout`, `flattenLayoutFields` |
-| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `listRelated`, `getAudit` |
-| `assets` | typed records ("entities"/"things") | `types`, `get`, `search`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
+| `flows` | flow discovery (read-only) | `list` (**work flows only**), `get`, `findTask`/`findTaskIn`, `getConfig`, `getLayout`, `flattenLayoutFields` |
+| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `listRelated`, `getAudit` |
+| `assets` | typed records ("entities"/"things") | `types` (**asset-type flows**), `get`, `search`, `quickSearch`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
 | `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
 
 ```ts
@@ -155,9 +155,74 @@ await work.delete(created.id); // permanent, no server-side undo
 // origin id string). A concrete flow id here silently returns an empty list.
 for await (const row of work.iterate({ flow, maxItems: 100 })) { /* … */ }
 
+// Listing that needs each item's status, state, assignee or timestamps — or a
+// filtered/sorted slice — belongs on work.search (SDK >= 0.7.0), not on
+// list/iterate. The v4 index returns those ON the row, so you never fetch each
+// item to derive them (the N+1 that makes dashboards slow), and the filter tree
+// replaces client-side narrowing.
+// EVERY v4 search (work AND asset) MUST pin flowOriginId with equals/in, at
+// the top level or under `and` groups — an or-nested pin doesn't narrow and
+// is rejected too. Environment-wide search is not supported: the server 400s
+// on an unpinned search regardless of what else the filter says. The SDK
+// types `filter` as required on both for this reason.
+const page = await work.search({
+  filter: { and: [
+    // Required, always. `in` with several origin ids works too. Pin the
+    // RESOLVED origin id, never FLOW_REF — that may hold a concrete version id,
+    // which is a valid guid the index simply never matches (see below).
+    { field: 'flowOriginId', operator: 'equals', values: [flow.flowOriginId] },
+    // status values: Open/Closed/Completed/Deleted/Ok. Step-level values like
+    // 'InProgress' live on flowState — a DIFFERENT field; filtering status by
+    // them matches nothing.
+    { field: 'status', operator: 'in', values: ['Open'] },
+  ] },
+  // Projection. A `data.*` path resolves against the PINNED flow's schema and
+  // arrives under row.data with the `data.` prefix stripped.
+  fields: ['status', 'assignedUsers', 'statusDisplay', 'data.total'],
+  // sort and the createdBy/lastModifiedBy filters need a pinned search; on an
+  // older API build they may fail, so pin first before assuming they're broken.
+  sort: [{ field: 'created', direction: 'desc' }],
+  pageSize: 50,
+});
+// row.status / row.flowState / row.assignedUsers / row.created / row.workCode /
+// row.data — and row.statusDisplay carries the status label plus the active
+// step's roleName. page.hasMore drives the next page.
+// row.created / row.lastModified are ISO strings, but DATE VALUES INSIDE
+// row.data arrive as {date, ticks, offset} objects — use the .date property,
+// never new Date(row.data.x) directly.
+
 // Assets: prefer typeOriginId / the AssetType object over the type name.
 const supplier = (await assets.types()).find((t) => t.entityType === 'Supplier')!;
-const hits = await assets.search({ typeOriginId: supplier.flow!.flowOriginId, search: 'acme' });
+
+// assets.search (SDK >= 0.7.0) is the same v4 grammar as work.search, over the
+// asset index — every reason to prefer it over list/iterate applies here too.
+// It is also the indexed replacement for the v3 field search, which times out
+// on large types.
+// Same mandatory flowOriginId pin as work.search — see above.
+const assetPage = await assets.search({
+  filter: { and: [
+    { field: 'flowOriginId', operator: 'equals', values: [supplier.flow!.flowOriginId] },
+    // Asset status values: Open/Closed/Deleted ONLY. Work's Completed/Ok do not
+    // exist here, and filtering by them matches nothing.
+    { field: 'status', operator: 'equals', values: ['Open'] },
+    // startsWith, NOT contains: substring matching on work/asset strings is
+    // rejected with a 400 (see the operator restrictions below).
+    { field: 'displayName', operator: 'startsWith', values: ['acme'] },
+  ] },
+  // Projection: a `data.*` path must EXIST in the pinned flow's data schema or
+  // the request 400s naming the field (GET /api/v4/config/flow/{originId}/data-schema
+  // lists them). Bare `data` skips that check and returns the whole document.
+  fields: ['status', 'code', 'statusDisplay', 'data.supplier.rating'],
+  sort: [{ field: 'created', direction: 'desc' }],
+  pageSize: 50,
+});
+// row.code / row.entityType / row.status / row.created / row.data — same page
+// envelope as work.search. `id` and `status` come back on every row even when
+// `fields` omits them; other scalars drop out once `fields` is set.
+
+// Fuzzy type-ahead across display fields is the one thing search can't do —
+// that is assets.quickSearch (the v3 endpoint), and only for that.
+const hits = await assets.quickSearch({ typeOriginId: supplier.flow!.flowOriginId, search: 'acme' });
 
 const chat = agents.createChat({ agentId }); // memory is server-persisted
 // streamAgentReply does the loop + delta accumulation; each snapshot.text is the
@@ -189,6 +254,12 @@ const { data } = await apps.get('/api/v4/config/apps');
 
 **flowId vs flowOriginId.** A flow has one stable `flowOriginId` across versions plus a concrete `id` per published version — a bare "flow id" copied from a URL is usually the concrete one. `flows.get`/`getConfig` and `work.start` accept either and resolve to the latest published version, but `work.list`/`iterate` and `assets.list`/`iterate` filter strictly by origin id and return an **empty list, not an error**, when given a concrete id. When unsure, resolve first: `(await flows.get(ref)).flowOriginId`.
 
+**`flows.list()` lists WORK flows only; asset-type flows come from `assets.types()`.** The two listings are **disjoint** — neither is a superset, and neither enumerates "all flows", so don't treat either as exhaustive. Only `flows.get()`/`findTask()` resolve a flow of either kind by id. This bites when sourcing the mandatory `flowOriginId` search pin: a work origin id in `assets.search` (or an asset origin id in `work.search`) is a valid guid of the wrong flow family, so it matches nothing and returns an **empty page with no error**. Work pin → `flows.list()`; asset pin → `assets.types()` (`type.flow.flowOriginId`).
+
+**Search grammar limits** — identical for `work.search` and `assets.search`, since one server-side service backs both. The grammar's whole vocabulary is `equals`, `notEquals`, `in`, `notIn`, `contains`, `startsWith`, `endsWith`, `greaterThan`, `greaterThanOrEqual`, `lessThan`, `lessThanOrEqual`, `between`, `exists`, `notExists` — anything else 400s, so don't reach for SQL-ish spellings (`like`, `gt`, `>=`). **What a given field accepts is narrower than that, and knowing the list is not enough.** On work and asset search: **strings take `equals`/`notEquals`/`in`/`notIn`/`startsWith` only, and `contains`/`endsWith` are rejected with a 400** (unanchored regex is non-indexable, so they are allowed only on flow and company search); numbers and dates take equality and membership plus the four range operators and `between`; guid and array fields take equality and membership only; booleans take `equals`/`notEquals`. `data.*` string paths are cut back the same way as work/asset strings, on every resource. `exists`/`notExists` work on any field and take no `values`; `between` takes exactly two. **`pageSize` defaults to 25 and the server caps it at 100** — a larger value is clamped silently, so "fetch them all in one page" truncates with no error; page through `hasMore` instead. `hasMore` is always populated, an exact count is not: pass `includeTotalCount: true` to get `page.totalCount` when the UI shows "25 of 340", and leave it off otherwise — it runs a separate count facet over the whole match set on every request.
+
+**Filter tree shape.** A node is either a leaf (`field` + `operator` + `values`) or a group (`and` **or** `or`) — never both, and never both group keys on the same node. `{ field: 'status', …, and: [...] }` and `{ and: [...], or: [...] }` are each rejected with a message naming the problem; wrap the leaf in its own group, or nest one group inside the other. Group nesting is capped at **5 levels** — a sixth returns `Filter group nesting exceeds maximum depth of 5`. Hand-written filters never approach that; it bites filter-builder UIs that let a user add nested condition groups without bounding the depth. All three arrive as a `ConnectorError` with `code: 'HTTP_ERROR'` — the server rejects the request rather than silently dropping conditions.
+
 **Asset writes go through a draft work item** (the platform's edit model). `assets.create({ type })` and `assets.startEdit({ assetId, flowOriginId })` return the draft as a `WorkDetail` — fill it with `work.patchData()` and **save it with `work.submit()`**; nothing persists until the submit. An already-open draft is on `assets.get(id).draftWorkId` — resume it with `work.get()` instead of starting another. Asset types come from `assets.types()`; pass the whole `AssetType` (or its flow's origin id) as the `type` ref.
 
 All connector failures normalize to `ConnectorError` (`code: 'SHELL_UNAVAILABLE' | 'SHELL_TOO_OLD' | 'AI_UNAVAILABLE' | 'HTTP_ERROR' | 'NOT_FOUND' | 'NETWORK_ERROR' | 'ABORTED' | 'PARSE_ERROR' | 'INVALID_ARG'`). `agents.run`/`createChat` need bridge v3 (`getAi`) and an environment with the AI gateway enabled — handle `SHELL_TOO_OLD`/`AI_UNAVAILABLE` gracefully. Chat memory is server-persisted: clients only handle `chatId` (`useHistory` defaults true; `chatId` + `useHistory:false` → `INVALID_ARG`). `listChats`/`getChat`/`renameChat`/`deleteChat`/`getChatMessages` read the chat store at `/api/v4/ai/agent-chat`.
@@ -206,9 +277,10 @@ const submit = useSubmitWork(); // submit.mutate({ workId, actionName }) — inv
 ```
 
 Rules:
-- **Never mount a `QueryClientProvider` in the app.** Federated apps get a per-app client from the host; standalone/older shells fall back to a per-bundle client automatically.
+- **Never mount a `QueryClientProvider` with a client of your own** — that shadows the per-app client the shell mounts and breaks shell-managed caching. The SDK hooks need no provider at all: they pass the resolved client explicitly (host client when federated, per-bundle fallback standalone).
+- **If the app calls react-query directly, wrap it in `<AppQueryProvider>`** (SDK ≥ 0.7.0, from `@rise-x/apps-sdk/query`; the scaffold's `App.tsx` already does). Plain APIs — `useQuery(flowQueries.list(args))`, `useQueryClient()`, devtools — read the client from context, and standalone dev has no provider, so they throw *"No QueryClient set"* the moment you leave the SDK hooks. `AppQueryProvider` publishes the *resolved* client, so it re-publishes the host's client when federated and the fallback when standalone.
 - **Keep `'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' }` in the webpack `shared` block** (the scaffold has it, WITHOUT `import: false` — the bundled fallback is deliberate). Removing it breaks shell-managed caching.
-- Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
+- Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useWorkSearch/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetQuickSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
 - Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
 - Keys are environment-scoped (`['rise-apps-sdk', envId, …]`) — ecosystem switches refetch automatically; `queryKeys` is exported for targeted invalidation. Advanced react-query features (select/suspense/prefetch) go through the factories: `useQuery(flowQueries.list(args))`.
 - SSE streams (`agents.run`, chat `send`) and the async iterators stay on the connectors — don't wrap them in queries.
@@ -269,16 +341,70 @@ If you change which hooks are exported, ensure `webpack.config.js` still has `'.
 
 ### Standalone dev (outside the shell)
 
-The scaffolded `src/bootstrap.tsx` already calls `createMockShell` when the standalone-root div is present, so `pnpm start` Just Works for local iteration without running the full Diana shell.
+The scaffolded `src/bootstrap.tsx` already calls `createMockShell` when the standalone-root div is present, so `pnpm start` renders the app without running the full Diana shell.
 
-To customize the mock:
+**The mock has no backend.** Out of the box every connector call throws
+`SHELL_UNAVAILABLE`, so a data-backed screen renders only its empty / loading /
+error state locally — the content path (tables, charts, totals) never executes
+until the app is deployed into a host. That is how content-path rendering bugs
+reach production: standalone dev cannot see them, so their first real execution
+is in front of a user.
+
+**Seed `fixtures` so the real screens render before you deploy** (SDK ≥ 0.7.0).
+This matters most when building **outside the `rise-x-app` monorepo** — the
+common case — because there is no shell to run locally, which makes fixtures the
+only pre-deploy test of the data path.
 
 ```ts
 window.__DIANA_SHELL__ = createMockShell({
   user: { id: 'dev-user', name: 'Test User' },
   environment: { id: 'env-1', slug: 'dev', name: 'Dev Env' },
+  fixtures: {
+    // Rows are keyed by flowOriginId; '*' serves any flow. Served with the
+    // request's paging, so pagination and work.iterate() behave as they would live.
+    workRows: { '*': [{ id: 'w1', displayName: 'Q3 pricing review — Northline Industrial', workCode: 'PRC-2026-0184' }] },
+    // Both search fixtures are served only when the request pins flowOriginId —
+    // they reject an unpinned search exactly as the live endpoints do, so
+    // standalone dev cannot pass where every host would 400.
+    workSearch: [{ id: 'w1', workCode: 'PRC-2026-0184', status: 'Open', flowState: 'InProgress', created: '2026-01-31T09:14:00Z' }],
+    workDetail: { w1: { id: 'w1', displayName: 'Q3 pricing review — Northline Industrial', actions: [] } },
+    workData: { w1: { pricing: { rate: 1.425, currency: 'AUD' } } },
+    // assets.types() is its own key — seed it whenever the screen resolves an
+    // asset type before listing (the documented path).
+    assetTypes: [{ id: 't1', entityType: 'Pump', flow: { flowOriginId: 'origin-a' } }],
+    assetRows: { '*': [{ id: 'a1', displayName: 'Centrifugal pump 200mm — Bay 4' }] },
+    // assets.search() rows; paged with the request's page/pageSize.
+    assetSearch: [{ id: 'a1', displayName: 'Centrifugal pump 200mm — Bay 4', code: 'PMP-00184', status: 'Open', created: '2025-11-02T04:31:00Z' }],
+    assetDetail: { a1: { id: 'a1', displayName: 'Centrifugal pump 200mm — Bay 4' } },
+  },
 });
 ```
+
+Only seeded reads are served: an unseeded call throws `SHELL_UNAVAILABLE` naming
+the fixture key that would have answered it, and writes always throw. Both are
+deliberate — a mock that returned empty data, or pretended a write persisted,
+would make a broken app look like a working one.
+
+**Fixture data must look like real records, not `Item 1` / `foo` / `test`.** A
+placeholder row renders a layout that live data will break. Specifically:
+
+- **Real field names and shapes** — read an actual record via the Rise-X MCP or
+  the platform UI and copy its structure; invented shapes test the app against a
+  fiction.
+- **The server's own enum values** — `status: 'Open'` (work: Open/Closed/
+  Completed/Deleted/Ok; assets: Open/Closed/Deleted), step state on `flowState`.
+  A made-up `'active'` renders a badge that never appears in production.
+- **Plausible lengths and characters** — a name long enough to wrap or truncate,
+  a code with its real format, non-ASCII where the domain has it. Uniformly
+  short strings hide every overflow bug.
+- **ISO timestamps**, and dates inside `data` in the platform's
+  `{date, ticks, offset}` shape — otherwise date formatting is untested exactly
+  where it is most likely wrong.
+- **Enough rows to page** (more than one `pageSize`), plus at least one row with
+  optional fields **missing** — that is the row that crashes a naive `.map()`.
+
+To develop against a live backend instead, pass `api` / `apiV4` axios instances —
+see the SDK README's standalone-dev section.
 
 ### Persistence
 
@@ -352,7 +478,7 @@ manifest with the live `remoteUrl` and `module` (defaults to `./App`).
 
 Whether you scaffolded a new app or modified an existing one, the user can't see the change in the running Diana shell until the bundle is deployed. **Always finish the task with build + zip + the deploy question** — never claim "done" without it.
 
-1. **Verify the dev server still works.** `pnpm start` succeeds and the standalone app — rendering the real design system via the SDK's bundled snapshot — shows without console errors in the browser.
+1. **Verify the dev server still works.** `pnpm start` succeeds and the standalone app — rendering the real design system via the SDK's bundled snapshot — shows without console errors in the browser. For every data-backed screen, seed `fixtures` with **real-world-shaped** data (§Standalone dev) and confirm the **content** renders — rows, charts, totals — not just the empty state. A screen you have only ever seen empty is untested, and one you have only seen with `Item 1` placeholders is barely better; the deployed host is a customer environment, not a test bench.
 2. **Verify against the approved design.** Open the approved
    `design/<app>.v<n>.html` next to the running app and compare screen by
    screen — layout, spacing, states, dark mode, and the mobile frame if the

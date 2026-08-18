@@ -153,7 +153,7 @@ Initiates an edit workflow for an existing asset. Same response structure as `cr
 | Look up a single asset by its entity GUID | `get_asset(entity_id)` |
 | List one asset type's assets with simple paging only | `list_assets(flow_origin_id, …)` |
 
-**Do not** call `list_assets` and then filter or sort the result client-side — `search_assets` is a real filter / sort / projection engine, including dynamic `data.*` fields. Any `data.*` query needs a `flowOriginId` pin (the asset type's `flowOriginId` from `search_flows` or `list_asset_types`); discover the valid paths first with `get_flow_data_schema`. `contains` / `endsWith` are Flow-only — use `startsWith`. Asset `status` is `DianaEntityStatus` (`Open` / `Closed` / `Deleted`), not Work's states.
+**Do not** call `list_assets` and then filter or sort the result client-side — `search_assets` is a real filter / sort / projection engine, including dynamic `data.*` fields. Every `search_assets` query needs a `flowOriginId` pin on the AND-spine (the asset type's `flowOriginId` from `search_flows` or `list_asset_types`), not just `data.*` ones; for a `data.*` query, discover the valid paths first with `get_flow_data_schema`. `contains` / `endsWith` are Flow- and Company-only — use `startsWith`. Asset `status` is `DianaEntityStatus` (`Open` / `Closed` / `Deleted`), not Work's states.
 
 ### `get_asset(entity_id: str)`
 Full asset data including all properties, metadata, and workflow state.
