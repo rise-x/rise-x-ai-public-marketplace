@@ -155,8 +155,8 @@ Initiates an edit workflow for an existing asset. Same response structure as `cr
 
 **Do not** call `list_assets` and then filter or sort the result client-side — `search_assets` is a real filter / sort / projection engine, including dynamic `data.*` fields. Every `search_assets` query needs a `flowOriginId` pin on the AND-spine (the asset type's `flowOriginId` from `search_flows` or `list_asset_types`), not just `data.*` ones; for a `data.*` query, discover the valid paths first with `get_flow_data_schema`. `contains` / `endsWith` are Flow- and Company-only — use `startsWith`. Asset `status` is `DianaEntityStatus` (`Open` / `Closed` / `Deleted`), not Work's states.
 
-### `get_asset(entity_id: str)`
-Full asset data including all properties, metadata, and workflow state.
+### `get_asset(entity_id: str, format: "slim" | "full" = "slim")`
+Slim (the default) returns identity, state, permissions, publish status, relationships, and the asset's `data` — everything reading an asset needs. `format="full"` adds the surrounding work document (`workDraft`, `steps`, `flowProperties`, `users`, `cardLayout` …), 50-100x larger and rarely needed: `create_asset`/`edit_asset` responses already carry the edit orchestration fields.
 
 ### `list_assets(flow_origin_id: str, skip: int = 0, limit: int = 50)`
 Simple paginated list of one asset type's assets — `flowOriginId` from `search_flows` or `list_asset_types`. Returns the paginated envelope `{items, returned, skip, limit, hasMore, nextSkip}` (loop on `nextSkip` while `hasMore`). For any filter / sort / projection, use `search_assets`, not this.

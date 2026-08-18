@@ -17,7 +17,7 @@ release an app end-to-end from a Claude session, no manual zip upload through th
 | `request_bundle_upload()` | Step 1 of a deploy: returns a one-time `uploadUrl` + `uploadId` for staging the bundle zip |
 | `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id` |
 | `list_apps()` | Registry listing — `id`, `name`, `version`, `scope`, `remoteUrl`, `lastModified` per app |
-| `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`) |
+| `get_app(app_id)` | Manifest for one app (incl. `module`, `description`, `icon`); access lists (`users`/`companies`) are summarized to counts |
 | `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Does NOT touch the bundle |
 | `delete_app(app_id)` | Soft-delete from the registry (bundle blobs cleaned). Redeploying under the same id restores it |
 
