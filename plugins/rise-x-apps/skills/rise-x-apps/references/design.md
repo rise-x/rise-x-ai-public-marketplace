@@ -104,18 +104,26 @@ How to build the mock:
   SDK (`node_modules/@rise-x/apps-sdk/build/ui/demo.html`, or
   `packages/apps-sdk/build/ui/demo.html` in the rise-x-app monorepo): every
   `@rise-x/ui` component pre-rendered with its real markup and classnames,
-  linking its own complete stylesheet (`demo.css`, next to it — a superset of
-  `styles.css` that also styles the demo page's own layout; your mock still
-  inlines `styles.css`). It's the ground truth for
-  rendered HTML — copy markup straight from it rather than reconstructing it
-  by hand; every element carries `data-slot`.
-- **Fall back to the component source** for props or variants the demo
+  plus five complete screens (app layout, AI chat, dashboard, chart gallery,
+  activity log) as tabbed panels. Self-contained — its own stylesheet is
+  inlined (that one is for viewing the page; your mock still inlines
+  `styles.css`). It's the ground truth for rendered HTML — copy markup
+  straight from it rather than reconstructing it by hand.
+- **Navigate demo.html by its TOC, never by scanning.** The file opens with a
+  navigation guide and a JSON table of contents
+  (`<script type="application/json" id="demo-toc">`) listing every section,
+  every screen, and the `data-slot` components each section demonstrates —
+  read the first ~80 lines to get it. The markup below is pretty-printed, so
+  pick the section from the TOC, then grep `data-section="<id>"` (a screen:
+  `data-screen-panel="<id>"`; one component's markup anywhere:
+  `data-slot="<name>"`) and read from the matched line.
+- **Fall back to the component types** for props or variants the demo
   doesn't exercise
-  (`node_modules/@rise-x/apps-sdk/build/ui/reference/components/*`;
-  `packages/ui/src/components/*` in the rise-x-app monorepo). The stylesheet
-  contains utilities for every class used across both, so copied markup
-  renders pixel-identical to the implemented app either way. Never hand-roll
-  a look-alike of a component or restyle one.
+  (`node_modules/@rise-x/apps-sdk/build/ui/components/<name>.d.ts`;
+  `packages/ui/src/components/*` sources in the rise-x-app monorepo). The
+  stylesheet contains utilities for every class the design system uses, so
+  copied markup renders pixel-identical to the implemented app either way.
+  Never hand-roll a look-alike of a component or restyle one.
 - **Layout glue may be plain CSS** in the mock's own `<style>` block (page
   scaffolding, columns, spacing): the stylesheet only ships utilities used
   inside the design-system source, so mock-level utility classes won't apply
@@ -126,10 +134,9 @@ How to build the mock:
   "native-feel adaptation", include a mobile-width frame alongside the
   desktop one, so the user approves both.
 
-Component inventory (see them rendered in `build/ui/demo.html`; browse
-`node_modules/@rise-x/apps-sdk/build/ui/reference/components/` — or
-`packages/ui/src/components/` in the rise-x-app monorepo — for
-props/variants):
+Component inventory (see them rendered in `build/ui/demo.html`; for
+props/variants read `node_modules/@rise-x/apps-sdk/build/ui/components/*.d.ts`
+— or the `packages/ui/src/components/` sources in the rise-x-app monorepo):
 button, input (+numeric/field/action/group/affix), textarea, select, checkbox,
 radio, switch, slider, toggle, toggle-group, segmented, label, badge, avatar,
 card, table, data-table, list, nav, page-header, empty-state, statistic, chart,
