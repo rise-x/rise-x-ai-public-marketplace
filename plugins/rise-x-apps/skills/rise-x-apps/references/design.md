@@ -109,8 +109,13 @@ From **0.9.0** that composition is three primitives out of
 | `AppRail` | The left nav rail. With `mobileNav="tabs"` on the frame it becomes a bottom tab bar once the frame is narrow. |
 | `AppContent` | The one scrolling column. |
 
-Props are in `build/ui/components/app-frame.d.ts`. Before 0.9.0 none of them
-exist and the template hand-builds an `<aside>` rail instead.
+Props are in `node_modules/@rise-x/apps-sdk/build/ui/components/app-frame.d.ts`.
+Before 0.9.0 none of them exist and the template hand-builds an `<aside>` rail
+instead.
+
+Every `build/ui/...` path below is **inside the SDK package**, not your app:
+prefix it with `node_modules/@rise-x/apps-sdk/`, or with `packages/apps-sdk/`
+in the rise-x-app monorepo.
 
 **Version applicability.** `demo.html`, `classes.json`, the Tailwind preflight
 inside `styles.css`, and `AppFrame` all ship from
@@ -126,7 +131,8 @@ The relative path is deliberate: the bare specifier
 every SDK before 0.9.0, because the package's `exports` map has no entry for
 it. The failure reads like a broken install rather than an old version.
 
-On an older SDK: read markup from `build/ui/reference/components/*.tsx` (the
+On an older SDK: read markup from
+`node_modules/@rise-x/apps-sdk/build/ui/reference/components/*.tsx` (the
 component sources, shipped through 0.8.0), give the mock its own
 `box-sizing` reset, and hand-build the mobile tab bar. Everything below marked
 **0.9.0+** does not apply. Upgrading the SDK is usually the better move.
@@ -189,8 +195,8 @@ How to build the mock:
   doesn't exercise
   (`node_modules/@rise-x/apps-sdk/build/ui/components/<name>.d.ts`;
   `packages/ui/src/components/*` sources in the rise-x-app monorepo). Before
-  0.9.0, `build/ui/reference/components/<name>.tsx` ships the component source
-  itself and is the only markup you can read. The stylesheet contains
+  0.9.0, `node_modules/@rise-x/apps-sdk/build/ui/reference/components/<name>.tsx`
+  ships the component source itself and is the only markup you can read. The stylesheet contains
   utilities for every class the design system uses, so copied markup renders
   pixel-identical to the implemented app either way. Never hand-roll a
   look-alike of a component or restyle one.
@@ -214,7 +220,7 @@ How to build the mock:
   phone layout.
 
 Component inventory (**0.9.0+** for the rendered specimens in
-`build/ui/demo.html`, and for `app-frame` itself; for
+`node_modules/@rise-x/apps-sdk/build/ui/demo.html`, and for `app-frame` itself; for
 props/variants read `node_modules/@rise-x/apps-sdk/build/ui/components/*.d.ts`
 — or the `packages/ui/src/components/` sources in the rise-x-app monorepo):
 button, input (+numeric/field/action/group/affix), textarea, select, checkbox,

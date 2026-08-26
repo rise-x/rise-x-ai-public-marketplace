@@ -96,8 +96,9 @@ From **SDK >= 0.9.0** that composition is `AppFrame` / `AppRail` /
 `AppContent` from `@rise-x/apps-sdk/ui`: the frame is a CSS container, so the
 layout answers to the region the host gave the app rather than to the browser
 window, `AppRail` is the nav rail, and `AppContent` is the app's ONE scroller.
-Props are in `build/ui/components/app-frame.d.ts`. Earlier SDKs hand-build an
-`<aside>` rail in the template instead.
+Props are in `node_modules/@rise-x/apps-sdk/build/ui/components/app-frame.d.ts`
+(`packages/apps-sdk/...` in the rise-x-app monorepo). Earlier SDKs hand-build
+an `<aside>` rail in the template instead.
 
 ## Writing app code
 
