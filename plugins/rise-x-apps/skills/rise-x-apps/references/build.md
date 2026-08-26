@@ -92,7 +92,7 @@ the Nav primitives, PageHeader + content screens, no user UI). Build the app
 by extending it — add screens, swap the stubs for real content — and preserve
 its chrome composition; don't flatten it back to a bare component.
 
-From **SDK >= 0.9.0** that composition is `AppFrame` / `AppRail` /
+From **SDK >= 0.10.0** that composition is `AppFrame` / `AppRail` /
 `AppContent` from `@rise-x/apps-sdk/ui`: the frame is a CSS container, so the
 layout answers to the region the host gave the app rather than to the browser
 window, `AppRail` is the nav rail, and `AppContent` is the app's ONE scroller.
@@ -328,7 +328,7 @@ implement the mobile UX level chosen in the design phase (see
 `references/design.md` §2 and the app's `APP.md`); the no-top-bar rule holds
 at every width.
 
-**SDK >= 0.9.0: don't hand-roll that bar.** Set `mobileNav="tabs"` on
+**SDK >= 0.10.0: don't hand-roll that bar.** Set `mobileNav="tabs"` on
 `AppFrame` (the scaffold template already does) and `AppRail` renders it once
 the frame is narrow — icon over label, safe-area padding, and a **More** sheet
 for the overflow past a handful of destinations. The SDK README's AppFrame
