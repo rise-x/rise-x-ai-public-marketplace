@@ -31,6 +31,11 @@ The scaffolder writes a registry version for `@rise-x/apps-sdk` — change it to
 repo root so the app links to `packages/apps-sdk` directly. The repo's own
 git conventions apply — commit only when the user asks.
 
+**Move the approved mock in.** The design phase leaves it wherever the user
+was working; put it at `design/<app>.v<n>.html` inside the new app now. §Build
+and deploy checks the implementation against that path, and a mock left
+outside the app is one nobody finds again.
+
 **Outside the repo (partner project)** — scaffold wherever the user keeps
 their code; `@rise-x/apps-sdk` resolves from the registry, so keep the
 version the scaffolder writes:
@@ -86,6 +91,13 @@ The scaffolded `src/App.tsx` **is the canonical app layout** (left rail from
 the Nav primitives, PageHeader + content screens, no user UI). Build the app
 by extending it — add screens, swap the stubs for real content — and preserve
 its chrome composition; don't flatten it back to a bare component.
+
+From **SDK >= 0.9.0** that composition is `AppFrame` / `AppRail` /
+`AppContent` from `@rise-x/apps-sdk/ui`: the frame is a CSS container, so the
+layout answers to the region the host gave the app rather than to the browser
+window, `AppRail` is the nav rail, and `AppContent` is the app's ONE scroller.
+Props are in `build/ui/components/app-frame.d.ts`. Earlier SDKs hand-build an
+`<aside>` rail in the template instead.
 
 ## Writing app code
 
@@ -278,7 +290,7 @@ const submit = useSubmitWork(); // submit.mutate({ workId, actionName }) — inv
 
 Rules:
 - **Never mount a `QueryClientProvider` with a client of your own** — that shadows the per-app client the shell mounts and breaks shell-managed caching. The SDK hooks need no provider at all: they pass the resolved client explicitly (host client when federated, per-bundle fallback standalone).
-- **If the app calls react-query directly, wrap it in `<AppQueryProvider>`** (SDK ≥ 0.7.0, from `@rise-x/apps-sdk/query`; the scaffold's `App.tsx` already does). Plain APIs — `useQuery(flowQueries.list(args))`, `useQueryClient()`, devtools — read the client from context, and standalone dev has no provider, so they throw *"No QueryClient set"* the moment you leave the SDK hooks. `AppQueryProvider` publishes the *resolved* client, so it re-publishes the host's client when federated and the fallback when standalone.
+- **If the app calls react-query directly, wrap it in `<AppQueryProvider>`** (SDK >= 0.7.0, from `@rise-x/apps-sdk/query`; the scaffold's `App.tsx` already does). Plain APIs — `useQuery(flowQueries.list(args))`, `useQueryClient()`, devtools — read the client from context, and standalone dev has no provider, so they throw *"No QueryClient set"* the moment you leave the SDK hooks. `AppQueryProvider` publishes the *resolved* client, so it re-publishes the host's client when federated and the fallback when standalone.
 - **Keep `'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' }` in the webpack `shared` block** (the scaffold has it, WITHOUT `import: false` — the bundled fallback is deliberate). Removing it breaks shell-managed caching.
 - Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useWorkSearch/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetQuickSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
 - Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
@@ -315,6 +327,13 @@ implement the mobile UX level chosen in the design phase (see
 `references/design.md` §2 and the app's `APP.md`); the no-top-bar rule holds
 at every width.
 
+**SDK >= 0.9.0: don't hand-roll that bar.** Set `mobileNav="tabs"` on
+`AppFrame` (the scaffold template already does) and `AppRail` renders it once
+the frame is narrow — icon over label, safe-area padding, and past five
+destinations four tabs plus a **More** sheet. `moreLabel` on `AppRail`
+localises the label. On earlier SDKs there is no such rail and the bar is
+yours to build.
+
 ### Lifecycle hooks (`src/lifecycle.ts`)
 
 Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently. They run inside the shell page, so all the SDK accessors work from inside them.
@@ -350,7 +369,7 @@ until the app is deployed into a host. That is how content-path rendering bugs
 reach production: standalone dev cannot see them, so their first real execution
 is in front of a user.
 
-**Seed `fixtures` so the real screens render before you deploy** (SDK ≥ 0.7.0).
+**Seed `fixtures` so the real screens render before you deploy** (SDK >= 0.7.0).
 This matters most when building **outside the `rise-x-app` monorepo** — the
 common case — because there is no shell to run locally, which makes fixtures the
 only pre-deploy test of the data path.

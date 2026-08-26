@@ -12,7 +12,11 @@ Which sections apply:
 | You are | Read |
 | --- | --- |
 | Building a new app | All of it, in order: 1 interview, 2 mobile level, 3 integration, 4 mock. |
-| Adding a feature or redesigning a screen | 1 (confirm the problem and the affected screens only) and 4. Skip 2 unless the feature is mobile-specific, and skip 3 unless the feature needs a flow, asset or agent that doesn't exist yet. |
+| Adding a feature or redesigning a screen | 1 (confirm the problem and the affected screens only) and 4. Skip 2 and take the app's mobile UX level from its `APP.md`, unless the feature is mobile-specific. Skip 3 unless the feature needs a flow, asset or agent that doesn't exist yet. |
+| Migrating an app to the design system (`references/upgrade.md`) | 1 (what the screens do today and what is wrong with them) and 4, one mock per screen you migrate. Mobile level from `APP.md`; if the app has none, decide it with §2 and write it down. |
+
+`references/experience-principles.md` is not one of the numbered sections and
+is never skipped, on any of those paths.
 
 For a new app the output is: a problem statement the user confirmed, a list
 of integration targets (origin ids), an **explicitly approved** HTML design
@@ -96,36 +100,66 @@ scaffolded app it became `src/App.tsx`). It encodes the chrome contract — left
 Nav primitives on the page background, PageHeader + content screens, no user
 UI — and the mock follows the same composition.
 
+From **0.9.0** that composition is three primitives out of
+`@rise-x/apps-sdk/ui`, and the rest of this section names them:
+
+| Primitive | What it is |
+| --- | --- |
+| `AppFrame` | The app's whole region. A CSS container, so every breakpoint below answers to the width the app was given rather than to the browser window, and a phone-sized frame renders the phone layout even on a desktop screen. |
+| `AppRail` | The left nav rail. With `mobileNav="tabs"` on the frame it becomes a bottom tab bar once the frame is narrow. |
+| `AppContent` | The one scrolling column. |
+
+Props are in `build/ui/components/app-frame.d.ts`. Before 0.9.0 none of them
+exist and the template hand-builds an `<aside>` rail instead.
+
+**Version applicability.** `demo.html`, `classes.json`, the Tailwind preflight
+inside `styles.css`, and `AppFrame` all ship from
+**`@rise-x/apps-sdk` 0.9.0**. Check what the project actually has before
+relying on any of them:
+
+```bash
+node -p "require('@rise-x/apps-sdk/package.json').version"
+```
+
+On an older SDK: read markup from `build/ui/reference/components/*.tsx` (the
+component sources, shipped through 0.8.0), give the mock its own
+`box-sizing` reset, and hand-build the mobile tab bar. Everything below marked
+**0.9.0+** does not apply. Upgrading the SDK is usually the better move.
+
 How to build the mock:
 
 - **One self-contained HTML file per iteration.** Everything inlined — no
   external links, no dev server; the file opens from disk and is shareable
-  as-is. Version the output as `design/<app>.v<version>.html`, relative to the
+  as-is. Version the output as `design/<app>.v<n>.html`, relative to the
   app directory once one exists — before scaffolding, put it wherever the user
   is working and move it into the app's `design/` at scaffold time. Keep it
   out of `src/`.
 - **Inline the compiled design-system stylesheet** — `build/ui/styles.css`
-  in the SDK (Inter font embedded, Tailwind preflight included): from
-  `node_modules/@rise-x/apps-sdk/build/ui/styles.css`, or
-  `packages/apps-sdk/build/ui/styles.css` in the rise-x-app monorepo
-  (rebuild apps-sdk there if the design system changed). The preflight is what
-  gives the mock `box-sizing: border-box`, which a real host would provide —
-  don't add a reset of your own. `demo.html` inlines this same file, so markup
-  copied out of it renders in your mock exactly as it renders there.
-- **Copy markup from the design-system demo** — `build/ui/demo.html` in the
-  SDK (`node_modules/@rise-x/apps-sdk/build/ui/demo.html`, or
+  in the SDK, from `node_modules/@rise-x/apps-sdk/build/ui/styles.css`, or
+  `packages/apps-sdk/build/ui/styles.css` in the rise-x-app monorepo (rebuild
+  apps-sdk there if the design system changed). Inter is embedded, so this one
+  file is the mock's only dependency.
+  **0.9.0+:** it carries Tailwind preflight, which is what gives the mock
+  `box-sizing: border-box` the way a real host would — don't add a reset of
+  your own. Before 0.9.0 there is no preflight: put
+  `*,::before,::after{box-sizing:border-box}` in the mock's own `<style>`
+  block, or every padded `w-full` control renders wider than its container.
+- **Copy markup from the design-system demo** (**0.9.0+**) —
+  `build/ui/demo.html` in the SDK
+  (`node_modules/@rise-x/apps-sdk/build/ui/demo.html`, or
   `packages/apps-sdk/build/ui/demo.html` in the rise-x-app monorepo): every
   `@rise-x/ui` component pre-rendered with its real markup and classnames,
-  plus six complete screens (app layout, AI chat, dashboard, chart gallery,
-  mobile, activity log) as tabbed panels. Self-contained — its own stylesheet is
-  inlined (that one is for viewing the page; your mock still inlines
-  `styles.css`). It's the ground truth for rendered HTML — copy markup
-  straight from it rather than reconstructing it by hand.
-- **Navigate demo.html by its TOC, never by scanning.** The file opens with a
+  plus a set of complete screens as tabbed panels. The TOC names the screens;
+  don't assume a list. The page is self-contained **because it inlines
+  `styles.css`** — the same file your mock inlines, and that identity is the
+  whole point: markup copied out of the demo renders in your mock exactly as
+  it renders there. It's the ground truth for rendered HTML, so copy from it
+  rather than reconstructing by hand.
+- **Navigate demo.html by its TOC, never by scanning** (**0.9.0+**). The file opens with a
   navigation guide and a JSON table of contents
   (`<script type="application/json" id="demo-toc">`) listing every section,
   every screen, and the `data-slot` components each section demonstrates —
-  read the first ~80 lines to get it. The markup below is pretty-printed, so
+  read the file down to that script's closing `</script>` to get it. The markup below is pretty-printed, so
   pick the section from the TOC, then grep `data-section="<id>"` (a screen:
   `data-screen-panel="<id>"`) and read from the matched line.
   **Find the section first; a bare `data-slot` grep lands on the wrong
@@ -133,7 +167,7 @@ How to build the mock:
   theme toggle, and the first `data-variant="default"` is a badge, not a
   button. The TOC lists the slots each section demonstrates — that is what it
   is for.
-- **Take variant classes from `classes.json`, never splice them.** For a
+- **Take variant classes from `classes.json`, never splice them** (**0.9.0+**). For a
   combination the demo doesn't happen to render — a `default` button at size
   `sm`, say — read `build/ui/classes.json`
   (`node_modules/@rise-x/apps-sdk/build/ui/classes.json`;
@@ -149,10 +183,12 @@ How to build the mock:
 - **Fall back to the component types** for props or variants the demo
   doesn't exercise
   (`node_modules/@rise-x/apps-sdk/build/ui/components/<name>.d.ts`;
-  `packages/ui/src/components/*` sources in the rise-x-app monorepo). The
-  stylesheet contains utilities for every class the design system uses, so
-  copied markup renders pixel-identical to the implemented app either way.
-  Never hand-roll a look-alike of a component or restyle one.
+  `packages/ui/src/components/*` sources in the rise-x-app monorepo). Before
+  0.9.0, `build/ui/reference/components/<name>.tsx` ships the component source
+  itself and is the only markup you can read. The stylesheet contains
+  utilities for every class the design system uses, so copied markup renders
+  pixel-identical to the implemented app either way. Never hand-roll a
+  look-alike of a component or restyle one.
 - **Layout glue may be plain CSS** in the mock's own `<style>` block (page
   scaffolding, columns, spacing): the stylesheet ships the utilities the design
   system and the demo page use, not every utility that exists, so one you
@@ -166,17 +202,19 @@ How to build the mock:
   themes (a tiny inline toggle script in the mock is fine).
 - **Show the chosen mobile UX level.** For "distinct experiences" and
   "native-feel adaptation", include a mobile-width frame alongside the desktop
-  one, so the user approves both. The demo's **mobile** screen
-  (`data-screen-panel="mobile"`) is the ground truth for it: a real
+  one, so the user approves both. **0.9.0+:** the demo's **mobile** screen
+  (`data-screen-panel="mobile"`) is the ground truth for it — a real
   `AppFrame mobileNav="tabs"` at phone width, with the bottom tab bar, a
-  bottom sheet and thumb-sized rows.
+  bottom sheet and thumb-sized rows. Copy that markup rather than inventing a
+  phone layout.
 
 Component inventory (see them rendered in `build/ui/demo.html`; for
 props/variants read `node_modules/@rise-x/apps-sdk/build/ui/components/*.d.ts`
 — or the `packages/ui/src/components/` sources in the rise-x-app monorepo):
 button, input (+numeric/field/action/group/affix), textarea, select, checkbox,
 radio, switch, slider, toggle, toggle-group, segmented, label, badge, avatar,
-card, table, data-table, list, nav, page-header, empty-state, statistic, chart,
+card, table, data-table, list, nav, app-frame (0.9.0+), page-header,
+empty-state, statistic, chart,
 stepper, timeline, progress, skeleton, spinner, dialog, alert-dialog, sheet,
 popover, dropdown-menu, tooltip, alert, snackbar, sonner (toasts), message, ai,
 calendar, file-upload, scroll-area, resizable, separator.
@@ -190,10 +228,13 @@ Design rules (apply to the mock exactly as they apply to the app):
   background, never wrapped in a Card or Panel** (cards are for content, not
   chrome). Never a top bar: the host already renders its own top-bar
   navigation above every app. On mobile widths the native pattern is a
-  **bottom tab bar**, and the rail renders one for you: set
-  `mobileNav="tabs"` on `AppFrame` (the scaffold already does). Past five
-  destinations it keeps four and folds the rest behind **More** on its own.
-  Never hand-roll a tab bar — the no-top-bar rule holds at every width.
+  **bottom tab bar**, and the no-top-bar rule holds at every width.
+  **0.9.0+:** the rail renders that bar for you — the app sets
+  `mobileNav="tabs"` on `AppFrame`, which the scaffold template does, and past
+  five destinations the rail keeps four and folds the rest behind **More**
+  (the SDK README's AppFrame section owns the exact contract). A mock has no
+  props, so copy the rendered bar out of `data-screen-panel="mobile"` instead.
+  Before 0.9.0 there is no such rail and the bar has to be built by hand.
 - **No user/account UI anywhere in the app** — no avatar, no user name, no
   ecosystem label, no sign-out. The host top bar owns identity, in both the
   old and the new host.
@@ -205,23 +246,62 @@ Design rules (apply to the mock exactly as they apply to the app):
 ### Check the mock before you show it
 
 A screenshot scaled down to fit a pane cannot tell 0px of padding from 56px,
-and a control 22px wider than its container looks fine at that size. Before
-each iteration goes to the user, measure a handful of computed values in the
-browser and read the numbers:
+and a control 22px wider than its container looks fine at that size. Three
+failure modes hide behind a plausible screenshot: a class you invented that
+the stylesheet has no rule for, a component copied with a padding that
+renders as nothing, and a full-width control overflowing its parent. Two
+checks catch them, in this order.
 
-- `getComputedStyle(el).boxSizing` on any input inside a padded box — it must
-  be `border-box`, and the input's width must equal the container's inner
-  width. If it doesn't, the stylesheet didn't inline.
-- `paddingTop` / `paddingBottom` on a component you copied whole, against
-  what the demo shows for it.
-- The rendered height of anything you gave a size class to. Zero means the
-  class has no rule.
+**1. Every class has a rule.** Mechanical, no browser. Save this as
+`audit-mock.js` and run it against your mock and the stylesheet you inlined:
 
-Three failure modes hide behind a plausible screenshot, and each is invisible
-until measured: a class you invented that the stylesheet has no rule for, a
-component copied with a padding that renders as nothing, and a full-width
-control overflowing its parent. Grepping every class in the mock against
-`styles.css` catches the first before the browser does.
+```js
+const fs = require('fs');
+const [mock, css] = process.argv.slice(2).map((f) => fs.readFileSync(f, 'utf8'));
+const SPECIAL = ".[]()/%:#!'\"=&>+*~$^|@,";
+const MARKER = /^(group\/|peer\/|lucide(-|$)|recharts-)/; // markers, never styled
+const decode = (v) => v.replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+const styled = (t) => {
+  const sel = '.' + [...t].map((c) => (SPECIAL.includes(c) ? '\\' + c : c)).join('');
+  for (let i = css.indexOf(sel); i !== -1; i = css.indexOf(sel, i + 1)) {
+    const next = css[i + sel.length] || '';
+    if (!/[\w-]/.test(next) && next !== '\\') return true; // the selector ends here
+  }
+  return false;
+};
+const used = new Set();
+for (const [, v] of mock.matchAll(/class="([^"]*)"/g))
+  for (const t of decode(v).split(/\s+/)) if (t && !MARKER.test(t)) used.add(t);
+const missing = [...used].filter((t) => !styled(t));
+console.log(missing.length ? 'NO RULE: ' + missing.sort().join(', ') : 'every class has a rule');
+```
+
+```bash
+node audit-mock.js design/<app>.v1.html node_modules/@rise-x/apps-sdk/build/ui/styles.css
+```
+
+Anything it names renders unstyled. Either it is a utility you invented, which
+belongs in the mock's own `<style>` block as plain CSS, or you mistyped a
+class you copied. Two exceptions are expected and fine: markup copied from the
+demo's map or Ask Diana specimens is styled by leaflet's own sheet and by the
+host's globals, so it reports unstyled there too.
+
+**2. Measure, don't look.** Open the mock in the browser and read computed
+values rather than judging a scaled screenshot:
+
+```js
+const input = document.querySelector('input');
+getComputedStyle(input).boxSizing;                 // see below
+input.getBoundingClientRect().width;               // must equal the container's inner width
+getComputedStyle(el).paddingTop;                   // against what the demo shows for it
+el.getBoundingClientRect().height;                 // 0 means the size class has no rule
+```
+
+`boxSizing` reads `border-box` on **0.9.0+**, where the stylesheet carries
+preflight. On an older SDK it reads `content-box` even when the stylesheet
+inlined perfectly — that is the missing preflight, not a missing stylesheet,
+and the fix is the reset in the mock's own `<style>` block, not re-inlining.
 
 When approved, move to `references/build.md` — carry the approved mock, the
 screen list, the integration origin ids, and the persona/journey material
