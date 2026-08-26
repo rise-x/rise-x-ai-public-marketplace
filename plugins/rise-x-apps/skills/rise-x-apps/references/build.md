@@ -329,8 +329,9 @@ at every width.
 
 **SDK >= 0.9.0: don't hand-roll that bar.** Set `mobileNav="tabs"` on
 `AppFrame` (the scaffold template already does) and `AppRail` renders it once
-the frame is narrow — icon over label, safe-area padding, and past five
-destinations four tabs plus a **More** sheet. `moreLabel` on `AppRail`
+the frame is narrow — icon over label, safe-area padding, and a **More** sheet
+for the overflow past a handful of destinations. The SDK README's AppFrame
+section is the source of truth for that threshold and for `moreLabel`, which
 localises the label. On earlier SDKs there is no such rail and the bar is
 yours to build.
 

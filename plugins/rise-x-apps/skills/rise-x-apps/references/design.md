@@ -118,8 +118,13 @@ inside `styles.css`, and `AppFrame` all ship from
 relying on any of them:
 
 ```bash
-node -p "require('@rise-x/apps-sdk/package.json').version"
+node -p "require('./node_modules/@rise-x/apps-sdk/package.json').version"
 ```
+
+The relative path is deliberate: the bare specifier
+(`@rise-x/apps-sdk/package.json`) throws `ERR_PACKAGE_PATH_NOT_EXPORTED` on
+every SDK before 0.9.0, because the package's `exports` map has no entry for
+it. The failure reads like a broken install rather than an old version.
 
 On an older SDK: read markup from `build/ui/reference/components/*.tsx` (the
 component sources, shipped through 0.8.0), give the mock its own
@@ -195,9 +200,9 @@ How to build the mock:
   invent for the mock has no rule — write the layout as small custom CSS
   instead, and keep it to layout. Media-query utilities (`md:`) are worse than
   useless in a mock: they answer to the browser window, so a phone-width frame
-  on a desktop screen still gets desktop styles. `AppFrame` does not have that
-  problem — it is a CSS container and measures itself — so a mock frame sized
-  like a phone renders the real mobile layout.
+  on a desktop screen still gets desktop styles. `AppFrame` (**0.9.0+**) does not have
+  that problem — it is a CSS container and measures itself — so a mock frame
+  sized like a phone renders the real mobile layout.
 - **Dark/light**: tokens switch on the `dark` class on `<html>` — review both
   themes (a tiny inline toggle script in the mock is fine).
 - **Show the chosen mobile UX level.** For "distinct experiences" and
@@ -208,7 +213,8 @@ How to build the mock:
   bottom sheet and thumb-sized rows. Copy that markup rather than inventing a
   phone layout.
 
-Component inventory (see them rendered in `build/ui/demo.html`; for
+Component inventory (**0.9.0+** for the rendered specimens in
+`build/ui/demo.html`, and for `app-frame` itself; for
 props/variants read `node_modules/@rise-x/apps-sdk/build/ui/components/*.d.ts`
 — or the `packages/ui/src/components/` sources in the rise-x-app monorepo):
 button, input (+numeric/field/action/group/affix), textarea, select, checkbox,
@@ -230,10 +236,11 @@ Design rules (apply to the mock exactly as they apply to the app):
   navigation above every app. On mobile widths the native pattern is a
   **bottom tab bar**, and the no-top-bar rule holds at every width.
   **0.9.0+:** the rail renders that bar for you — the app sets
-  `mobileNav="tabs"` on `AppFrame`, which the scaffold template does, and past
-  five destinations the rail keeps four and folds the rest behind **More**
-  (the SDK README's AppFrame section owns the exact contract). A mock has no
-  props, so copy the rendered bar out of `data-screen-panel="mobile"` instead.
+  `mobileNav="tabs"` on `AppFrame`, which the scaffold template does, and it
+  folds the overflow behind **More** on its own once there are too many
+  destinations. The SDK README's AppFrame section owns that threshold; don't
+  restate it. A mock has no props, so copy the rendered bar out of
+  `data-screen-panel="mobile"` instead.
   Before 0.9.0 there is no such rail and the bar has to be built by hand.
 - **No user/account UI anywhere in the app** — no avatar, no user name, no
   ecosystem label, no sign-out. The host top bar owns identity, in both the
@@ -271,9 +278,16 @@ const styled = (t) => {
   return false;
 };
 const used = new Set();
-for (const [, v] of mock.matchAll(/class="([^"]*)"/g))
+for (const [, v] of mock.matchAll(/class=["']([^"']*)["']/g))
   for (const t of decode(v).split(/\s+/)) if (t && !MARKER.test(t)) used.add(t);
+// Parsing nothing must not read as passing: single-quoted markup, an empty
+// file and swapped arguments all land here.
+if (!used.size) {
+  console.error('no class attributes found in ' + process.argv[2]);
+  process.exit(2);
+}
 const missing = [...used].filter((t) => !styled(t));
+process.exitCode = missing.length ? 1 : 0;
 console.log(missing.length ? 'NO RULE: ' + missing.sort().join(', ') : 'every class has a rule');
 ```
 
@@ -296,8 +310,8 @@ getComputedStyle(input).boxSizing;                  // see below
 input.getBoundingClientRect().width;                // must equal the container's inner width
 
 const copied = document.querySelector('[data-slot="empty-state"]'); // any component you copied whole
-getComputedStyle(copied).paddingTop;                // against what the demo shows for it
-copied.getBoundingClientRect().height;              // 0 means a size class on it has no rule
+getComputedStyle(copied)?.paddingTop;               // against what the demo shows for it
+copied?.getBoundingClientRect().height;             // 0 means a size class on it has no rule
 ```
 
 `boxSizing` reads `border-box` on **0.9.0+**, where the stylesheet carries
