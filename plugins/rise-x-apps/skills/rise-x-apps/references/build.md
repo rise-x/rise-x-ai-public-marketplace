@@ -8,6 +8,7 @@
 | "Add a feature to app <x>" / "Use shell user/env in my app" | Skip bootstrap. If the feature adds or changes UI, design phase first (`references/design.md`, mock → approval); then edit files under the app's `src/` using the patterns below. |
 | "Wire installation behaviour" / "Migrate data on update" | Edit the app's `src/lifecycle.ts`. |
 | "Build/deploy the app" | `pnpm build` in the app folder, then deploy via the Rise-X MCP (default: **test**) — see Build and deploy. |
+| "Make the app work offline" | `src/lifecycle.ts`'s `onOfflineDownload`, plus offline-aware reads/writes — see `references/offline.md`. |
 
 ## Bootstrap a new app
 
@@ -138,6 +139,8 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 | `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `listRelated`, `getAudit` |
 | `assets` | typed records ("entities"/"things") | `types` (**asset-type flows**), `get`, `search`, `quickSearch`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
 | `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
+| `attachments` | work-attachment blobs | `getBlob`, `upload`, `delete` |
+| `offline` | connectivity, the offline queue, and downloads | see `references/offline.md` |
 
 ```ts
 // Connectors (preferred) — flows discovery, work items, assets, configurable agents.
@@ -268,6 +271,8 @@ All connector failures normalize to `ConnectorError` (`code: 'SHELL_UNAVAILABLE'
 
 For component data, **default to `@rise-x/apps-sdk/query`** (react-query v5 over the connectors) instead of hand-rolling `useState`/`useEffect` fetches — caching, dedupe, refetch, and abort come free. The raw connectors remain the tool for event handlers, lifecycle hooks, and non-React code.
 
+**Except on screens that must work offline** — the query hooks pause fetching while the browser is offline and never call the connector underneath, even though the connector would answer from cache. Call the connectors directly on those screens instead (`references/offline.md`).
+
 ```tsx
 import { useFlows, useWorkRows, useSubmitWork, dedupeRows } from '@rise-x/apps-sdk/query';
 
@@ -317,10 +322,10 @@ at every width.
 
 ### Lifecycle hooks (`src/lifecycle.ts`)
 
-Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently. They run inside the shell page, so all the SDK accessors work from inside them.
+Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently — except `onOfflineDownload`, which is user-initiated, may run minutes, and where throwing **fails the download** (see `references/offline.md`). They run inside the shell page, so all the SDK accessors work from inside them.
 
 ```ts
-import type { InstallHook, UpdateHook, UninstallHook } from '@rise-x/apps-sdk';
+import type { InstallHook, UpdateHook, UninstallHook, OfflineDownloadHook } from '@rise-x/apps-sdk';
 import localforage from 'localforage';   // or whatever you persist with
 
 export const onInstall: InstallHook = async ({ manifest, user, environment }) => {
@@ -337,7 +342,7 @@ export const onUninstall: UninstallHook = async ({ manifest }) => {
 };
 ```
 
-If you change which hooks are exported, ensure `webpack.config.js` still has `'./lifecycle': './src/lifecycle'` in `exposes` (the scaffolder includes it; never remove it).
+If you change which hooks are exported, ensure `webpack.config.js` still has `'./lifecycle': './src/lifecycle'` in `exposes` (the scaffolder includes it; never remove it) — `onOfflineDownload` rides the same export.
 
 ### Standalone dev (outside the shell)
 
@@ -348,7 +353,9 @@ The scaffolded `src/bootstrap.tsx` already calls `createMockShell` when the stan
 error state locally — the content path (tables, charts, totals) never executes
 until the app is deployed into a host. That is how content-path rendering bugs
 reach production: standalone dev cannot see them, so their first real execution
-is in front of a user.
+is in front of a user. The `offline` connector is the exception: its methods
+throw `SHELL_TOO_OLD` instead — the mock's `getOffline()` is null, and the
+connector maps a missing handle/method to that code (`references/offline.md`).
 
 **Seed `fixtures` so the real screens render before you deploy** (SDK ≥ 0.7.0).
 This matters most when building **outside the `rise-x-app` monorepo** — the
@@ -420,6 +427,10 @@ pnpm build                                    # produces dist/
 
 **Why zip the contents, not the `dist/` folder itself:** the deploy pipeline extracts the archive under the app's served path. `remoteEntry.js` must be at the archive root so the shell can fetch it at runtime.
 
+- **Clean `dist/` before `pnpm build`** when producing a bundle to deploy (`npx shx rm -rf dist` — cross-platform); webpack does not clean the directory, and stale content-hashed chunks otherwise ship inside the zip.
+- **A deploy is rejected (409) only when its version string equals the app's currently live version** — an exact-match check, no semver ordering, no history check — so bump deliberately every release rather than trusting the platform to enforce order.
+- **The shell's apps list is cached with a short `staleTime` (~10s) and a deploy does not invalidate it** — allow a few seconds (or refresh) before concluding the new version didn't take.
+
 When the bundle is ready, **ask the user whether to deploy**. Two paths:
 
 ### Preferred — deploy via the Rise-X MCP
@@ -432,12 +443,16 @@ environment-orchestrator role.
 
 1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
 2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
-3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` —
+3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` —
    omit `app_id` for a brand-new app (a GUID is generated and returned); pass
    the existing GUID to release a new version. `version` comes from the app's
-   `package.json` and must be unique per app — bump it every release.
-   `app_scope` is snake_case and **must match the `name` set by the app's
-   webpack `ModuleFederationPlugin`**.
+   `package.json`; a deploy is rejected (409) only when it exactly equals the
+   app's currently live version — no ordering or history check — so bump it
+   every release anyway, as recommended practice. `app_scope` is snake_case and
+   **must match the `name` set by the app's webpack `ModuleFederationPlugin`**.
+   `feature_flags` is an optional `dict` of app feature flags, e.g.
+   `{"isOfflineModeEnabled": true}` — what makes the shell offer "Make
+   available offline" (see `references/offline.md`).
 
 The result carries the app `id` and the canonical manifest (`remoteUrl`,
 `version`, `scope`, `deployedAt`). Confirm the app loads in the shell after.

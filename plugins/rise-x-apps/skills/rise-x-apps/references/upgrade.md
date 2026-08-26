@@ -53,7 +53,9 @@ user rather than guessing.
    system and get explicit approval before rebuilding. A component-library
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
-   in components; `/connectors` in event handlers and lifecycle hooks.
+   in components; `/connectors` in event handlers and lifecycle hooks. If the
+   app must work offline, keep direct connector calls on those screens instead
+   — the query hooks pause while the browser is offline (`references/offline.md`).
 5. **Add the docs the template now ships:** `APP.md` (see above), `AGENTS.md`,
    and the one-line `CLAUDE.md` pointer — copy the shape from the SDK's
    `template/` directory (`node_modules/@rise-x/apps-sdk/template/`;

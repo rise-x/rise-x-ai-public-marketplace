@@ -17,11 +17,16 @@ covers that alone (§6). Not needed while merely scaffolding a new app — that'
 (`references/build.md`); come back to this reference once the scaffold exists and the plan asks for
 offline support specifically.
 
-**The build, in order.** Each numbered step is a section below; doing them out of order is how the
-unrecoverable mistakes happen (a published flow's flags are frozen, §2):
+Offline support also requires a platform release that carries it. On an older host, the offline
+connector methods throw `ConnectorError("SHELL_TOO_OLD", …)` and the app card shows no "Make available
+offline" action — there is nothing further to configure your way around. This reference assumes a host
+that has it.
 
-1. **Flow prep first** (§2) — the offline flag pre-publish (frozen at publish), and quick submit on
-   every action the app will submit (layout config — changeable in later flow versions).
+**The build, in order.** Each numbered step is a section below; the sections are organised by
+subsystem; this list is the execution order.
+
+1. **Flow prep first** (§2) — the offline flag via the flow draft cycle, and quick submit on the panel
+   config of every task the app submits from (layout config — changeable in later flow versions).
 2. **The app-level flag** (§2) — plan to pass `feature_flags: {"isOfflineModeEnabled": true}` on
    `deploy_app`, or set it later via `update_app`.
 3. **Screens** (§4, §5) — reads through connectors called directly (not the query hooks — §8, gap 6),
@@ -30,7 +35,7 @@ unrecoverable mistakes happen (a published flow's flags are frozen, §2):
    offline to an empty world.
 5. **Freshness and queue visibility** (§6, §7) — browser connectivity events, one Refresh control,
    the pending-edits overlay.
-6. **Prove it** (§9, "Prove it works") — five checks against the deployed test environment.
+6. **Prove it** (§9, "Prove it works") — six checks, the deployed test environment and the mock shell.
 7. **Deploy** (§10) — including confirming the flags actually shipped.
 
 ## 1. What offline means here
@@ -43,6 +48,8 @@ you reach for a function.
 | **Code** | The app's bundle — `remoteEntry.js` + chunks — cached read-only so a cold reload with no network still boots the app | The shell's download orchestrator + a service-worker route. Not app-facing. |
 | **Data** | Flow config, layouts, works, attachments, and every queued-but-unsent write | The connectors (`work`, `flows`, `attachments`, `offline`) from `@rise-x/apps-sdk` — this is what your app code calls |
 | **Availability** | Whether a download is actually complete and intact right now | Derived on every check, never a stored flag — storage can be evicted without telling the app |
+
+Asset-backed screens are online-only today — §8, gap 7.
 
 A download for an offline-enabled app captures three artifacts, in order: the app **manifest**
 (`remoteUrl` + `featureFlags`), a **file listing** enumerating every chunk the bundle needs, and the
@@ -128,25 +135,33 @@ and let the connectors carry everything your running UI does.
 
 ## 2. Prepare the flow + app
 
-**Set the flow's offline flag before the first publish, not after.** `PATCH
-/api/v4/config/flow/{id}/properties` only applies a `featureFlags` update to a **draft** flow —
-the platform strips every property except
-`Id`/`DisplayName`/`Description`/`ImageUrl`/`Icon` from a patch targeting an **already-published**
-flow, silently. If you need to change it on a published flow, there is no follow-up-patch path — get
-it right pre-publish. The bag itself is a plain `string → bool` dictionary on the flow's properties —
-the key is exactly `isOfflineModeEnabled` — and it is shared with unrelated flags the platform seeds
-(`UseCompletedName`, …), so inspect what is already in it rather than assuming it is empty.
+**The flow's offline flag is set through the flow draft cycle, not a one-shot pre-publish edit.**
+`create_flow_draft` → `update_flow_properties(draftId, { featureFlags: … })` → `publish_flow` — the
+`rise-x-mcp` plugin documents the cycle, and it is the only path that sticks. `PATCH
+/api/v4/config/flow/{id}/properties` only applies a `featureFlags` update to a **draft** flow id; a
+properties update aimed at an already-**published** flow id silently strips everything except identity
+fields at the REST layer, and — via the MCP — surfaces as a `dropped_property` warning with
+`changed: []`. So always target a draft: to change the flag later, open a new draft off the published
+flow, patch that draft's id, then publish again. The bag itself is a plain `string → bool` dictionary on
+the flow's properties — the key is exactly `isOfflineModeEnabled` — and it is shared with unrelated
+flags the platform seeds (`UseCompletedName`, …), so inspect what is already in it and send the bag
+complete rather than assuming it is empty.
 
-**Configure quick submit on every action your app will submit offline.** `quickSubmit` is a
-client-side contract — the server never reads it. The work page auto-submits a quick-submit action,
-but routes a non-quick-submit one through a recipient-picker drawer, and the only guard against an
-empty recipient list lives in that drawer's submit hook. `offline.queueWorkAction` (§5) resolves the
-configured invitees itself and **bypasses that guard entirely**, so a non-quick-submit action whose
-config resolves nobody queues fine and syncs with an empty recipient list — and nothing rejects it:
-there is no server-side validation, so what comes back is an invitation naming nobody, or — when the
-step restricts the action to a `PartyName` (a flow-config role) — §5's silent `200` no-op. Quick submit makes the picker-less path the action's *configured* contract, which
-is why it belongs on every action an app submits; where a flow's config resolves nobody for an action
-you must submit anyway, pass `recipients` (§5).
+**Quick submit is a task-level switch, not a per-action one.** `quickSubmit` lives on the `panelConfig`
+of a step/task in the flow config document, and the shell's toolbar checks it once per task — not per
+action; the clicked action's own config is never consulted by that gate. There is no flow-builder UI
+control for it today, so it is set on the flow document directly. `quickSubmit` is a client-side
+contract — the server never reads it (verified against the shell's submit path). The work page
+auto-submits when the task is quick-submit, but routes a non-quick-submit task through a
+recipient-picker drawer, and the only guard against an empty recipient list lives in that drawer's
+submit hook. `offline.queueWorkAction` (§5) resolves the configured invitees itself and **bypasses that
+guard entirely**, so submitting from a non-quick-submit task whose action config resolves nobody queues
+fine and syncs with an empty recipient list — and nothing rejects it: there is no server-side
+validation, so what comes back is an invitation naming nobody, or — when the step restricts the action
+to a `PartyName` (a flow-config role) — §5's silent `200` no-op. Quick submit makes the picker-less path
+the task's *configured* contract, which is why it belongs on the panel config of every task the app
+submits from; where a flow's config resolves nobody for an action you must submit anyway, pass
+`recipients` (§5).
 
 **The app-level flag is a deliberate step at deploy time**: pass
 `feature_flags: {"isOfflineModeEnabled": true}` to `deploy_app` (it survives redeploys), or set it on
@@ -170,24 +185,23 @@ chunks. Without your own hook, an offline-enabled app opens offline to an empty 
 import type { OfflineDownloadHook } from "@rise-x/apps-sdk";
 
 export const onOfflineDownload: OfflineDownloadHook = async (_ctx, { offline, reportProgress }) => {
-  const result = await offline.downloadFlowWorks({ flowOriginId: FLOW_ORIGIN_ID });
+  const result = await offline.downloadFlowWorks({
+    flowOriginId: FLOW_ORIGIN_ID, // flowOriginId — app config
+  });
   reportProgress({ processed: result.total, total: result.total });
 };
 ```
 
-If you don't have the origin id hardcoded, resolve it by searching first, and throw rather than
-silently skip if it isn't found:
+The flow reference is app config, recorded once at integration time — not something to resolve by
+searching flow names at runtime, since a shipped app that hardcodes a flow's display name breaks the
+moment a user renames the flow:
 
 ```ts
-import { flows } from "@rise-x/apps-sdk/connectors"; // module-level, not part of the hook's tools arg
-
-export const onOfflineDownload: OfflineDownloadHook = async (_ctx, { offline, reportProgress }) => {
-  const [flow] = await flows.list({ search: "My Flow" });
-  if (!flow) throw new Error("My Flow not found — cannot download offline data");
-  const result = await offline.downloadFlowWorks({ flowOriginId: flow.flowOriginId, flowId: flow.id });
-  reportProgress({ processed: result.total, total: result.total });
-};
+const FLOW_ORIGIN_ID = "…"; // flowOriginId — app config, recorded at integration time
 ```
+
+`downloadFlowWorks` (§5) already throws when any work in the flow fails to pull, so the hook fails
+loudly on its own — there is no separate lookup step that could silently skip a missing flow.
 
 - The shell calls this **after** the app's own bundle is already fully cached — the hook's own code
   (and anything it imports) is already running from the offline copy by the time it executes.
@@ -203,9 +217,10 @@ export const onOfflineDownload: OfflineDownloadHook = async (_ctx, { offline, re
 - **Throwing fails the whole download.** Unlike `onInstall`/`onUpdate`/`onUninstall` — fire-and-forget
   reconciliation the shell runs behind a short timeout and swallows errors from — this hook is
   user-initiated, can legitimately run minutes, and its failure is reported to the user as "not
-  available offline." Don't catch and swallow just to report success on partial data — a missing flow
-  should throw loudly, the way the second example above does, rather than silently reporting success on
-  an empty pull. The bundle stays cached regardless, so a retry only redoes the data pull.
+  available offline." Don't catch and swallow just to report success on partial data — a failed pull
+  should throw loudly (the way `downloadFlowWorks` itself does on a failed work, §5) rather than
+  silently reporting success on an empty or partial pull. The bundle stays cached regardless, so a retry
+  only redoes the data pull.
 - `ctx` is a **snapshot at invocation** — `{ manifest: { id, version, name }, user, environment }` —
   taken when the hook starts; a pull that runs minutes does not see a mid-flight user or environment
   switch through it.
@@ -302,23 +317,26 @@ tracking that is your app's own job:
 // TODAY — the only option: keep your own optimistic copy alongside the read.
 const [pendingEdits, setPendingEdits] = useState<Record<string, unknown>>({});
 
-function submitQty(workId: string, dataPath: string, value: unknown) {
+async function submitQty(workId: string, dataPath: string, value: unknown) {
   const { writeMode } = offline.getWorkSyncStatus(workId);
   if (writeMode === "queued") {
     offline.queueWorkDataUpdate({ workId, dataPath, value });
-    setPendingEdits((prev) => ({ ...prev, [dataPath]: value })); // your own overlay
+    setPendingEdits((prev) => ({ ...prev, [`${workId}:${dataPath}`]: value })); // your own overlay
   } else {
     // originId (required) = the work's flowOriginId; the data key is `path`, not `dataPath` (§5).
-    void work.patchData(workId, { originId, path: dataPath, value });
+    const originId = (await work.get(workId))?.flowOriginId;
+    if (!originId) throw new Error(`work ${workId} not found`);
+    await work.patchData(workId, { originId, path: dataPath, value });
   }
 }
 
-// Render: value shown = pendingEdits[dataPath] ?? (await work.getData(workId, { path: dataPath }))
+// Render: value shown = pendingEdits[`${workId}:${dataPath}`] ?? (await work.getData(workId, { path: dataPath }))
 ```
 
-Reconcile `pendingEdits` by clearing an entry once `listQueuedWorkOperations({ workId })` no longer
-contains a queued item you queued for that path, or once `getWorkSyncStatus(workId).allSynced` is
-`true` for that work, then re-fetch to confirm the server's value.
+The only workable reconciliation signal is per-work, not per-path: clear a work's `pendingEdits` entries
+once `getWorkSyncStatus(workId).allSynced` flips `true`, then re-fetch to confirm the server's value.
+There is no per-path signal — `listQueuedWorkOperations` summaries carry no payload to match against a
+path, and the queue methods return nothing to correlate by.
 
 ## 5. Write
 
@@ -329,7 +347,7 @@ write-side counterpart.
 `work.patchData`, `work.submit`, `attachments.upload`, `attachments.delete` are **network-only** — they
 throw (via `ConnectorError`) if the request fails and do not know how to queue. Calling one while
 offline is a caller error, not a supported path. `offline.queue*` methods are the queued counterparts.
-On a host with no offline support at all, every one of them (except `isOnline()`, §6) throws
+On a host with no offline support at all, every one of them (except `isOnline()`, §5) throws
 `ConnectorError("SHELL_TOO_OLD", …)` rather than a bare `TypeError` — the connector does this
 feature-detection for you, so don't probe the host for offline support yourself.
 
@@ -337,9 +355,13 @@ feature-detection for you, so don't probe the host for offline support yourself.
 
 ```ts
 const { writeMode } = offline.getWorkSyncStatus(workId);
-writeMode === 'queued'
-  ? offline.queueWorkDataUpdate({ workId, dataPath, value })          // preserves order
-  : await work.patchData(workId, { originId, path: dataPath, value }); // clear to send
+if (writeMode === "queued") {
+  offline.queueWorkDataUpdate({ workId, dataPath, value }); // preserves order
+} else {
+  const originId = (await work.get(workId))?.flowOriginId;
+  if (!originId) throw new Error(`work ${workId} not found`);
+  await work.patchData(workId, { originId, path: dataPath, value }); // clear to send
+}
 ```
 
 That is the entire decision. Never add an `if (online)` of your own next to it, and never cache
@@ -349,13 +371,13 @@ reconnect), and reading it once at mount or holding it across an await reorders 
 silently. The flag qualifier is also where a §2 misconfiguration finally surfaces: offline on a flow
 *without* the flag reads `'direct'`, so the write goes to the network and fails instead of queueing.
 
-### Every `offline` queue method, exact signature
+### Every `offline` connector method, exact signature
 
 | Method | Signature | Notes |
 |---|---|---|
 | `isOnline()` | `(): boolean` | The one method that answers rather than throwing on a host with no offline support — `true` there. |
 | `getWorkSyncStatus(workId)` | `(workId: string): WorkSyncStatus` | `{ writeMode: 'direct' \| 'queued', hasPendingItems, syncProgress, hasError, allSynced }`. Read immediately before every write — never once at mount. |
-| `listQueuedWorkOperations(args?)` | `(args?: { workId?: string; kind?: QueuedWorkOperationKind }): QueuedWorkOperation[]` | Summaries only: `{ id, kind, workId, queuedAt, isSynced }`. `kind` is one of `workCreation \| dataUpdate \| attachmentUpload \| attachmentDeletion \| actionExecution \| attachmentTitleUpdate`. **No payload** — see §4's overlay recipe. Newest last — the order replay follows. |
+| `listQueuedWorkOperations(args?)` | `(args?: { workId?: string; kind?: QueuedWorkOperationKind }): QueuedWorkOperation[]` | Summaries only: `{ id, kind, workId, queuedAt, isSynced }`. `kind` is one of `workCreation \| dataUpdate \| attachmentUpload \| attachmentDeletion \| actionExecution \| attachmentTitleUpdate` — `attachmentTitleUpdate` is produced only by the shell's own attachment UI, observable here but not producible from this connector. **No payload** — see §4's overlay recipe. Newest last — the order replay follows. |
 | `queueWorkDataUpdate(args)` | `(args: UpdateWorkDataArgs): void` | **Synchronous.** No await, no `.then`. |
 | `queueWorkAction(args)` | `(args: ExecuteWorkActionArgs): void` | **Synchronous.** See "Submitting" below. |
 | `queueWorkCreation(args)` | `(args: CreateWorkArgs): { workId: string; code: string }` | **Synchronous — returns the result directly, not a Promise.** Builds an `OFFLINE-…`-coded stub locally; `workId` is real and stable immediately and stays stable after sync (only `code` swaps off `OFFLINE-…`). Pass `workCode` to use a caller-chosen code instead — see "Custom work codes" below. |
@@ -367,9 +389,10 @@ silently. The flag qualifier is also where a §2 misconfiguration finally surfac
 | `downloadFlowWorks(args)` | `(args: DownloadFlowWorksArgs): Promise<DownloadFlowWorksResult>` | `{ flowOriginId, flowId? }` → `{ total, failedWorkIds }`. **Throws when any work fails** — on resolve, every work landed and `failedWorkIds` is empty. Omit `flowId` and the shell resolves the current version. |
 | `getFlowWorksDownloadInfo(flowOriginId)` | `(flowOriginId: string): FlowDownloadInfo` | `{ status: 'idle'\|'preparing'\|'downloading'\|'done'\|'error', downloadedAt: number \| null, processed, total }` — `processed`/`total` count works for the run in flight (both `0` when idle). Derived, not stored — recomputed from the cache each call. |
 
-Only `queueWorkAttachmentUpload` is genuinely async; awaiting one of the synchronous ones is harmless
-but writing `.then()` on one is a bug your type-checker won't catch if you've cast loosely — the return
-type is the tell.
+Among the `queue*` methods only `queueWorkAttachmentUpload` is async; `requestSync` and
+`downloadFlowWorks` are also promise-returning. Awaiting one of the synchronous `queue*` methods is
+harmless but writing `.then()` on one is a bug your type-checker won't catch if you've cast loosely —
+the return type is the tell.
 
 ### Data updates: `dataPath`, `value`, and the two write shapes' asymmetry
 
@@ -381,7 +404,7 @@ stored and read back exactly as passed — nothing coerces it. Numeric inputs co
 it for you from the work. `work.patchData`'s `WorkDataPatch.originId` on the exact same field is
 **required** — it is a thin wrapper over the raw `PATCH /api/v4/work/{id}/data` body with no
 shell-side resolution, so a `'direct'`-routed write needs you to supply it yourself (read it off
-`work.get(workId).flowOriginId` first if you don't already have it). Writing one branch as if it
+`(await work.get(workId))?.flowOriginId` first if you don't already have it). Writing one branch as if it
 mirrored the other's defaulting is a real trap the `writeMode` split invites.
 
 **The task-node argument.** Every queue method takes the same optional `sectionId`, authorized against a
@@ -448,7 +471,7 @@ Queued, `offline.queueWorkAction({ workId, actionId })` — and that is the whol
 resolves everything else off the cached work: event name, step name, the task node, the queue-row
 label, and the configured invitees (resolved against current work data, exactly as the work page
 does). An `actionId` the work does not have **throws at the call site** rather than queueing a
-malformed replay — so read the actions fresh (`work.get(workId).actions[].id`) instead of holding
+malformed replay — so read the actions fresh from `(await work.get(workId)).actions` instead of holding
 them across renders; a stale render's id may already be gone.
 
 - `recipients?` overrides only `to`/`cc` per destination. Supply it **only** when the flow config
@@ -497,7 +520,9 @@ the new attachment's id immediately after upload; re-fetch first.
 online. `offline.queueWorkAttachmentDeletion({ workId, id, fileName, folder, mimeType })` needs four
 more fields queued — there is no shell-side lookup that backfills them the way `patchData`'s `originId`
 gets defaulted on the queued data-update path. Read them off the attachment record you already have
-before queuing.
+before queuing — except `folder`, which has no field of its own on the record: pass the record's `path`
+value as `folder`, verbatim. The stored `path` IS the sanitized folder string the shell matches
+components on (see Folder binding, below).
 
 **Folder binding — exact-match, case-sensitive, and not an online/offline divergence.** An upload is
 visible in an Attachments/AttachmentsGrid layout component **if and only if** the `folder` your app
@@ -561,7 +586,8 @@ by design and will hit the server rather than hand back a stale local copy.
 request is posted ("asked", not drained: it does not even wait for the attempt), and it silently
 no-ops while offline or before a session exists. There is no bridge method that guarantees — or even
 observes — a sync completing synchronously with your call; poll `getWorkSyncStatus` (via the Refresh
-pattern in §6) for the outcome.
+pattern in §6) for the outcome. Surface `getWorkSyncStatus(workId).hasError` in the Refresh control —
+true means a sync attempt failed and the queue still holds the items.
 
 `offline.listQueuedWorkOperations(args?)` returns **summaries** — `{ id, kind, workId, queuedAt,
 isSynced }`, newest last, the order replay follows — with no payload. If your UI needs to show *what*
@@ -583,8 +609,9 @@ what's missing, the workaround, and what a fix would look like.
    `taskName` (e.g. `"Task_1"`) — `flows.get()` only gives step names (`"Step_1"`, and passing one
    throws `Task Step_1 not found in flow <name>`), and
    `flows.getConfig()` maps a task's `name` to a `taskDisplayName` ("Task 1"), also wrong. Workaround:
-   read the raw cached flow POCO — `getShell().getCache().readFlow(flowId).steps[].taskName` — falling
-   back online to `getShellApiV4('config').get('/api/v4/config/flow/{flowId}')`. Fix would look like:
+   read the raw cached flow POCO — the `taskName` on each step node of
+   `getShell().getCache().readFlow(flowId)` — falling back online to
+   `getShellApiV4('config').get('/api/v4/config/flow/{flowId}')`. Fix would look like:
    `FlowConfigTask` carrying the internal `taskName` alongside the display name.
 
 3. **An app can't discover a component's folder through the typed surface.** `LayoutComponent` (from
@@ -617,6 +644,14 @@ what's missing, the workaround, and what a fix would look like.
    `networkMode: 'always'` in `createAppQueryClient` — the read ladder already routes connectivity
    itself, so pausing above it only prevents answers.
 
+7. **Asset-backed screens have no offline support at all.** The asset-draft pattern
+   (`assets.create`/`assets.startEdit` → `work.patchData` → `work.submit`) is network-only end to end —
+   nothing seeds the offline cache for the draft, entity flows are served by a separate API family the
+   offline download never touches, and there is no queue or download primitive for assets.
+   Workaround: treat asset screens as online-only and gate them on `offline.isOnline()` with an explicit
+   offline empty-state. Fix would look like: offline cache seeding and queueing for asset drafts and
+   their entity-flow config.
+
 ## 9. Dev and test loops
 
 Where things live — apps have two homes, and the offline surface is identical in both:
@@ -632,25 +667,27 @@ Two loops — see `references/build.md` for the scaffolding both assume:
 
 - **Standalone** (`pnpm start`, `createMockShell()`): instant rebuilds, but the mock shell returns
   `null` from `getOffline()` and has no cache wired — nothing offline-related is real here, only layout
-  and pure UI. Connector calls that need offline support throw `SHELL_TOO_OLD` down this path, which is
-  itself worth testing (your error/empty-state handling).
+  and pure UI. The two failure modes are distinct: OFFLINE connector methods (`offline.*`) throw
+  `SHELL_TOO_OLD` down this path — the offline connector maps a missing handle or method to that code —
+  while other connector calls fail with the mock's general no-backend behaviour, `SHELL_UNAVAILABLE`
+  (see `references/build.md`). Both are worth testing (your error/empty-state handling).
 - **Deployed to the test environment** (build → zip → deploy via the Rise-X MCP, §10): the only place
   offline behavior is real. The hosted shell is a production build, so the service worker, the
   download orchestration, the queue, and sync all work there exactly as they will for users — verify
   everything offline in a browser against it, per "Prove it works" below.
 
-**Seeding a flow's offline flag for testing** follows the same pre-publish-only rule as §2 — set
-`featureFlags.isOfflineModeEnabled` before the first publish, and double-check you're patching
-`featureFlags`, not `flowFeatures`.
+**Seeding a flow's offline flag for testing** goes through the same draft cycle as §2 — and
+double-check you're patching `featureFlags`, not `flowFeatures`.
 
 Testing offline needs the flow's own data downloaded first (`offline.downloadFlowWorks`, or the app's
 download card) — an offline-enabled app with no downloaded flow data is testing the offline-miss
 **throw** path, not the happy path.
 
-### Prove it works — five checks that define done
+### Prove it works — six checks that define done
 
-Run against the deployed test environment — the hosted shell is where offline is real (§9) — with the
-flow's data downloaded:
+Six checks. The first four run against the deployed test environment — the hosted shell is where
+offline is real, with the flow's data downloaded; the fifth runs standalone against the mock shell;
+the sixth back on the deployed environment.
 
 1. **Cold boot.** Download the app and its data, cut connectivity, reload the shell. The app's screens
    render from cache — not a skeleton, not a spinner.
@@ -666,6 +703,10 @@ flow's data downloaded:
    if you passed a custom `workCode`).
 5. **Degraded host.** Standalone against the mock shell, every offline-dependent surface shows its
    error/empty state via `SHELL_TOO_OLD` — no crashed screen, no raw `TypeError`.
+6. **Flag misconfiguration probe.** On a flow WITH the offline flag,
+   `offline.getWorkSyncStatus(workId).writeMode` reads `'queued'` while offline; on a flow without it,
+   it reads `'direct'` (and the write would go to the network and fail) — the §2 misconfiguration that
+   no other check catches.
 
 ## 10. Deploy checklist
 
@@ -674,16 +715,7 @@ Full deploy mechanics — cleaning `dist/`, zipping its contents, the exact MCP 
 
 - Deploys go through the Rise-X MCP (`request_bundle_upload` → `deploy_app`) or the shell's New App /
   New release form.
-- Clean `dist/` before `pnpm build` when producing a bundle to deploy (`npx shx rm -rf dist` —
-  cross-platform) — webpack does not clean the directory, and stale content-hashed chunks from a
-  previous build otherwise ship inside the zip.
 - Zip the **contents** of `dist/`, not the folder — `remoteEntry.js` must sit at the archive root.
-- A deploy is rejected (409) only when its version string equals the app's **currently live**
-  version — an exact-match check against the one live version, no semver ordering, no history. Rolling
-  back to an older version string deploys fine, so bump deliberately rather than trusting the platform
-  to enforce order.
-- The shell's apps list is cached with a short `staleTime` (~10s) and a deploy does not invalidate
-  it — allow a few seconds (or refresh) before concluding the new version didn't take.
 - Confirm the offline flags actually shipped: pass `feature_flags` on `deploy_app` and read the
   manifest back (`get_app` — the flags echo as `featureFlags`), and on every flow the app depends on,
   the flow-level flag plus quick submit (§2). A deploy that misses one ships an app that looks normal
@@ -720,7 +752,7 @@ async function submitQty(workId: string, dataPath: string, value: unknown) {
     }
   } catch (e) {
     // ConnectorError("SHELL_TOO_OLD", …) on a host with no offline support at all. Surface it —
-    // swallowing here is the silent success §5 warns against.
+    // swallowing here is the silent success §3 warns against.
     console.error("write failed", e);
     throw e;
   }

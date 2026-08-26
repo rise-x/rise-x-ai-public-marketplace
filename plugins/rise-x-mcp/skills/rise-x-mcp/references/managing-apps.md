@@ -15,10 +15,10 @@ release an app end-to-end from a Claude session, no manual zip upload through th
 | Tool | What it does |
 |---|---|
 | `request_bundle_upload()` | Step 1 of a deploy: returns a one-time `uploadUrl` + `uploadId` for staging the bundle zip |
-| `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id` |
+| `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id` |
 | `list_apps()` | Registry listing — `id`, `name`, `version`, `scope`, `remoteUrl`, `lastModified` per app |
-| `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`) |
-| `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Does NOT touch the bundle |
+| `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`, `featureFlags`) |
+| `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Does NOT touch the bundle. The merge is per-field: `feature_flags`, when passed, replaces the stored flags dictionary wholesale (pass the full dict; `{}` clears it) — omitted, the stored flags carry through unchanged. Known key: `isOfflineModeEnabled` — gates the shell's "Make available offline" card |
 | `delete_app(app_id)` | Soft-delete from the registry (bundle blobs cleaned). Redeploying under the same id restores it |
 
 ## Deploying a bundle (the three-step flow)
@@ -36,7 +36,7 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
 3. deploy_app(
      upload_id = <uploadId>,
      name      = "My App",            # human-readable display name
-     version   = "1.0.0",             # semver; must be unique per app — bump every release
+     version   = "1.0.0",             # semver; rejected (409) only if it equals the app's live version — bump every release
      app_scope = "my_app",            # MF scope, snake_case: [a-z][a-z0-9_]*
      app_id    = <GUID>,              # ONLY when releasing a new version of an existing app
    )
@@ -65,8 +65,8 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
 generated and returned. Record it; it's the handle for every later operation.
 
 **New version of an existing app:** `list_apps` first — find the app's `id` and *current*
-`version`, pick a strictly newer semver (a duplicate version is rejected) → three-step flow with
-`app_id` set.
+`version`, pick a semver different from that live version (the platform rejects only an exact match
+to it, but always bump) → three-step flow with `app_id` set.
 
 **Rename / re-describe / change icon (no new bundle):** `update_app(app_id, name=…)` — it reads
 the current manifest, merges only what you pass, writes it back. Never use it to fake a release:
@@ -77,7 +77,7 @@ cleaned, but redeploying with the same `app_id` restores the app.
 
 ## Validation rules (checked client-side before anything is consumed)
 
-- `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app.
+- `version` — semver (`1.2.3`, `1.0.0-rc.1`). Rejected only when it exactly matches the app's currently live version — always bump anyway.
 - `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `todo_app`). Must equal the
   `ModuleFederationPlugin` `name` the app was built with, or the shell can't mount it.
 - `name` — non-empty.
@@ -91,8 +91,9 @@ cleaned, but redeploying with the same `app_id` restores the app.
 2. **`app_scope` mismatch** — deploy-time `app_scope` must match the webpack MF scope
    (`app_<slug_with_underscores>` for scaffolded apps). Wrong scope = manifest loads, app never
    mounts.
-3. **Version reuse** — the platform rejects a duplicate version per app; `list_apps` shows the
-   current one to bump from.
+3. **Version reuse** — the 409 fires only when the version string exactly equals the app's
+   *currently live* version (no semver ordering, no history check); `list_apps` shows the
+   current one to bump from, and bumping is still the recommended practice every release.
 4. **Deploy failed? The staged bundle survives.** Neither client-side validation errors nor
    platform failures (409 duplicate version, 403 missing role, 404 unknown app id) consume the
    upload — fix the manifest field (e.g. bump `version` after a 409) and call `deploy_app` again
