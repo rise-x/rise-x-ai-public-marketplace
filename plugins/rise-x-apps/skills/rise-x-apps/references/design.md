@@ -292,10 +292,12 @@ values rather than judging a scaled screenshot:
 
 ```js
 const input = document.querySelector('input');
-getComputedStyle(input).boxSizing;                 // see below
-input.getBoundingClientRect().width;               // must equal the container's inner width
-getComputedStyle(el).paddingTop;                   // against what the demo shows for it
-el.getBoundingClientRect().height;                 // 0 means the size class has no rule
+getComputedStyle(input).boxSizing;                  // see below
+input.getBoundingClientRect().width;                // must equal the container's inner width
+
+const copied = document.querySelector('[data-slot="empty-state"]'); // any component you copied whole
+getComputedStyle(copied).paddingTop;                // against what the demo shows for it
+copied.getBoundingClientRect().height;              // 0 means a size class on it has no rule
 ```
 
 `boxSizing` reads `border-box` on **0.9.0+**, where the stylesheet carries
