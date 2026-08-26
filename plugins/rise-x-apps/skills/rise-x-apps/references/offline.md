@@ -144,8 +144,12 @@ fields at the REST layer, and — via the MCP — surfaces as a `dropped_propert
 `changed: []`. So always target a draft: to change the flag later, open a new draft off the published
 flow, patch that draft's id, then publish again. The bag itself is a plain `string → bool` dictionary on
 the flow's properties — the key is exactly `isOfflineModeEnabled` — and it is shared with unrelated
-flags the platform seeds (`UseCompletedName`, …), so inspect what is already in it and send the bag
-complete rather than assuming it is empty.
+flags the platform seeds (`UseCompletedName`, …). The update **replaces the whole bag** — properties
+merge per-field, so a non-null `featureFlags` wins wholesale and any seeded key you didn't echo is
+dropped — so read what is already in it and send it complete. One more reach limit: the runtime reads
+the flag from each work's **own pinned flow version**, and publishing a new version does not move
+already-open works by default — a flag change reaches works created after the publish, not the ones
+already open.
 
 **Quick submit is a task-level switch, not a per-action one.** `quickSubmit` lives on the `panelConfig`
 of a step/task in the flow config document, and the shell's toolbar checks it once per task — not per
@@ -578,7 +582,10 @@ sync batch settles — it does not update them in place. There is no method anyw
 revalidate a single entry, and nothing repopulates a removed one. Practically: once `allSynced`
 flips for that work — not when `requestSync()` resolves, which only means "asked" (§7) — don't trust a
 cache-only read of it; call `work.get(workId)` (or `work.getData`), which is network-first while online
-by design and will hit the server rather than hand back a stale local copy.
+by design and will hit the server rather than hand back a stale local copy. If the app also uses the
+`@rise-x/apps-sdk/query` hooks on its online surfaces (§4's hybrid), call
+`invalidateAppSdkQueries(useAppQueryClient())` at the same moment — otherwise those hooks keep serving
+react-query's pre-sync cache.
 
 ## 7. Sync + queue visibility
 
@@ -670,7 +677,9 @@ Two loops — see `references/build.md` for the scaffolding both assume:
   and pure UI. The two failure modes are distinct: OFFLINE connector methods (`offline.*`) throw
   `SHELL_TOO_OLD` down this path — the offline connector maps a missing handle or method to that code —
   while other connector calls fail with the mock's general no-backend behaviour, `SHELL_UNAVAILABLE`
-  (see `references/build.md`). Both are worth testing (your error/empty-state handling).
+  (see `references/build.md`). Both are worth testing (your error/empty-state handling). The
+  standalone `fixtures` mechanism feeds connector *reads* only — nothing makes the mock's
+  `getOffline()` non-null, so no offline behaviour becomes real here.
 - **Deployed to the test environment** (build → zip → deploy via the Rise-X MCP, §10): the only place
   offline behavior is real. The hosted shell is a production build, so the service worker, the
   download orchestration, the queue, and sync all work there exactly as they will for users — verify
