@@ -52,7 +52,8 @@ user rather than guessing.
    import pkg from './package.json';
 
    export default defineConfig(({ envMode }) =>
-     defineAppConfig({ pkg, port: <this app's port>, standalone: envMode === 'standalone' }),
+     // port: keep the app's existing standalone dev port
+     defineAppConfig({ pkg, port: 5101, standalone: envMode === 'standalone' }),
    );
    ```
 

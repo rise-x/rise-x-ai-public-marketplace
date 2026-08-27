@@ -79,7 +79,9 @@ cleaned, but redeploying with the same `app_id` restores the app.
 
 - `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app.
 - `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `todo_app`). Must equal the
-  `ModuleFederationPlugin` `name` the app was built with, or the shell can't mount it.
+  Module Federation scope the app was built with, or the shell can't mount it. For an app on
+  `@rise-x/apps-sdk` that scope is derived from the package name
+  (`@rise-x-apps/todo-app` -> `todo_app`) and reported as `scope` by the scaffolder's `--json`.
 - `name` — non-empty.
 - Failing validation never consumes the staged upload — fix the field and call `deploy_app` again
   with the same `upload_id`.
