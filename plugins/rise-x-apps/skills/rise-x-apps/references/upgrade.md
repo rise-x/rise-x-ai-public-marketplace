@@ -58,7 +58,8 @@ user rather than guessing.
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
    in components; `/connectors` in event handlers and lifecycle hooks.
-5. **Move ids into `rise-x-app.json`** (SDK >= 0.12.0). Create the
+5. **Move ids into `rise-x-app.json`** (needs the SDK version named in
+   `references/build.md` §App dependencies). Create the
    manifest at the app root, declare every hardcoded flow, asset-type, or
    agent GUID as an aliased dependency (with `label`/`description` and
    per-environment ids — an agent's id field is `agentId`, not

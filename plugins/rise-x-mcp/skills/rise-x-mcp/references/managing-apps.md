@@ -72,30 +72,51 @@ environment it was built for, plus a `dependencies` object **keyed by the depend
 flow or asset type, `agentId` for an agent (an agent has no origin id and no version chain).
 The app's build emits it — these tools never author or edit it.
 
-**Deploy-time validation.** `deploy_app` checks the manifest against the *target* ecosystem and
-rejects the deploy when:
+**The two `kind` spellings are not interchangeable.** The file takes the lower-camel values
+above; `get_app` returns them capitalised (`Flow`, `AssetType`, `Agent`). Never copy a kind out
+of a `get_app` result into a hand-edited manifest — the platform rejects the capitalised form.
 
-- **`InvalidDependencyManifest`** — the file is malformed (bad JSON, missing/invalid fields).
-- **`UnresolvedDependencies`** — one or more declared dependencies don't resolve in the target
-  ecosystem. The message lists every failing dependency's alias, label, kind, and id. This
-  usually means the bundle was **built for a different environment** (e.g. test-environment ids
-  deployed to production) — rebuild with the right `APP_ENV` and restage; the ids live inside
-  the zip, so retrying with the same `upload_id` can't fix it.
+**Deploy-time validation.** `deploy_app` validates the manifest against the *target* ecosystem
+before it stores anything. A rejection comes back as **`error.code: http_400`** whose message
+names the failing entries by alias, label, kind, and id. There is no dedicated error code to
+match on — `InvalidDependencyManifest` and `UnresolvedDependencies` are names the platform logs
+internally, never fields the response carries — so the message is the signal. It is truncated at
+500 characters, and each failing entry costs ~165 of them, so expect the first two and assume
+more. Two things are rejected:
+
+- **A malformed file** — bad JSON, or missing/invalid fields.
+- **A declared dependency that doesn't resolve in the target ecosystem.** Usually a bundle
+  **built for a different environment** (test-environment ids deployed to production): rebuild
+  with the right `APP_ENV` and restage. The ids live inside the zip, so reusing the same
+  `upload_id` redeploys the same broken manifest.
 
 Agents are validated the same way, with one deliberate difference: an agent that doesn't
 resolve gives the **same reason** whether it is absent, deleted, or lives in another ecosystem.
 A failed deploy therefore never confirms that an agent exists somewhere else — don't read the
 message as "wrong ecosystem" evidence.
 
-A bundle without the file deploys as before — no dependencies are recorded.
+**No manifest and an empty manifest are opposite outcomes.** A bundle with **no**
+`rise-x-app.json` leaves the app's stored dependencies **untouched** — deliberate, so a deploy
+from a manifest-unaware build cannot wipe them — and `deploy_app` echoes the retained set. A
+bundle whose manifest declares **none** *clears* them. The scaffolded app template ships an
+empty manifest, so redeploying an app whose manifest was never filled clears whatever the
+registry had recorded.
+
+**Read `dependencyCount`, not the presence of `dependencies`.** The result omits `dependencies`
+whenever the set is empty, so its absence covers the cleared case *and* the never-had-any case
+— it never means "unchanged". `dependencyCount: 0` is the only thing that says the app now
+declares none; no `dependencyCount` at all says the app has no stored manifest. `dependencies`
+appears only when the set is non-empty.
 
 **Reading dependencies back.** `get_app` returns a `dependencies` list — the way to answer
-"what data does this app use". Read each entry's `kind` to know which fields apply: a `flow` or
-`assetType` entry carries `flowOriginId` plus the resolved `flowId` and `flowName` in the active
-ecosystem; an `agent` entry carries `agentId` plus the resolved agent name, and none of the flow
-fields. Every entry also carries the declared `name`, `label`, and `description`. `list_apps`
-rows carry a `dependencyCount`, and a successful `deploy_app` echoes `dependencies` in its
-result.
+"what data does this app use". It is absent when the app has no manifest, empty when its
+manifest declared nothing. Read each entry's `kind` to know which fields apply, and mind the
+casing: **the response uses `Flow`, `AssetType`, and `Agent`**, not the manifest's lowercase
+values. A `Flow` or `AssetType` entry carries `flowOriginId` plus the resolved `flowId` and
+`flowName` in the active ecosystem; an `Agent` entry carries `agentId` and `agentName`, and none
+of the flow fields. Every entry carries the declared `name` (the manifest's alias) and `kind`;
+`label` and `description` appear only when the manifest supplied them. `list_apps` rows carry a
+`dependencyCount`, and a successful `deploy_app` echoes `dependencies` in its result.
 
 **Declaring an agent doesn't make it callable from here.** No MCP tool runs or spawns an agent;
 the declaration records it for the ecosystem and lets the app's own code call it.
@@ -141,9 +162,9 @@ cleaned, but redeploying with the same `app_id` restores the app.
    applies).
 5. **These tools don't build anything** — produce the bundle with the `rise-x-apps` skill (its build phase
    covers the production build + zipping) and hand the zip to this flow.
-6. **`UnresolvedDependencies` on deploy = wrong-environment bundle.** The declared ids
-   (`flowOriginId`s, or an `agentId`) don't exist in the target ecosystem — almost always a
-   bundle built against another environment (test ids pushed to production). Don't retry with the same `upload_id`:
-   rebuild with the right `APP_ENV`, re-zip, and run the three-step flow again. And
-   `rise-x-app.json` sitting at the archive root is *expected* — never "clean" it out of the
-   zip to get past the check.
+6. **An `http_400` naming dependencies on deploy = wrong-environment bundle.** The declared
+   ids (`flowOriginId`s, or an `agentId`) don't exist in the target ecosystem — almost always a
+   bundle built against another environment (test ids pushed to production). Don't retry with
+   the same `upload_id`: it still holds the old zip. Rebuild with the right `APP_ENV`, re-zip,
+   and run the three-step flow again. And `rise-x-app.json` sitting at the archive root is
+   *expected* — never "clean" it out of the zip to get past the check.

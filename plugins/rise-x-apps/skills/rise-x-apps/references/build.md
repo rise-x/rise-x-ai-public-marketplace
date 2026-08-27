@@ -118,14 +118,16 @@ work on old foundations.
 
 ### App dependencies (`rise-x-app.json`) — no GUID literals in source
 
-**A GUID literal in app source is a bug.** Every flow, asset-type, or agent id
-the app depends on is declared in `rise-x-app.json` at the app project root
-(SDK >= 0.12.0) — one stable **alias** per target, and one id **per
-environment**, so the same source builds for every environment the app ships
-to. App code consumes them through `deps.<alias>`. Only flows the *user*
-picks at runtime (a search box, a flow selector) keep going through the
-generic connectors with a ref — those stay fully supported; nothing is
-deprecated.
+**Needs `@rise-x/apps-sdk` >= 0.12.0.** This section is the one place that
+states the gate; everything else about the manifest points here.
+
+**A flow, asset-type, or agent GUID in app source is a bug.** Every such id the
+app depends on is declared in `rise-x-app.json` at the app project root — one
+stable **alias** per target, and one id **per environment**, so the same source
+builds for every environment the app ships to. App code consumes them through
+`deps.<alias>`. Only flows the *user* picks at runtime (a search box, a flow
+selector) keep going through the generic connectors with a ref — those stay
+fully supported; nothing is deprecated.
 
 ```json
 {
@@ -315,7 +317,7 @@ import {
   getShellApi,           // legacy Diana axios instance
   getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment' | 'asset'
   getShellAi,            // rise-x-ai gateway handle (bridge v3+), or null
-  // Declared app dependencies (rise-x-app.json, SDK >= 0.12.0) — see App dependencies above
+  // Declared app dependencies (rise-x-app.json) — see App dependencies above for the SDK gate
   useAppDependencies,
   getAppDependency,
   getAppDependencies,
@@ -578,7 +580,7 @@ only pre-deploy test of the data path.
 window.__DIANA_SHELL__ = createMockShell({
   user: { id: 'dev-user', name: 'Test User' },
   environment: { id: 'env-1', slug: 'dev', name: 'Dev Env' },
-  // Overrides the resolved rise-x-app.json dependencies (SDK >= 0.12.0). The
+  // Overrides the resolved rise-x-app.json dependencies. The
   // build injects them in standalone mode too, so this is for pointing local
   // dev at different ids — or for an app that has no manifest yet.
   dependencies: {
