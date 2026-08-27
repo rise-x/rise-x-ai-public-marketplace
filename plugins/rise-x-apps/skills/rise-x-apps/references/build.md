@@ -62,7 +62,7 @@ CLI flags worth knowing:
 | Flag | Default | Use |
 | --- | --- | --- |
 | `--pm=<npm\|yarn\|pnpm>` | auto | Force a package manager. **Prefer `pnpm` whenever it's available** — it's what Rise-X uses, and the commands throughout this guide assume it. Without the flag the CLI auto-detects from lockfiles in the cwd (falling back to npm), so pass it explicitly when scaffolding into an empty directory. |
-| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — in the rise-x-app monorepo list what's taken with `node tools/list-app-ports.js`. |
+| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — in the rise-x-app monorepo list what's taken with `node tools/list-app-ports.js` from the repo root. |
 | `--skip-install` | off | Skip install (faster scaffold; the user installs later). |
 | `--json` | off | Emit `{ path, slug, scope, pkgName, port, pm }` to stdout — useful for automation. |
 
@@ -75,8 +75,8 @@ What the scaffolder creates:
 ├── README.md              # app readme; points at APP.md and AGENTS.md
 ├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod
 ├── tsconfig.json          # jsx: "react-jsx", strict
-├── rsbuild.config.mts     # 17 lines: calls defineAppConfig from @rise-x/apps-sdk/rsbuild
-│                         # (the MF contract lives in the preset, not here)
+├── rsbuild.config.mts     # thin: calls defineAppConfig from @rise-x/apps-sdk/rsbuild
+│                          # (the MF contract lives in the preset, not here)
 ├── public/index.html
 └── src/
     ├── index.tsx          # `import('./bootstrap')` — MF async boundary
@@ -85,9 +85,23 @@ What the scaffolder creates:
     └── lifecycle.ts       # the module exposed as ./lifecycle
 ```
 
-The app has **no Module Federation config of its own to edit.** `rsbuild.config.mts` just calls `defineAppConfig`, and the preset owns the whole contract: the MF scope (derived from the package name, `@rise-x-apps/vendor-hub` -> `app_vendor_hub`), `remoteEntry.js`, the `./App` + `./lifecycle` exposes, and every share. The react family is shared `singleton` + `import: false` because the shell provides it eagerly and bundling a local fallback causes duplicate-React bugs — load-bearing, and now out of reach of a local edit, which is the point.
+From **SDK >= 0.9.0** the whole build is one call. `rsbuild.config.mts`:
 
-An app may pass only `exposes` (merged over the defaults) and `define`. It **cannot add shares**: if one is genuinely needed, that is a change to the SDK preset, not to the app. You upgrade the contract by upgrading `@rise-x/apps-sdk`.
+```ts
+import { defineConfig } from '@rsbuild/core';
+import { defineAppConfig } from '@rise-x/apps-sdk/rsbuild';
+import pkg from './package.json';
+
+export default defineConfig(({ envMode }) =>
+  defineAppConfig({ pkg, port: 5101, standalone: envMode === 'standalone' }),
+);
+```
+
+`.mts`, not `.ts`: it marks the file ESM, which a plain `.ts` warns about on every build, and `"type": "module"` is not an alternative because it breaks `commitlint.config.js`. On an SDK older than 0.9.0 the `@rise-x/apps-sdk/rsbuild` subpath does not exist and the app is still on a webpack config — see `references/upgrade.md`.
+
+On SDK >= 0.9.0 the app has **no Module Federation config of its own to edit.** `rsbuild.config.mts` just calls `defineAppConfig`, and the preset owns the whole contract: the MF scope (derived from the package name, `@rise-x-apps/vendor-hub` → `app_vendor_hub`), `remoteEntry.js`, the `./App` + `./lifecycle` exposes, and every share. The react family is shared `singleton` + `import: false` because the shell provides it eagerly and bundling a local fallback causes duplicate-React bugs — load-bearing, and now out of reach of a local edit, which is the point.
+
+Beyond the required `pkg`, `port` and `standalone`, the only knobs an app may pass are `exposes` (merged over the defaults) and `define`. It **cannot add shares**: if one is genuinely needed, that is a change to the SDK preset, not to the app. You upgrade the contract by upgrading `@rise-x/apps-sdk`.
 
 The scaffolded `src/App.tsx` **is the canonical app layout** (left rail from
 the Nav primitives, PageHeader + content screens, no user UI). Build the app
@@ -311,10 +325,10 @@ the design system has no fitting primitive, and compose it from `cn` + the
 existing pieces. Uphold the Rise-X experience principles
 (`references/experience-principles.md`). Typings come from the SDK; the runtime
 and its Tailwind CSS come from the **host** (the Diana app) via the Module
-Federation share scope (`@rise-x/ui` in the template's `shared`, no bundled
+Federation share scope (the preset shares `@rise-x/ui` with no bundled
 fallback) when running federated, and components follow the host's
 light/dark theme automatically (tokens switch on a root-level `dark` class
-the host controls). In standalone dev (`pnpm start`) the template aliases
+the host controls). In standalone dev (`pnpm start`) the preset aliases
 `@rise-x/ui` to the SDK's compiled standalone bundle instead — a
 self-contained snapshot with its own CSS injected, so components render for
 real without a host. It's a snapshot, not the source of truth: verify in a
@@ -460,7 +474,7 @@ environment-orchestrator role.
    the existing GUID to release a new version. `version` comes from the app's
    `package.json` and must be unique per app — bump it every release.
    `app_scope` is snake_case and **must match the MF scope the preset derives
-   from the package name** (`@rise-x-apps/vendor-hub` -> `app_vendor_hub`); the
+   from the package name** (`@rise-x-apps/vendor-hub` → `app_vendor_hub`); the
    scaffolder's `--json` output reports it as `scope`.
 
 The result carries the app `id` and the canonical manifest (`remoteUrl`,
@@ -490,7 +504,7 @@ manifest with the live `remoteUrl` and `module` (defaults to `./App`).
 
 ## Don'ts
 
-- **Don't** bundle your own React. The scaffolder's `import: false` on react/react-dom/jsx-runtime is intentional. If you remove it, you'll get cross-React-instance hook crashes when the app mounts inside the shell.
+- **Don't** bundle your own React, and don't try to shadow the preset's shares. The preset shares react/react-dom/jsx-runtime as `singleton` + `import: false` so the app uses the host's copy; adding react or react-dom as bundled dependencies of your own, or re-declaring those shares, gives you cross-React-instance hook crashes when the app mounts inside the shell.
 - **Don't** import shell internals. The contract is `@rise-x/apps-sdk` — full stop. If you need something the SDK doesn't expose, propose it as an SDK addition in a separate PR (or request it from the Rise-X team) — don't reach into the host.
 - **Don't** wire your own auth or call backend services directly. Go through the connectors (`@rise-x/apps-sdk/connectors`) or `getShellApiV4`.
 - **Don't** hand-roll UI or pull in another component library — the app UI is built exclusively from `@rise-x/apps-sdk/ui` (see UI components).

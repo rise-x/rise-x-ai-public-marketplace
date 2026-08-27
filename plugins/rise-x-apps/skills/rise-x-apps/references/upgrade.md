@@ -7,7 +7,7 @@ system and the docs conventions. Recognize them, and **ask before migrating**.
 
 Any of these marks the app as old:
 
-- A `webpack.config.js` at the app root. Current apps have a 17-line
+- A `webpack.config.js` at the app root. Current apps have a thin
   `rsbuild.config.mts` instead, and the Module Federation contract lives in
   `@rise-x/apps-sdk/rsbuild`, not in the app. An older still-on-webpack app whose
   `shared` block has no `@rise-x/ui` entry (often no `@tanstack/react-query`
@@ -38,10 +38,24 @@ user rather than guessing.
 
 ## Migration checklist
 
+**Two different migrations share this list — check which one you're doing.**
+Steps 1, 2 and 6 are the *build* migration (webpack → the Rsbuild preset), and
+they apply to any app still on a webpack config. Steps 3, 4 and 5 are the
+*design-system and data-layer* migration, and apply only when those signals are
+present too: hand-rolled UI instead of `@rise-x/apps-sdk/ui`, `useEffect`/axios
+instead of the query hooks, no `APP.md`, an in-app top bar.
+
+An app that is already current on the design system and the query hooks but
+still on webpack needs **only 1, 2 and 6** — no design phase and no approval
+gate, because no screen changes. Don't run it through steps 3-5 out of habit.
+
 1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
    outside), then `pnpm install`.
-2. **Move the build onto the preset.** Delete `webpack.config.js` and
-   `webpack.local.config.js`, and add an `rsbuild.config.mts` — copy the shape
+2. **Move the build onto the preset.** First **read the app's dev port out of
+   `webpack.local.config.js`** (its `devServer.port`) — that file is deleted in
+   this step and it is the only place the value lives. Then delete
+   `webpack.config.js` and `webpack.local.config.js`, and add an
+   `rsbuild.config.mts` — copy the shape
    from the SDK's `template/rsbuild.config.mts`
    (`node_modules/@rise-x/apps-sdk/template/`; `packages/apps-sdk/template/` in
    the rise-x-app monorepo):
@@ -52,7 +66,7 @@ user rather than guessing.
    import pkg from './package.json';
 
    export default defineConfig(({ envMode }) =>
-     // port: keep the app's existing standalone dev port
+     // the port the old webpack.local.config.js devServer used
      defineAppConfig({ pkg, port: 5101, standalone: envMode === 'standalone' }),
    );
    ```
@@ -61,17 +75,23 @@ user rather than guessing.
    add `@rsbuild/core`, `@rsbuild/plugin-react` and `@rsbuild/plugin-type-check`
    as devDependencies, and set `build: rsbuild build`,
    `start: rsbuild dev --env-mode standalone`, `start:federated: rsbuild dev`.
+   The preset registers the two rsbuild plugins itself — they only need to
+   resolve. `import pkg from './package.json'` needs `resolveJsonModule` in
+   `tsconfig.json`, which a webpack-era config often lacks; add it if missing.
+
+   `.mts` rather than `.ts` marks the file ESM, which a plain `.ts` warns about
+   on every build. `"type": "module"` is not an alternative — it breaks
+   `commitlint.config.js`.
 
    **There is no `shared` block to align any more.** The preset owns the whole
    Module Federation contract — the MF scope (derived from the package name,
-   `@rise-x-apps/vendor-hub` -> `app_vendor_hub`), `remoteEntry.js`, the
+   `@rise-x-apps/vendor-hub` → `app_vendor_hub`), `remoteEntry.js`, the
    `./App` + `./lifecycle` exposes, and every share including `@rise-x/ui` and
-   `@tanstack/react-query`. You upgrade the contract by upgrading the SDK. An app
-   can pass only `exposes` (merged over the defaults) and `define`; it cannot add
+   `@tanstack/react-query`. You upgrade the contract by upgrading the SDK. Beyond the
+   required `pkg`, `port` and `standalone`, an app can pass only `exposes`
+   (merged over the defaults) and `define`; it cannot add
    shares, so an app that needed a custom one is a conversation with the SDK, not
-   a local edit. `.mts` rather than `.ts` is deliberate: it marks the file ESM,
-   which a plain `.ts` warns about on every build, and `"type": "module"` is not
-   an alternative because it breaks `commitlint.config.js`.
+   a local edit.
 3. **Rebuild the UI on `@rise-x/apps-sdk/ui`.** Replace hand-rolled
    CSS/components/icon sets with design-system components (lucide icons ship
    with it); delete what they cover. Move any top-bar navigation to a left
