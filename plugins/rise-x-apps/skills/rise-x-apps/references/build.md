@@ -105,9 +105,9 @@ work on old foundations.
 
 ### App dependencies (`rise-x-app.json`) — no GUID literals in source
 
-**A GUID literal in app source is a bug.** Every flow or asset-type origin id
+**A GUID literal in app source is a bug.** Every flow, asset-type, or agent id
 the app depends on is declared in `rise-x-app.json` at the app project root
-(SDK ≥ 0.11.0) — one stable **alias** per target, and one origin id **per
+(SDK ≥ 0.12.0) — one stable **alias** per target, and one id **per
 environment**, so the same source builds for every environment the app ships
 to. App code consumes them through `deps.<alias>`. Only flows the *user*
 picks at runtime (a search box, a flow selector) keep going through the
@@ -134,6 +134,15 @@ deprecated.
         "test": { "flowOriginId": "33333333-3333-3333-3333-333333333333" },
         "prod": { "flowOriginId": "44444444-4444-4444-4444-444444444444" }
       }
+    },
+    "triageAgent": {
+      "kind": "agent",
+      "label": "Medication triage",
+      "description": "Answers identification questions from a photo",
+      "ids": {
+        "test": { "agentId": "55555555-5555-5555-5555-555555555555" },
+        "prod": { "agentId": "66666666-6666-6666-6666-666666666666" }
+      }
     }
   }
 }
@@ -142,14 +151,35 @@ deprecated.
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `environments` | yes | the environments this app is built for; every `ids` key must appear here |
-| `<alias>.kind` | yes | `flow` or `assetType` — an asset type is defined by an entity flow, so both are addressed by a flow origin id |
+| `<alias>.kind` | yes | `flow`, `assetType`, or `agent` |
 | `<alias>.label` / `.description` | no | human-readable name and what the app uses it for — **fill them**: they feed ecosystem management and Ask Diana, not just the reader |
-| `<alias>.ids.<env>.flowOriginId` | yes | the origin id on that environment (GUID) |
+| `<alias>.ids.<env>.<idField>` | yes | the id on that environment (GUID) — the field name follows the `kind` |
 
-The origin ids come from the same discovery as before — the Rise-X MCP
-(`list_flows`, `list_asset_types`) or the user — they just land in the
-manifest, per environment, instead of in source (see `references/design.md`
-§3).
+**The id field name follows the `kind`**, and the wrong field for a kind is a
+mismatch, not an extra to ignore: the build fails with a message naming the
+field that kind takes.
+
+| `kind` | Id field | Why |
+| --- | --- | --- |
+| `flow` | `flowOriginId` | the origin id, stable across the flow's versions |
+| `assetType` | `flowOriginId` | an asset type is defined by an entity flow |
+| `agent` | `agentId` | an agent has no origin id and no version chain — one agent is one document with one id |
+
+**An agent's id always differs between test and prod.** Each agent is created
+per ecosystem and there is no promotion path, so no single id works
+everywhere: the per-environment block is mandatory for an agent, never
+optional.
+
+**What declaring an agent gives you — and what it doesn't.** It records the
+agent as a declared dependency (ecosystem management, Ask Diana) and gives app
+code the bound surface below. It does **not** make the agent invocable by
+Diana: no MCP tool runs or spawns an agent, so the agent runs only when the
+app's own code calls it.
+
+The ids come from the same discovery as before — the Rise-X MCP
+(`list_flows`, `list_asset_types`, `list_agents`) or the user — they just land
+in the manifest, per environment, instead of in source (see
+`references/design.md` §3).
 
 **Per-environment builds.** The scaffolded `webpack.config.js` runs
 `RiseAppManifestPlugin` (from `@rise-x/apps-sdk/webpack`), which resolves the
@@ -157,7 +187,8 @@ manifest for **one** environment — `APP_ENV`, default `test` — and emits the
 flat, single-environment result as `dist/rise-x-app.json`, so it rides the
 bundle zip. Origin ids for other environments never ship. The build fails,
 naming the alias and environment, on an unknown environment, a missing id,
-an unsupported `kind`, or a non-GUID id.
+an unsupported `kind`, an id field that doesn't belong to the `kind`, or a
+non-GUID id.
 
 ```bash
 pnpm build                                    # → environment "test"
@@ -178,21 +209,29 @@ import {
   getAppDependencies,        // the whole map
   type BoundFlowDependency,
   type BoundAssetTypeDependency,
+  type BoundAgentDependency,
 } from '@rise-x/apps-sdk';
 
 // Declare the app's aliases once for typed access without narrowing:
 interface AppDeps {
   riskFlow: BoundFlowDependency;
   vesselType: BoundAssetTypeDependency;
+  triageAgent: BoundAgentDependency;
 }
 
 const deps = useAppDependencies<AppDeps>();
 deps.riskFlow.flowOriginId;                       // the raw id + kind/label/description
+deps.triageAgent.agentId;                         // an agent names its id field agentId
 const open = await deps.riskFlow.work.search({    // pre-bound connector call
   filter: { field: 'status', operator: 'equals', values: ['Open'] },
 });
 const vessels = await deps.vesselType.assets.list({ pageSize: 50 });
 ```
+
+The resolved entries are a union over `kind`, so an unnarrowed `deps.<alias>`
+carries only the fields its kind has — `flowOriginId` on a flow or asset type,
+`agentId` on an agent. Declaring the aliases as above is how you skip the
+narrowing.
 
 Every dependency exposes the connector operations that take its ref, with the
 ref pre-filled — each bound method is the existing connector call, nothing
@@ -202,19 +241,31 @@ more:
 | --- | --- |
 | `flow` | `dep.flow.get()` / `getConfig()`, `dep.work.start()` / `list()` / `iterate()` / `search()` |
 | `assetType` | `dep.assets.list()` / `iterate()` / `search()` / `quickSearch()` / `create()` |
+| `agent` | `dep.agent.get()` / `run()` / `createChat()` / `listChats()` |
 
 On the two bound `search()` methods `filter` is optional: the mandatory
 `flowOriginId` pin **is** the dependency, so the bound call adds it and
-`and`s your filter with it. Anything not on the bound surface takes the id —
-`useFlowConfig(dep.flowOriginId)` works for either kind, since an asset type
-is backed by a flow too. Both accessors throw a `ConnectorError` naming the
-fix when no manifest reached the bundle, or listing the declared aliases when
-the alias isn't one of them.
+`and`s your filter with it.
+
+The agent surface binds only the agent-scoped operations. The chat operations
+keyed by a **chat** id (`getChat`, `renameChat`, `deleteChat`,
+`getChatMessages`) take a chat, not an agent, so they stay on the generic
+`agents` connector — the streaming rules and error codes there apply
+unchanged.
+
+Anything not on the bound surface takes the id — `useFlowConfig(dep.flowOriginId)`
+works for a flow or an asset type, since an asset type is backed by a flow
+too, and `useAgent(dep.agentId)` for an agent. Both accessors throw a
+`ConnectorError` naming the fix when no manifest reached the bundle, or
+listing the declared aliases when the alias isn't one of them.
 
 **Prefetch (optional).** `prefetchAppDependencies(client)` from
-`@rise-x/apps-sdk/query` warms react-query with every declared dependency's
-flow config and layouts. The client parameter is required and must be the one
-from `useAppQueryClient()` — never construct a second react-query client:
+`@rise-x/apps-sdk/query` warms react-query with what each declared dependency
+needs: a flow or asset type gets its flow config and the layouts that config
+points at; an agent gets its agent document — never a flow config, and never
+its run stream, which is SSE and has nothing to cache. The client parameter is
+required and must be the one from `useAppQueryClient()` — never construct a
+second react-query client:
 
 ```tsx
 import { prefetchAppDependencies, useAppQueryClient } from '@rise-x/apps-sdk/query';
@@ -242,7 +293,7 @@ import {
   getShellApi,           // legacy Diana axios instance
   getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment' | 'asset'
   getShellAi,            // rise-x-ai gateway handle (bridge v3+), or null
-  // Declared app dependencies (rise-x-app.json, SDK ≥ 0.11.0) — see App dependencies above
+  // Declared app dependencies (rise-x-app.json, SDK ≥ 0.12.0) — see App dependencies above
   useAppDependencies,
   getAppDependency,
   getAppDependencies,
@@ -497,12 +548,13 @@ only pre-deploy test of the data path.
 window.__DIANA_SHELL__ = createMockShell({
   user: { id: 'dev-user', name: 'Test User' },
   environment: { id: 'env-1', slug: 'dev', name: 'Dev Env' },
-  // The app's resolved rise-x-app.json dependencies (SDK ≥ 0.11.0) — the local
+  // The app's resolved rise-x-app.json dependencies (SDK ≥ 0.12.0) — the local
   // dev config doesn't run RiseAppManifestPlugin, so the mock supplies them;
   // without this, useAppDependencies()/getAppDependency() throw standalone.
   dependencies: {
     riskFlow: { kind: 'flow', flowOriginId: '11111111-1111-1111-1111-111111111111' },
     vesselType: { kind: 'assetType', flowOriginId: '33333333-3333-3333-3333-333333333333' },
+    triageAgent: { kind: 'agent', agentId: '55555555-5555-5555-5555-555555555555' },
   },
   fixtures: {
     // Rows are keyed by flowOriginId; '*' serves any flow. Served with the
@@ -628,7 +680,7 @@ manifest with the live `remoteUrl` and `module` (defaults to `./App`).
 - **Don't** bundle your own React. The scaffolder's `import: false` on react/react-dom/jsx-runtime is intentional. If you remove it, you'll get cross-React-instance hook crashes when the app mounts inside the shell.
 - **Don't** import shell internals. The contract is `@rise-x/apps-sdk` — full stop. If you need something the SDK doesn't expose, propose it as an SDK addition in a separate PR (or request it from the Rise-X team) — don't reach into the host.
 - **Don't** wire your own auth or call backend services directly. Go through the connectors (`@rise-x/apps-sdk/connectors`) or `getShellApiV4`.
-- **Don't** put a flow or asset-type GUID literal in app source. Declare it in `rise-x-app.json` and read it through `useAppDependencies()` (§App dependencies); the generic connectors with a ref are for flows the user picks at runtime.
+- **Don't** put a flow, asset-type, or agent GUID literal in app source. Declare it in `rise-x-app.json` and read it through `useAppDependencies()` (§App dependencies); the generic connectors with a ref are for flows the user picks at runtime.
 - **Don't** hand-roll UI or pull in another component library — the app UI is built exclusively from `@rise-x/apps-sdk/ui` (see UI components).
 - **Don't** put navigation in a top bar. The host already renders top-bar nav above the app; app navigation belongs in a left sidebar/rail.
 - **Don't** assume the user or environment is non-null inside lifecycle hooks — accept the typed `ctx` and check.

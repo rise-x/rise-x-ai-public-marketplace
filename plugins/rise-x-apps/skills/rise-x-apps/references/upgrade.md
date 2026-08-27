@@ -13,8 +13,8 @@ Any of these marks the app as old:
   own component kit or icon set, another component library.
 - Data fetched with hand-rolled `useEffect`/axios instead of the `/query`
   hooks or `/connectors`.
-- Flow / asset-type GUIDs hardcoded in source or a hand-rolled config module —
-  no `rise-x-app.json` at the app root.
+- Flow / asset-type / agent GUIDs hardcoded in source or a hand-rolled config
+  module — no `rise-x-app.json` at the app root.
 - No `APP.md` / `AGENTS.md` at the app root.
 - An in-app top-bar navigation (now disallowed — nav belongs on the left).
 
@@ -56,10 +56,12 @@ user rather than guessing.
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
    in components; `/connectors` in event handlers and lifecycle hooks.
-5. **Move origin ids into `rise-x-app.json`** (SDK ≥ 0.11.0). Create the
-   manifest at the app root, declare every hardcoded flow / asset-type GUID
-   as an aliased dependency (with `label`/`description` and per-environment
-   ids), add `new RiseAppManifestPlugin()` (from `@rise-x/apps-sdk/webpack`)
+5. **Move ids into `rise-x-app.json`** (SDK ≥ 0.12.0). Create the
+   manifest at the app root, declare every hardcoded flow, asset-type, or
+   agent GUID as an aliased dependency (with `label`/`description` and
+   per-environment ids — an agent's id field is `agentId`, not
+   `flowOriginId`), add `new RiseAppManifestPlugin()`
+   (from `@rise-x/apps-sdk/webpack`)
    to `webpack.config.js` plugins as the current template does, and replace
    the GUID constants with `useAppDependencies()` reads
    (`references/build.md` §App dependencies).

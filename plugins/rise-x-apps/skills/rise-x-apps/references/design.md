@@ -56,24 +56,33 @@ they land in `APP.md` and shape the mock below.
 Ask whether the app should integrate with existing **flows (workflows), assets,
 or agents**:
 
-- **Yes, existing ones** — discover the exact targets and record their
-  **origin ids** (`flowOriginId`, asset-type origin id, agent id). Discover
-  via the Rise-X MCP (`list_flows`, `list_asset_types`, `list_agents`) or
-  ask the user to point at them. Flow and asset-type origin ids land in the
-  app's `rise-x-app.json` at scaffold time — one alias per target, with a
-  `label` and `description`, and ids **per environment**: the same flow has
-  a different origin id on each environment, so run the discovery on every
-  environment the app ships to (per MCP server — `rise-x-test` → test,
-  `rise-x` → production; starting with test only and adding prod later is
-  fine). Agent ids aren't covered by the manifest — they go into app config
-  as before. See `references/build.md` §App dependencies.
+- **Yes, existing ones** — discover the exact targets and record their ids
+  (`flowOriginId`, asset-type origin id, agent id). Discover via the Rise-X
+  MCP (`list_flows`, `list_asset_types`, `list_agents`) or ask the user to
+  point at them. All three land in the app's `rise-x-app.json` at scaffold
+  time — one alias per target, with a `label` and `description`, and ids
+  **per environment**: the same flow has a different origin id on each
+  environment, so run the discovery on every environment the app ships to
+  (per MCP server — `rise-x-test` → test, `rise-x` → production; starting
+  with test only and adding prod later is fine). An agent is declared with
+  `kind: "agent"` and its id field is `agentId`, not `flowOriginId`; an agent
+  is created per ecosystem with no promotion path, so its id always differs
+  between environments and the per-environment block is mandatory. See
+  `references/build.md` §App dependencies.
 - **Nothing suitable exists yet** — ask whether to **build the flow / assets /
   agent first using the Rise-X MCP**, so the app has something real to
   integrate with, then come back here. For an agent, create the configuration
   with the agent-management tools (`create_agent` — the `rise-x-mcp` skill's
   managing-agents reference covers it): the returned `id` **is** the agent id
-  the app integrates against — record it.
+  the app integrates against — record it, per environment.
 - **No integration** — fine; note it and move on.
+
+**What an agent dependency does and doesn't buy.** Declaring it records the
+agent for ecosystem management and Ask Diana, and gives app code a bound
+surface (`deps.<alias>.agent.run()` and friends). It does **not** let Diana
+invoke the agent: there is no MCP tool that runs or spawns an agent, so the
+agent only runs when the app's own code calls it. Don't promise the user
+Diana-driven agent runs.
 
 If the Rise-X MCP isn't available (the `rise-x-mcp` plugin isn't installed or
 its servers aren't connected), don't invent ids: either ask the user to
