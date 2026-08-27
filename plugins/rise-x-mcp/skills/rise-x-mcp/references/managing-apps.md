@@ -66,27 +66,38 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
 ## Dependency manifest (`rise-x-app.json`)
 
 A bundle may declare the platform data it uses in a `rise-x-app.json` at the archive root: one
-entry per dependency with an alias (`name`), a `kind` (`flow` or `assetType`), an optional
-`label`/`description`, and the `flowOriginId` it resolves to. The app's build emits it — these
-tools never author or edit it.
+entry per dependency with an alias (`name`), a `kind` (`flow`, `assetType`, or `agent`), an
+optional `label`/`description`, and the id it resolves to — `flowOriginId` for a flow or asset
+type, `agentId` for an agent (an agent has no origin id and no version chain). The app's build
+emits it — these tools never author or edit it.
 
 **Deploy-time validation.** `deploy_app` checks the manifest against the *target* ecosystem and
 rejects the deploy when:
 
 - **`InvalidDependencyManifest`** — the file is malformed (bad JSON, missing/invalid fields).
 - **`UnresolvedDependencies`** — one or more declared dependencies don't resolve in the target
-  ecosystem. The message lists every failing dependency's alias, label, kind, and
-  `flowOriginId`. This usually means the bundle was **built for a different environment** (e.g.
-  test-environment ids deployed to production) — rebuild with the right `APP_ENV` and restage;
-  the ids live inside the zip, so retrying with the same `upload_id` can't fix it.
+  ecosystem. The message lists every failing dependency's alias, label, kind, and id. This
+  usually means the bundle was **built for a different environment** (e.g. test-environment ids
+  deployed to production) — rebuild with the right `APP_ENV` and restage; the ids live inside
+  the zip, so retrying with the same `upload_id` can't fix it.
+
+Agents are validated the same way, with one deliberate difference: an agent that doesn't
+resolve gives the **same reason** whether it is absent, deleted, or lives in another ecosystem.
+A failed deploy therefore never confirms that an agent exists somewhere else — don't read the
+message as "wrong ecosystem" evidence.
 
 A bundle without the file deploys as before — no dependencies are recorded.
 
 **Reading dependencies back.** `get_app` returns a `dependencies` list — the way to answer
-"what data does this app use". Each entry carries the declared `name`, `kind`, `label`,
-`description`, and `flowOriginId`, plus the resolved `flowId` and `flowName` in the active
-ecosystem. `list_apps` rows carry a `dependencyCount`, and a successful `deploy_app` echoes
-`dependencies` in its result.
+"what data does this app use". Read each entry's `kind` to know which fields apply: a `flow` or
+`assetType` entry carries `flowOriginId` plus the resolved `flowId` and `flowName` in the active
+ecosystem; an `agent` entry carries `agentId` plus the resolved agent name, and none of the flow
+fields. Every entry also carries the declared `name`, `label`, and `description`. `list_apps`
+rows carry a `dependencyCount`, and a successful `deploy_app` echoes `dependencies` in its
+result.
+
+**Declaring an agent doesn't make it callable from here.** No MCP tool runs or spawns an agent;
+the declaration records it for the ecosystem and lets the app's own code call it.
 
 ## Release workflow recipes
 
@@ -129,9 +140,9 @@ cleaned, but redeploying with the same `app_id` restores the app.
    applies).
 5. **These tools don't build anything** — produce the bundle with the `rise-x-apps` skill (its build phase
    covers the production build + zipping) and hand the zip to this flow.
-6. **`UnresolvedDependencies` on deploy = wrong-environment bundle.** The declared
-   `flowOriginId`s don't exist in the target ecosystem — almost always a bundle built against
-   another environment (test ids pushed to production). Don't retry with the same `upload_id`:
+6. **`UnresolvedDependencies` on deploy = wrong-environment bundle.** The declared ids
+   (`flowOriginId`s, or an `agentId`) don't exist in the target ecosystem — almost always a
+   bundle built against another environment (test ids pushed to production). Don't retry with the same `upload_id`:
    rebuild with the right `APP_ENV`, re-zip, and run the three-step flow again. And
    `rise-x-app.json` sitting at the archive root is *expected* — never "clean" it out of the
    zip to get past the check.
