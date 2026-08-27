@@ -107,7 +107,7 @@ work on old foundations.
 
 **A GUID literal in app source is a bug.** Every flow or asset-type origin id
 the app depends on is declared in `rise-x-app.json` at the app project root
-(SDK ≥ 0.10.0) — one stable **alias** per target, and one origin id **per
+(SDK ≥ 0.11.0) — one stable **alias** per target, and one origin id **per
 environment**, so the same source builds for every environment the app ships
 to. App code consumes them through `deps.<alias>`. Only flows the *user*
 picks at runtime (a search box, a flow selector) keep going through the
@@ -242,7 +242,7 @@ import {
   getShellApi,           // legacy Diana axios instance
   getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment' | 'asset'
   getShellAi,            // rise-x-ai gateway handle (bridge v3+), or null
-  // Declared app dependencies (rise-x-app.json, SDK ≥ 0.10.0) — see App dependencies above
+  // Declared app dependencies (rise-x-app.json, SDK ≥ 0.11.0) — see App dependencies above
   useAppDependencies,
   getAppDependency,
   getAppDependencies,
@@ -497,7 +497,7 @@ only pre-deploy test of the data path.
 window.__DIANA_SHELL__ = createMockShell({
   user: { id: 'dev-user', name: 'Test User' },
   environment: { id: 'env-1', slug: 'dev', name: 'Dev Env' },
-  // The app's resolved rise-x-app.json dependencies (SDK ≥ 0.10.0) — the local
+  // The app's resolved rise-x-app.json dependencies (SDK ≥ 0.11.0) — the local
   // dev config doesn't run RiseAppManifestPlugin, so the mock supplies them;
   // without this, useAppDependencies()/getAppDependency() throw standalone.
   dependencies: {

@@ -56,7 +56,7 @@ user rather than guessing.
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
    in components; `/connectors` in event handlers and lifecycle hooks.
-5. **Move origin ids into `rise-x-app.json`** (SDK ≥ 0.10.0). Create the
+5. **Move origin ids into `rise-x-app.json`** (SDK ≥ 0.11.0). Create the
    manifest at the app root, declare every hardcoded flow / asset-type GUID
    as an aliased dependency (with `label`/`description` and per-environment
    ids), add `new RiseAppManifestPlugin()` (from `@rise-x/apps-sdk/webpack`)
