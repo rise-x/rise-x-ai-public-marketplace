@@ -354,8 +354,7 @@ error state locally — the content path (tables, charts, totals) never executes
 until the app is deployed into a host. That is how content-path rendering bugs
 reach production: standalone dev cannot see them, so their first real execution
 is in front of a user. The `offline` connector is the exception: its methods
-throw `SHELL_TOO_OLD` instead — the mock's `getOffline()` is null, and the
-connector maps a missing handle/method to that code (`references/offline.md`).
+throw when the offline bridge isn't available (`references/offline.md`).
 
 **Seed `fixtures` so the real screens render before you deploy** (SDK ≥ 0.7.0).
 This matters most when building **outside the `rise-x-app` monorepo** — the
