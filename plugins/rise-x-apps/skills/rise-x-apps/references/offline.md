@@ -283,9 +283,11 @@ and react-query's default mode `'online'` **pauses fetching while the browser re
 query mounted offline sits `isPending` with its `queryFn` never called, even though the connector one
 layer down would have answered from the cache instantly. Data fetched earlier in the session still
 renders from react-query's own memory, which makes the failure look intermittent — a screen "works
-offline" right up until its first cold offline mount. On any surface that must work offline, call the
-connectors directly (they are plain async functions) and hold the result in your own state; keep the
-hooks for online-only surfaces. (§8, gap 6.) The replacement is ordinary async state — `WorkDetail`
+offline" right up until its first cold offline mount. On any surface that must work offline, source
+the data without the hooks: the connectors called directly (plain async functions, answering from the
+platform's offline cache) are the provided tool, and an app that manages its own caching is free to
+use that instead; keep the hooks for online-only surfaces. (§8, gap 6.) One direct-connector shape is
+ordinary async state — `WorkDetail`
 and `ConnectorError` are both importable from `@rise-x/apps-sdk/connectors` — with all three outcomes
 of the read ladder handled:
 
@@ -647,7 +649,8 @@ what's missing, the workaround, and what a fix would look like.
    `SdkQueryOptions` doesn't accept one, and react-query's default `'online'` pauses every fetch while
    the browser is offline — so `useWork`/`useWorkData`/`useFlowConfig`/`useFlowLayout` mounted offline
    never call their `queryFn`, even though the connector underneath would answer from cache (§4).
-   Workaround: call the connectors directly on any screen that must work offline. Fix would look like:
+   Workaround: on screens that must work offline, skip the hooks — call the connectors directly, or
+   the app's own cache if it manages one. Fix would look like:
    `networkMode: 'always'` in `createAppQueryClient` — the read ladder already routes connectivity
    itself, so pausing above it only prevents answers.
 
@@ -719,7 +722,7 @@ the sixth back on the deployed environment.
 
 ## 10. Deploy checklist
 
-Full deploy mechanics — cleaning `dist/`, zipping its contents, the exact MCP calls — are in
+Full deploy mechanics — zipping the bundle, the exact MCP calls — are in
 `references/build.md` §Build and deploy; this list is what's specific to an offline-enabled app.
 
 - Deploys go through the Rise-X MCP (`request_bundle_upload` → `deploy_app`) or the shell's New App /

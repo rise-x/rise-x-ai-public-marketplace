@@ -271,7 +271,7 @@ All connector failures normalize to `ConnectorError` (`code: 'SHELL_UNAVAILABLE'
 
 For component data, **default to `@rise-x/apps-sdk/query`** (react-query v5 over the connectors) instead of hand-rolling `useState`/`useEffect` fetches — caching, dedupe, refetch, and abort come free. The raw connectors remain the tool for event handlers, lifecycle hooks, and non-React code.
 
-**Except on screens that must work offline** — the query hooks pause fetching while the browser is offline and never call the connector underneath, even though the connector would answer from cache. Call the connectors directly on those screens instead (`references/offline.md`).
+**Except on screens that must work offline** — the query hooks pause fetching while the browser is offline, so they never resolve there. Source those screens' data another way: the connectors answer from the platform's offline cache when the flow's data is downloaded (`references/offline.md`), or the app's own storage if it manages caching itself.
 
 ```tsx
 import { useFlows, useWorkRows, useSubmitWork, dedupeRows } from '@rise-x/apps-sdk/query';
@@ -342,7 +342,7 @@ export const onUninstall: UninstallHook = async ({ manifest }) => {
 };
 ```
 
-If you change which hooks are exported, ensure `webpack.config.js` still has `'./lifecycle': './src/lifecycle'` in `exposes` (the scaffolder includes it; never remove it) — `onOfflineDownload` rides the same export.
+If you change which hooks are exported, ensure `webpack.config.js` still has `'./lifecycle': './src/lifecycle'` in `exposes` (the scaffolder includes it; never remove it).
 
 ### Standalone dev (outside the shell)
 
@@ -427,10 +427,6 @@ pnpm build                                    # produces dist/
 
 **Why zip the contents, not the `dist/` folder itself:** the deploy pipeline extracts the archive under the app's served path. `remoteEntry.js` must be at the archive root so the shell can fetch it at runtime.
 
-- **Clean `dist/` before `pnpm build`** when producing a bundle to deploy (`npx shx rm -rf dist` — cross-platform); webpack does not clean the directory, and stale content-hashed chunks otherwise ship inside the zip.
-- **A deploy is rejected (409) only when its version string equals the app's currently live version** — an exact-match check, no semver ordering, no history check — so bump deliberately every release rather than trusting the platform to enforce order.
-- **The shell's apps list is cached with a short `staleTime` (~10s) and a deploy does not invalidate it** — allow a few seconds (or refresh) before concluding the new version didn't take.
-
 When the bundle is ready, **ask the user whether to deploy**. Two paths:
 
 ### Preferred — deploy via the Rise-X MCP
@@ -446,10 +442,9 @@ environment-orchestrator role.
 3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` —
    omit `app_id` for a brand-new app (a GUID is generated and returned); pass
    the existing GUID to release a new version. `version` comes from the app's
-   `package.json`; a deploy is rejected (409) only when it exactly equals the
-   app's currently live version — no ordering or history check — so bump it
-   every release anyway, as recommended practice. `app_scope` is snake_case and
-   **must match the `name` set by the app's webpack `ModuleFederationPlugin`**.
+   `package.json` and must be unique per app — bump it every release.
+   `app_scope` is snake_case and **must match the `name` set by the app's
+   webpack `ModuleFederationPlugin`**.
    `feature_flags` is an optional `dict` of app feature flags, e.g.
    `{"isOfflineModeEnabled": true}` — what makes the shell offer "Make
    available offline" (see `references/offline.md`).
