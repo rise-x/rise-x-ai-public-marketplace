@@ -52,6 +52,11 @@ personas, and their full user journeys. It's the app's living context — the
 scaffolded `AGENTS.md` and `README.md` point at it, and every later change
 reads and maintains it (see Writing app code).
 
+**Also fill `rise-x-app.json`** with the integration targets from the design
+phase: the scaffolded manifest starts empty, and every flow or asset-type
+origin id the app depends on is declared there — never in source (see App
+dependencies below).
+
 CLI flags worth knowing:
 
 | Flag | Default | Use |
@@ -69,8 +74,9 @@ What the scaffolder creates:
 ├── CLAUDE.md              # one-line @AGENTS.md import so Claude Code loads the same guide — edit AGENTS.md
 ├── README.md              # app readme; points at APP.md and AGENTS.md
 ├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod
+├── rise-x-app.json        # app dependency manifest — alias → per-environment origin ids (starts empty)
 ├── tsconfig.json          # jsx: "react-jsx", strict
-├── webpack.config.js      # MF: exposes ./App and ./lifecycle, shares react/react-dom/jsx-runtime as singleton+import:false
+├── webpack.config.js      # MF: exposes ./App and ./lifecycle, shares react/react-dom/jsx-runtime as singleton+import:false; runs RiseAppManifestPlugin
 ├── webpack.local.config.js # standalone dev config — what `pnpm start` runs (no shell needed)
 ├── public/index.html
 └── src/
@@ -97,6 +103,130 @@ and check the other old-app signals too (`references/upgrade.md`): ask the
 user about migrating to the current SDK + design system before piling new
 work on old foundations.
 
+### App dependencies (`rise-x-app.json`) — no GUID literals in source
+
+**A GUID literal in app source is a bug.** Every flow or asset-type origin id
+the app depends on is declared in `rise-x-app.json` at the app project root
+(SDK ≥ 0.10.0) — one stable **alias** per target, and one origin id **per
+environment**, so the same source builds for every environment the app ships
+to. App code consumes them through `deps.<alias>`. Only flows the *user*
+picks at runtime (a search box, a flow selector) keep going through the
+generic connectors with a ref — those stay fully supported; nothing is
+deprecated.
+
+```json
+{
+  "environments": ["test", "prod"],
+  "dependencies": {
+    "riskFlow": {
+      "kind": "flow",
+      "label": "Risk Management workflow",
+      "description": "Source of all risk work items",
+      "ids": {
+        "test": { "flowOriginId": "11111111-1111-1111-1111-111111111111" },
+        "prod": { "flowOriginId": "22222222-2222-2222-2222-222222222222" }
+      }
+    },
+    "vesselType": {
+      "kind": "assetType",
+      "label": "Vessel",
+      "ids": {
+        "test": { "flowOriginId": "33333333-3333-3333-3333-333333333333" },
+        "prod": { "flowOriginId": "44444444-4444-4444-4444-444444444444" }
+      }
+    }
+  }
+}
+```
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `environments` | yes | the environments this app is built for; every `ids` key must appear here |
+| `<alias>.kind` | yes | `flow` or `assetType` — an asset type is defined by an entity flow, so both are addressed by a flow origin id |
+| `<alias>.label` / `.description` | no | human-readable name and what the app uses it for — **fill them**: they feed ecosystem management and Ask Diana, not just the reader |
+| `<alias>.ids.<env>.flowOriginId` | yes | the origin id on that environment (GUID) |
+
+The origin ids come from the same discovery as before — the Rise-X MCP
+(`list_flows`, `list_asset_types`) or the user — they just land in the
+manifest, per environment, instead of in source (see `references/design.md`
+§3).
+
+**Per-environment builds.** The scaffolded `webpack.config.js` runs
+`RiseAppManifestPlugin` (from `@rise-x/apps-sdk/webpack`), which resolves the
+manifest for **one** environment — `APP_ENV`, default `test` — and emits the
+flat, single-environment result as `dist/rise-x-app.json`, so it rides the
+bundle zip. Origin ids for other environments never ship. The build fails,
+naming the alias and environment, on an unknown environment, a missing id,
+an unsupported `kind`, or a non-GUID id.
+
+```bash
+pnpm build                                    # → environment "test"
+pnpm exec cross-env APP_ENV=prod pnpm build   # → environment "prod"
+```
+
+Go through `cross-env` (a template devDependency) — the inline
+`APP_ENV=prod pnpm build` form doesn't work in PowerShell or cmd.exe.
+
+**Runtime consumption.** The plugin injects the resolved manifest into the
+bundle as a compile-time constant, so the accessors are synchronous and the
+returned map is referentially stable (safe as a hook/effect dependency):
+
+```ts
+import {
+  useAppDependencies,        // hook form — inside components
+  getAppDependency,          // one alias — outside React
+  getAppDependencies,        // the whole map
+  type BoundFlowDependency,
+  type BoundAssetTypeDependency,
+} from '@rise-x/apps-sdk';
+
+// Declare the app's aliases once for typed access without narrowing:
+interface AppDeps {
+  riskFlow: BoundFlowDependency;
+  vesselType: BoundAssetTypeDependency;
+}
+
+const deps = useAppDependencies<AppDeps>();
+deps.riskFlow.flowOriginId;                       // the raw id + kind/label/description
+const open = await deps.riskFlow.work.search({    // pre-bound connector call
+  filter: { field: 'status', operator: 'equals', values: ['Open'] },
+});
+const vessels = await deps.vesselType.assets.list({ pageSize: 50 });
+```
+
+Every dependency exposes the connector operations that take its ref, with the
+ref pre-filled — each bound method is the existing connector call, nothing
+more:
+
+| `kind` | Bound surface |
+| --- | --- |
+| `flow` | `dep.flow.get()` / `getConfig()`, `dep.work.start()` / `list()` / `iterate()` / `search()` |
+| `assetType` | `dep.assets.list()` / `iterate()` / `search()` / `quickSearch()` / `create()` |
+
+On the two bound `search()` methods `filter` is optional: the mandatory
+`flowOriginId` pin **is** the dependency, so the bound call adds it and
+`and`s your filter with it. Anything not on the bound surface takes the id —
+`useFlowConfig(dep.flowOriginId)` works for either kind, since an asset type
+is backed by a flow too. Both accessors throw a `ConnectorError` naming the
+fix when no manifest reached the bundle, or listing the declared aliases when
+the alias isn't one of them.
+
+**Prefetch (optional).** `prefetchAppDependencies(client)` from
+`@rise-x/apps-sdk/query` warms react-query with every declared dependency's
+flow config and layouts. The client parameter is required and must be the one
+from `useAppQueryClient()` — never construct a second react-query client:
+
+```tsx
+import { prefetchAppDependencies, useAppQueryClient } from '@rise-x/apps-sdk/query';
+
+const client = useAppQueryClient();
+useEffect(() => { void prefetchAppDependencies(client); }, [client]);
+```
+
+**Standalone dev.** `webpack.local.config.js` doesn't run the plugin, so the
+mock shell supplies the resolved manifest — see §Standalone dev below for the
+`createMockShell({ dependencies })` option.
+
 ### Runtime APIs from `@rise-x/apps-sdk`
 
 ```ts
@@ -112,6 +242,10 @@ import {
   getShellApi,           // legacy Diana axios instance
   getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment' | 'asset'
   getShellAi,            // rise-x-ai gateway handle (bridge v3+), or null
+  // Declared app dependencies (rise-x-app.json, SDK ≥ 0.10.0) — see App dependencies above
+  useAppDependencies,
+  getAppDependency,
+  getAppDependencies,
   // Standalone dev
   createMockShell,
 } from '@rise-x/apps-sdk';
@@ -140,10 +274,12 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 | `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
 
 ```ts
-// Connectors (preferred) — flows discovery, work items, assets, configurable agents.
-// Ship the flow's ORIGIN ID in app config; resolve everything else at runtime:
-const FLOW_REF = '7732039e-…'; // flowOriginId (a concrete flow id also works here)
-const flow = await flows.get(FLOW_REF); // resolves to the latest published version
+// Connectors (generic) — flows discovery, work items, assets, configurable agents.
+// A flow the app knows at AUTHORING time is a dependency: declare it in
+// rise-x-app.json and use its bound surface (deps.<alias>.work.…, see App
+// dependencies above). The generic calls below take a ref — for flows the
+// USER picks at runtime (from flows.list, a search box, a saved selection):
+const flow = await flows.get(pickedRef); // origin or concrete id — resolves to the latest published version
 
 const created = await work.start({ flowId: flow.id, data: { title: 'New' } });
 await work.patchData(created.id, { originId: created.flowOriginId!, path: '$.title', value: 'Renamed' });
@@ -168,8 +304,8 @@ for await (const row of work.iterate({ flow, maxItems: 100 })) { /* … */ }
 const page = await work.search({
   filter: { and: [
     // Required, always. `in` with several origin ids works too. Pin the
-    // RESOLVED origin id, never FLOW_REF — that may hold a concrete version id,
-    // which is a valid guid the index simply never matches (see below).
+    // RESOLVED origin id, never the picked ref — that may hold a concrete
+    // version id, a valid guid the index simply never matches (see below).
     { field: 'flowOriginId', operator: 'equals', values: [flow.flowOriginId] },
     // status values: Open/Closed/Completed/Deleted/Ok. Step-level values like
     // 'InProgress' live on flowState — a DIFFERENT field; filtering status by
@@ -192,6 +328,8 @@ const page = await work.search({
 // never new Date(row.data.x) directly.
 
 // Assets: prefer typeOriginId / the AssetType object over the type name.
+// (A type known at authoring time is a dependency — deps.<alias>.assets.…;
+// runtime discovery like this is for types the user picks.)
 const supplier = (await assets.types()).find((t) => t.entityType === 'Supplier')!;
 
 // assets.search (SDK >= 0.7.0) is the same v4 grammar as work.search, over the
@@ -250,7 +388,7 @@ const apps = getShellApiV4('apps');
 const { data } = await apps.get('/api/v4/config/apps');
 ```
 
-**Reference by id, not by name.** Users rename flows, steps, tasks, and asset types freely (`displayName`), and internal `name`s change when a flow is rebuilt — ids are the only rename-proof reference. Bake `flowOriginId` (and task/step ids where needed) into app config; never hardcode display names. `flows.findTask({ flow, task })` matches by id, exact name, or case-insensitive displayName — the name forms are for dev-time exploration, not shipped code. When the user's input *is* a name (a search box), go through `flows.list({ search })` and let them pick.
+**Reference by id, not by name.** Users rename flows, steps, tasks, and asset types freely (`displayName`), and internal `name`s change when a flow is rebuilt — ids are the only rename-proof reference. Declare `flowOriginId`s in `rise-x-app.json` (task/step ids, which the manifest doesn't carry, stay in app config); never hardcode display names. `flows.findTask({ flow, task })` matches by id, exact name, or case-insensitive displayName — the name forms are for dev-time exploration, not shipped code. When the user's input *is* a name (a search box), go through `flows.list({ search })` and let them pick.
 
 **flowId vs flowOriginId.** A flow has one stable `flowOriginId` across versions plus a concrete `id` per published version — a bare "flow id" copied from a URL is usually the concrete one. `flows.get`/`getConfig` and `work.start` accept either and resolve to the latest published version, but `work.list`/`iterate` and `assets.list`/`iterate` filter strictly by origin id and return an **empty list, not an error**, when given a concrete id. When unsure, resolve first: `(await flows.get(ref)).flowOriginId`.
 
@@ -359,6 +497,13 @@ only pre-deploy test of the data path.
 window.__DIANA_SHELL__ = createMockShell({
   user: { id: 'dev-user', name: 'Test User' },
   environment: { id: 'env-1', slug: 'dev', name: 'Dev Env' },
+  // The app's resolved rise-x-app.json dependencies (SDK ≥ 0.10.0) — the local
+  // dev config doesn't run RiseAppManifestPlugin, so the mock supplies them;
+  // without this, useAppDependencies()/getAppDependency() throw standalone.
+  dependencies: {
+    riskFlow: { kind: 'flow', flowOriginId: '11111111-1111-1111-1111-111111111111' },
+    vesselType: { kind: 'assetType', flowOriginId: '33333333-3333-3333-3333-333333333333' },
+  },
   fixtures: {
     // Rows are keyed by flowOriginId; '*' serves any flow. Served with the
     // request's paging, so pagination and work.iterate() behave as they would live.
@@ -414,11 +559,22 @@ see the SDK README's standalone-dev section.
 
 ```bash
 cd <name>
-pnpm build                                    # produces dist/
+pnpm build                                    # produces dist/ — APP_ENV defaults to "test"
+pnpm exec cross-env APP_ENV=prod pnpm build   # prod bundle — carries prod ids only
 (cd dist && zip -r ../<name>-bundle.zip .)    # zip the CONTENTS of dist/, not the folder
 ```
 
 **Why zip the contents, not the `dist/` folder itself:** the deploy pipeline extracts the archive under the app's served path. `remoteEntry.js` must be at the archive root so the shell can fetch it at runtime.
+
+**Build for the environment you deploy to.** `RiseAppManifestPlugin` resolves
+`rise-x-app.json` for the `APP_ENV` environment and emits the single-environment
+result into `dist/`, so it rides the zip — a test build carries test ids only
+(see §App dependencies). At deploy time the backend reads that file from the
+zip and **rejects the deploy** if any declared dependency doesn't resolve in
+the target ecosystem, with an error listing each failing dependency's alias,
+label, kind, and id — this is what catches a test bundle shipped to prod. The
+stored app then exposes a `dependencies` field, readable through the Rise-X
+MCP's `get_app`.
 
 When the bundle is ready, **ask the user whether to deploy**. Two paths:
 
@@ -428,7 +584,10 @@ Load the `rise-x-mcp` skill first (mandatory before any Rise-X MCP call), then
 pick the server for the target environment: **`rise-x-test` → test,
 `rise-x` → production. If the user doesn't name an environment, deploy to
 test** — most users want to try the app there first. Deploying requires the
-environment-orchestrator role.
+environment-orchestrator role. The bundle must be **built for the same
+environment** (`APP_ENV` above): the backend validates the zip's
+`rise-x-app.json` against the target ecosystem and rejects the deploy when a
+declared dependency doesn't resolve there.
 
 1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
 2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
@@ -469,6 +628,7 @@ manifest with the live `remoteUrl` and `module` (defaults to `./App`).
 - **Don't** bundle your own React. The scaffolder's `import: false` on react/react-dom/jsx-runtime is intentional. If you remove it, you'll get cross-React-instance hook crashes when the app mounts inside the shell.
 - **Don't** import shell internals. The contract is `@rise-x/apps-sdk` — full stop. If you need something the SDK doesn't expose, propose it as an SDK addition in a separate PR (or request it from the Rise-X team) — don't reach into the host.
 - **Don't** wire your own auth or call backend services directly. Go through the connectors (`@rise-x/apps-sdk/connectors`) or `getShellApiV4`.
+- **Don't** put a flow or asset-type GUID literal in app source. Declare it in `rise-x-app.json` and read it through `useAppDependencies()` (§App dependencies); the generic connectors with a ref are for flows the user picks at runtime.
 - **Don't** hand-roll UI or pull in another component library — the app UI is built exclusively from `@rise-x/apps-sdk/ui` (see UI components).
 - **Don't** put navigation in a top bar. The host already renders top-bar nav above the app; app navigation belongs in a left sidebar/rail.
 - **Don't** assume the user or environment is non-null inside lifecycle hooks — accept the typed `ctx` and check.
@@ -488,7 +648,9 @@ Whether you scaffolded a new app or modified an existing one, the user can't see
    (`/code-review --fix`) over the new app code and apply the fixes it
    confirms. If the skill isn't available, say so instead of skipping
    silently.
-4. **Build.** `pnpm build` succeeds and produces `dist/remoteEntry.js`.
+4. **Build.** `pnpm build` succeeds and produces `dist/remoteEntry.js` — with
+   `APP_ENV` matching the environment the bundle will deploy to (default
+   `test`), so `dist/rise-x-app.json` carries that environment's ids.
 5. **Zip `dist/` contents** into `<name>-bundle.zip` (see Build and deploy above for the exact command — must zip the contents, not the folder).
 6. **Ask the user whether to deploy.** If yes, deploy via the Rise-X MCP —
    **test environment unless the user names another** — following the steps in

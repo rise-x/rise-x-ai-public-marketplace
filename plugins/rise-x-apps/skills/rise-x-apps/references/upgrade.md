@@ -13,6 +13,8 @@ Any of these marks the app as old:
   own component kit or icon set, another component library.
 - Data fetched with hand-rolled `useEffect`/axios instead of the `/query`
   hooks or `/connectors`.
+- Flow / asset-type GUIDs hardcoded in source or a hand-rolled config module —
+  no `rise-x-app.json` at the app root.
 - No `APP.md` / `AGENTS.md` at the app root.
 - An in-app top-bar navigation (now disallowed — nav belongs on the left).
 
@@ -54,10 +56,17 @@ user rather than guessing.
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
    in components; `/connectors` in event handlers and lifecycle hooks.
-5. **Add the docs the template now ships:** `APP.md` (see above), `AGENTS.md`,
+5. **Move origin ids into `rise-x-app.json`** (SDK ≥ 0.10.0). Create the
+   manifest at the app root, declare every hardcoded flow / asset-type GUID
+   as an aliased dependency (with `label`/`description` and per-environment
+   ids), add `new RiseAppManifestPlugin()` (from `@rise-x/apps-sdk/webpack`)
+   to `webpack.config.js` plugins as the current template does, and replace
+   the GUID constants with `useAppDependencies()` reads
+   (`references/build.md` §App dependencies).
+6. **Add the docs the template now ships:** `APP.md` (see above), `AGENTS.md`,
    and the one-line `CLAUDE.md` pointer — copy the shape from the SDK's
    `template/` directory (`node_modules/@rise-x/apps-sdk/template/`;
    `packages/apps-sdk/template/` in the rise-x-app monorepo).
-6. **Verify and deploy** per `references/build.md`: `pnpm build` produces
-   `dist/remoteEntry.js`, then the deploy question (test environment by
-   default).
+7. **Verify and deploy** per `references/build.md`: `pnpm build` produces
+   `dist/remoteEntry.js` (with `APP_ENV` matching the deploy target), then
+   the deploy question (test environment by default).

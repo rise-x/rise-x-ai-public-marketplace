@@ -8,8 +8,9 @@ The gate is the same either way: **no implementation before the user
 explicitly approves the mock**.
 
 For a new app the output is: a problem statement the user confirmed, a list
-of integration targets (origin ids), an **explicitly approved** HTML design
-mock, and the material for the app's `APP.md` (personas + user journeys).
+of integration targets (per-environment origin ids, ready for
+`rise-x-app.json`), an **explicitly approved** HTML design mock, and the
+material for the app's `APP.md` (personas + user journeys).
 For changes to an existing app, the output is the approved mock plus the
 `APP.md` updates the change implies.
 
@@ -56,10 +57,16 @@ Ask whether the app should integrate with existing **flows (workflows), assets,
 or agents**:
 
 - **Yes, existing ones** — discover the exact targets and record their
-  **origin ids** (`flowOriginId`, asset-type origin id, agent id); those go
-  into the app config at implementation time. Discover via the Rise-X MCP
-  (`list_flows`, `list_asset_types`, `list_agents`) or ask the user to point
-  at them.
+  **origin ids** (`flowOriginId`, asset-type origin id, agent id). Discover
+  via the Rise-X MCP (`list_flows`, `list_asset_types`, `list_agents`) or
+  ask the user to point at them. Flow and asset-type origin ids land in the
+  app's `rise-x-app.json` at scaffold time — one alias per target, with a
+  `label` and `description`, and ids **per environment**: the same flow has
+  a different origin id on each environment, so run the discovery on every
+  environment the app ships to (per MCP server — `rise-x-test` → test,
+  `rise-x` → production; starting with test only and adding prod later is
+  fine). Agent ids aren't covered by the manifest — they go into app config
+  as before. See `references/build.md` §App dependencies.
 - **Nothing suitable exists yet** — ask whether to **build the flow / assets /
   agent first using the Rise-X MCP**, so the app has something real to
   integrate with, then come back here. For an agent, create the configuration
@@ -147,5 +154,6 @@ Design rules (apply to the mock exactly as they apply to the app):
   keyboard- and screen-reader-friendly structure.
 
 When approved, move to `references/build.md` — carry the approved mock, the
-screen list, the integration origin ids, and the persona/journey material
-(for `APP.md`) into implementation.
+screen list, the integration targets (per-environment origin ids, destined
+for `rise-x-app.json`), and the persona/journey material (for `APP.md`) into
+implementation.
