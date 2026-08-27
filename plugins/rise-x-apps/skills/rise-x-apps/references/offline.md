@@ -169,7 +169,8 @@ submits from; where a flow's config resolves nobody for an action you must submi
 
 **The app-level flag is a deliberate step at deploy time**: pass
 `feature_flags: {"isOfflineModeEnabled": true}` to `deploy_app` (it survives redeploys), or set it on
-an existing app via `update_app` — which **replaces the stored flags wholesale** when passed, so send
+an existing app via `update_app`. `update_app` merges field by field — only what you pass changes —
+but `feature_flags` is a single field, so a passed dict **replaces the stored flags wholesale**; send
 the full dict, not just the key you're changing. The shell's deploy form has no field for it.
 
 ## 3. Pull data down
@@ -266,7 +267,7 @@ What your app experiences, function by function:
 | Call | Fresh online | Cached offline (or network unreachable) | `null` means | Throws when |
 |---|---|---|---|---|
 | `work.get(workId)` | Full `WorkDetail` from `GET /api/v4/work/{id}` | Same shape, mapped from the cached copy of the server's work document, with **no queued edits folded in** — see below | Does not exist (server 404) — **only** that; offline-and-not-downloaded throws instead (see the ladder) | Server unreachable + nothing cached — including offline with nothing downloaded; any non-404 4xx; aborted |
-| `work.getData(workId, {path?})` | The data document, or the subtree at `path` | Same subtree — the shell resolves `path` against the cached document with the same JSONPath the server's `?path=` accepts, so `$.parts[0].qty` answers identically either way | Same convention | Same |
+| `work.getData(workId, {path?})` | The data document, or the subtree at `path` | Same subtree — the shell resolves `path` against the cached document with the same JSONPath the server's `?path=` accepts, so `$.parts[0].qty` answers identically either way | Weaker than `get`'s: a `path` that resolves to nothing also answers `null`, so `null` is not a work-missing signal here | Same |
 | `work.getMyAccess(workId)` | `WorkAccessInfo` from `/my-roles` | From `readMyWorkAccess` — `[]` is a real "downloaded, no roles" answer, distinct from `null` ("not downloaded") | Same — 404 only | Same |
 | `flows.getLayout(layoutId)` | The flat `parentId` component list from the network | The same flat list from the cached copy — one mapper, nothing rearranged, so a component walk behaves identically either way | Same — 404 only | Same |
 | `flows.getConfig(flowId)` | Flow config from the network; an origin id is resolved to the latest version id | From the cached copy. Configs are cached under **version** ids, so an origin id — the stable one an app persists — is matched by scanning the downloaded configs and taking the **newest downloaded** version — the newest that *exists* would need the versions endpoint, i.e. the network | Same — 404 only | Same |
@@ -316,8 +317,9 @@ exist on the server.
 the network response and the cached copy through the *same* mapper, so the two sources are
 shape-identical by construction — but the cached copy is the server's document **as downloaded**, with
 nothing your app has since queued folded in. `listQueuedWorkOperations()` (§7) carries each queued
-operation's `payload` exactly as it was queued (its shape varies by `kind` — a `dataUpdate` carries the
-path and value), so an app can derive what is pending from the queue itself — no separate state, and
+operation's `payload` as the app queued it (its shape varies by `kind` — a `dataUpdate` carries
+`{ id, originId, path, operation, sectionId, value }`, with `operation` in the same name vocabulary
+`queueWorkDataUpdate` accepts), so an app can derive what is pending from the queue itself — no separate state, and
 nothing to reconcile, since a synced item leaves the queue and the derivation falls back to the
 server's value on its own:
 
