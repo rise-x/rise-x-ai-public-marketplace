@@ -56,15 +56,16 @@ user rather than guessing.
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
    in components; `/connectors` in event handlers and lifecycle hooks.
-5. **Move ids into `rise-x-app.json`** (SDK ≥ 0.12.0). Create the
+5. **Move ids into `rise-x-app.json`** (SDK >= 0.12.0). Create the
    manifest at the app root, declare every hardcoded flow, asset-type, or
    agent GUID as an aliased dependency (with `label`/`description` and
    per-environment ids — an agent's id field is `agentId`, not
-   `flowOriginId`), add `new RiseAppManifestPlugin()`
-   (from `@rise-x/apps-sdk/webpack`)
-   to `webpack.config.js` plugins as the current template does, and replace
-   the GUID constants with `useAppDependencies()` reads
-   (`references/build.md` §App dependencies).
+   `flowOriginId`), and replace the GUID constants with
+   `useAppDependencies()` reads (`references/build.md` §App dependencies).
+   The current template's build config wires the manifest plugin itself
+   (`defineAppConfig` from `@rise-x/apps-sdk/rsbuild`); an app still on a
+   hand-written `webpack.config.js` adds `new RiseAppManifestPlugin()` from
+   `@rise-x/apps-sdk/webpack` to its `plugins` instead.
 6. **Add the docs the template now ships:** `APP.md` (see above), `AGENTS.md`,
    and the one-line `CLAUDE.md` pointer — copy the shape from the SDK's
    `template/` directory (`node_modules/@rise-x/apps-sdk/template/`;

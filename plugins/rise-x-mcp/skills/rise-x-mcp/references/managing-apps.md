@@ -65,11 +65,12 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
 
 ## Dependency manifest (`rise-x-app.json`)
 
-A bundle may declare the platform data it uses in a `rise-x-app.json` at the archive root: one
-entry per dependency with an alias (`name`), a `kind` (`flow`, `assetType`, or `agent`), an
-optional `label`/`description`, and the id it resolves to — `flowOriginId` for a flow or asset
-type, `agentId` for an agent (an agent has no origin id and no version chain). The app's build
-emits it — these tools never author or edit it.
+A bundle may declare the platform data it uses in a `rise-x-app.json` at the archive root: the
+environment it was built for, plus a `dependencies` object **keyed by the dependency's alias**
+(the alias is the key, not a field). Each entry carries a `kind` (`flow`, `assetType`, or
+`agent`), an optional `label`/`description`, and the id it resolves to — `flowOriginId` for a
+flow or asset type, `agentId` for an agent (an agent has no origin id and no version chain).
+The app's build emits it — these tools never author or edit it.
 
 **Deploy-time validation.** `deploy_app` checks the manifest against the *target* ecosystem and
 rejects the deploy when:

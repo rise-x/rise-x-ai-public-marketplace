@@ -53,9 +53,9 @@ scaffolded `AGENTS.md` and `README.md` point at it, and every later change
 reads and maintains it (see Writing app code).
 
 **Also fill `rise-x-app.json`** with the integration targets from the design
-phase: the scaffolded manifest starts empty, and every flow or asset-type
-origin id the app depends on is declared there — never in source (see App
-dependencies below).
+phase: the scaffolded manifest declares the environments and no dependencies
+yet, and every flow, asset-type, or agent id the app depends on is declared
+there — never in source (see App dependencies below).
 
 CLI flags worth knowing:
 
@@ -74,9 +74,9 @@ What the scaffolder creates:
 ├── CLAUDE.md              # one-line @AGENTS.md import so Claude Code loads the same guide — edit AGENTS.md
 ├── README.md              # app readme; points at APP.md and AGENTS.md
 ├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod
-├── rise-x-app.json        # app dependency manifest — alias → per-environment origin ids (starts empty)
+├── rise-x-app.json        # app dependency manifest — alias → per-environment ids; the build preset resolves it (no dependencies yet)
 ├── tsconfig.json          # jsx: "react-jsx", strict
-├── webpack.config.js      # MF: exposes ./App and ./lifecycle, shares react/react-dom/jsx-runtime as singleton+import:false; runs RiseAppManifestPlugin
+├── webpack.config.js      # MF: exposes ./App and ./lifecycle, shares react/react-dom/jsx-runtime as singleton+import:false
 ├── webpack.local.config.js # standalone dev config — what `pnpm start` runs (no shell needed)
 ├── public/index.html
 └── src/
@@ -107,7 +107,7 @@ work on old foundations.
 
 **A GUID literal in app source is a bug.** Every flow, asset-type, or agent id
 the app depends on is declared in `rise-x-app.json` at the app project root
-(SDK ≥ 0.12.0) — one stable **alias** per target, and one id **per
+(SDK >= 0.12.0) — one stable **alias** per target, and one id **per
 environment**, so the same source builds for every environment the app ships
 to. App code consumes them through `deps.<alias>`. Only flows the *user*
 picks at runtime (a search box, a flow selector) keep going through the
@@ -181,22 +181,26 @@ The ids come from the same discovery as before — the Rise-X MCP
 in the manifest, per environment, instead of in source (see
 `references/design.md` §3).
 
-**Per-environment builds.** The scaffolded `webpack.config.js` runs
-`RiseAppManifestPlugin` (from `@rise-x/apps-sdk/webpack`), which resolves the
-manifest for **one** environment — `APP_ENV`, default `test` — and emits the
-flat, single-environment result as `dist/rise-x-app.json`, so it rides the
-bundle zip. Origin ids for other environments never ship. The build fails,
-naming the alias and environment, on an unknown environment, a missing id,
-an unsupported `kind`, an id field that doesn't belong to the `kind`, or a
-non-GUID id.
+**Per-environment builds.** The scaffolded build config wires the app-manifest
+plugin for you — `defineAppConfig` from `@rise-x/apps-sdk/rsbuild` includes it,
+so there is nothing to add (an app still on a hand-written webpack config adds
+`new RiseAppManifestPlugin()` from `@rise-x/apps-sdk/webpack` instead). It
+resolves the manifest for **one** environment — `APP_ENV`, default `test` — and
+emits the flat, single-environment result as `dist/rise-x-app.json`, so it rides
+the bundle zip. Ids for other environments never ship. The build fails, naming
+the alias and environment, on an unknown environment, a missing id, an
+unsupported `kind`, an id field that doesn't belong to the `kind`, a non-GUID
+id, two aliases that differ only by case (the deploy side folds the alias
+keyspace the same way), or more than 100 dependencies.
 
 ```bash
 pnpm build                                    # → environment "test"
-pnpm exec cross-env APP_ENV=prod pnpm build   # → environment "prod"
+pnpm build:prod                               # → environment "prod"
 ```
 
-Go through `cross-env` (a template devDependency) — the inline
-`APP_ENV=prod pnpm build` form doesn't work in PowerShell or cmd.exe.
+`build:prod` is the template's own script — `cross-env APP_ENV=prod` in front
+of the build. Go through `cross-env` for any other environment too: the inline
+`APP_ENV=<env> pnpm build` form doesn't work in PowerShell or cmd.exe.
 
 **Runtime consumption.** The plugin injects the resolved manifest into the
 bundle as a compile-time constant, so the accessors are synchronous and the
@@ -255,11 +259,15 @@ unchanged.
 
 Anything not on the bound surface takes the id — `useFlowConfig(dep.flowOriginId)`
 works for a flow or an asset type, since an asset type is backed by a flow
-too, and `useAgent(dep.agentId)` for an agent. Both accessors throw a
-`ConnectorError` naming the fix when no manifest reached the bundle, or
-listing the declared aliases when the alias isn't one of them.
+too, and `useAgent(dep.agentId)` for an agent — both take the raw id, so a
+missing dependency surfaces before them: the accessors above throw a
+`ConnectorError` naming the fix when no manifest reached the bundle, and
+`getAppDependency` lists the declared aliases when the alias isn't one of them.
 
-**Prefetch (optional).** `prefetchAppDependencies(client)` from
+**Prefetch (optional, needs a manifest).** It reads the declared dependencies,
+so it throws the same missing-manifest `ConnectorError` when none reached the
+bundle — don't `void` it in an app that may ship without one.
+`prefetchAppDependencies(client)` from
 `@rise-x/apps-sdk/query` warms react-query with what each declared dependency
 needs: a flow or asset type gets its flow config and the layouts that config
 points at; an agent gets its agent document — never a flow config, and never
@@ -274,9 +282,10 @@ const client = useAppQueryClient();
 useEffect(() => { void prefetchAppDependencies(client); }, [client]);
 ```
 
-**Standalone dev.** `webpack.local.config.js` doesn't run the plugin, so the
-mock shell supplies the resolved manifest — see §Standalone dev below for the
-`createMockShell({ dependencies })` option.
+**Standalone dev.** The preset runs the plugin in standalone mode too, so
+`useAppDependencies()` works there with no extra wiring. Pass
+`createMockShell({ dependencies })` only to *override* the built ids locally —
+see §Standalone dev below.
 
 ### Runtime APIs from `@rise-x/apps-sdk`
 
@@ -293,7 +302,7 @@ import {
   getShellApi,           // legacy Diana axios instance
   getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment' | 'asset'
   getShellAi,            // rise-x-ai gateway handle (bridge v3+), or null
-  // Declared app dependencies (rise-x-app.json, SDK ≥ 0.12.0) — see App dependencies above
+  // Declared app dependencies (rise-x-app.json, SDK >= 0.12.0) — see App dependencies above
   useAppDependencies,
   getAppDependency,
   getAppDependencies,
@@ -548,9 +557,9 @@ only pre-deploy test of the data path.
 window.__DIANA_SHELL__ = createMockShell({
   user: { id: 'dev-user', name: 'Test User' },
   environment: { id: 'env-1', slug: 'dev', name: 'Dev Env' },
-  // The app's resolved rise-x-app.json dependencies (SDK ≥ 0.12.0) — the local
-  // dev config doesn't run RiseAppManifestPlugin, so the mock supplies them;
-  // without this, useAppDependencies()/getAppDependency() throw standalone.
+  // Overrides the resolved rise-x-app.json dependencies (SDK >= 0.12.0). The
+  // build injects them in standalone mode too, so this is for pointing local
+  // dev at different ids — or for an app that has no manifest yet.
   dependencies: {
     riskFlow: { kind: 'flow', flowOriginId: '11111111-1111-1111-1111-111111111111' },
     vesselType: { kind: 'assetType', flowOriginId: '33333333-3333-3333-3333-333333333333' },
@@ -612,7 +621,7 @@ see the SDK README's standalone-dev section.
 ```bash
 cd <name>
 pnpm build                                    # produces dist/ — APP_ENV defaults to "test"
-pnpm exec cross-env APP_ENV=prod pnpm build   # prod bundle — carries prod ids only
+pnpm build:prod                               # prod bundle — carries prod ids only
 (cd dist && zip -r ../<name>-bundle.zip .)    # zip the CONTENTS of dist/, not the folder
 ```
 
