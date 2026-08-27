@@ -15,9 +15,9 @@ release an app end-to-end from a Claude session, no manual zip upload through th
 | Tool | What it does |
 |---|---|
 | `request_bundle_upload()` | Step 1 of a deploy: returns a one-time `uploadUrl` + `uploadId` for staging the bundle zip |
-| `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id` |
-| `list_apps()` | Registry listing — `id`, `name`, `version`, `scope`, `remoteUrl`, `lastModified` per app |
-| `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`) |
+| `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id`. Validates the bundle's dependency manifest against the target ecosystem — see § Dependency manifest |
+| `list_apps()` | Registry listing — `id`, `name`, `version`, `scope`, `remoteUrl`, `lastModified`, `dependencyCount` per app |
+| `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`, resolved `dependencies`) |
 | `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Does NOT touch the bundle |
 | `delete_app(app_id)` | Soft-delete from the registry (bundle blobs cleaned). Redeploying under the same id restores it |
 
@@ -40,7 +40,8 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
      app_scope = "my_app",            # MF scope, snake_case: [a-z][a-z0-9_]*
      app_id    = <GUID>,              # ONLY when releasing a new version of an existing app
    )
-     → app id + canonical manifest (remoteUrl, version, scope, deployedAt, sizeBytes)
+     → app id + canonical manifest (remoteUrl, version, scope, deployedAt, sizeBytes,
+       dependencies — echoed from the bundle's dependency manifest, if it has one)
 ```
 
 ### Bundle requirements
@@ -48,6 +49,9 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
 - A zip of the app's **`dist/` folder contents** — `remoteEntry.js` must sit at the **archive
   root** (zip the contents, not the folder), or the shell can't load the remote.
 - Size-capped (default 20 MB) — the PUT is rejected above the cap.
+- May contain **`rise-x-app.json`** at the archive root — the app's dependency manifest,
+  emitted by the app's build. Expected, not an error; see § Dependency manifest for how it's
+  validated at deploy time.
 
 ### Upload URL semantics
 
@@ -58,6 +62,31 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
   `deploy_app` forwards them to the platform with *your* bearer token.
 - A `localhost_public_url` warning in the step-1 response means the server's `MCP_PUBLIC_URL` is
   the localhost default — the URL is only reachable when the MCP server runs locally.
+
+## Dependency manifest (`rise-x-app.json`)
+
+A bundle may declare the platform data it uses in a `rise-x-app.json` at the archive root: one
+entry per dependency with an alias (`name`), a `kind` (`flow` or `assetType`), an optional
+`label`/`description`, and the `flowOriginId` it resolves to. The app's build emits it — these
+tools never author or edit it.
+
+**Deploy-time validation.** `deploy_app` checks the manifest against the *target* ecosystem and
+rejects the deploy when:
+
+- **`InvalidDependencyManifest`** — the file is malformed (bad JSON, missing/invalid fields).
+- **`UnresolvedDependencies`** — one or more declared dependencies don't resolve in the target
+  ecosystem. The message lists every failing dependency's alias, label, kind, and
+  `flowOriginId`. This usually means the bundle was **built for a different environment** (e.g.
+  test-environment ids deployed to production) — rebuild with the right `APP_ENV` and restage;
+  the ids live inside the zip, so retrying with the same `upload_id` can't fix it.
+
+A bundle without the file deploys as before — no dependencies are recorded.
+
+**Reading dependencies back.** `get_app` returns a `dependencies` list — the way to answer
+"what data does this app use". Each entry carries the declared `name`, `kind`, `label`,
+`description`, and `flowOriginId`, plus the resolved `flowId` and `flowName` in the active
+ecosystem. `list_apps` rows carry a `dependencyCount`, and a successful `deploy_app` echoes
+`dependencies` in its result.
 
 ## Release workflow recipes
 
@@ -100,3 +129,9 @@ cleaned, but redeploying with the same `app_id` restores the app.
    applies).
 5. **These tools don't build anything** — produce the bundle with the `rise-x-apps` skill (its build phase
    covers the production build + zipping) and hand the zip to this flow.
+6. **`UnresolvedDependencies` on deploy = wrong-environment bundle.** The declared
+   `flowOriginId`s don't exist in the target ecosystem — almost always a bundle built against
+   another environment (test ids pushed to production). Don't retry with the same `upload_id`:
+   rebuild with the right `APP_ENV`, re-zip, and run the three-step flow again. And
+   `rise-x-app.json` sitting at the archive root is *expected* — never "clean" it out of the
+   zip to get past the check.
