@@ -62,7 +62,7 @@ CLI flags worth knowing:
 | Flag | Default | Use |
 | --- | --- | --- |
 | `--pm=<npm\|yarn\|pnpm>` | auto | Force a package manager. **Prefer `pnpm` whenever it's available** — it's what Rise-X uses, and the commands throughout this guide assume it. Without the flag the CLI auto-detects from lockfiles in the cwd (falling back to npm), so pass it explicitly when scaffolding into an empty directory. |
-| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — in the rise-x-app monorepo check what's taken with `grep -n "port:" apps/*/webpack.config.js`. |
+| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — in the rise-x-app monorepo list what's taken with `node tools/list-app-ports.js`. |
 | `--skip-install` | off | Skip install (faster scaffold; the user installs later). |
 | `--json` | off | Emit `{ path, slug, scope, pkgName, port, pm }` to stdout — useful for automation. |
 
@@ -75,8 +75,8 @@ What the scaffolder creates:
 ├── README.md              # app readme; points at APP.md and AGENTS.md
 ├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod
 ├── tsconfig.json          # jsx: "react-jsx", strict
-├── webpack.config.js      # MF: exposes ./App and ./lifecycle, shares react/react-dom/jsx-runtime as singleton+import:false
-├── webpack.local.config.js # standalone dev config — what `pnpm start` runs (no shell needed)
+├── rsbuild.config.mts     # 17 lines: calls defineAppConfig from @rise-x/apps-sdk/rsbuild
+│                         # (the MF contract lives in the preset, not here)
 ├── public/index.html
 └── src/
     ├── index.tsx          # `import('./bootstrap')` — MF async boundary
@@ -85,7 +85,9 @@ What the scaffolder creates:
     └── lifecycle.ts       # the module exposed as ./lifecycle
 ```
 
-After scaffold, **do not** modify `webpack.config.js` shares for react-family — the singleton+`import: false` pattern is load-bearing. (The shell provides them eagerly; bundling a local fallback causes duplicate-React bugs.) Adding *other* shares is fine.
+The app has **no Module Federation config of its own to edit.** `rsbuild.config.mts` just calls `defineAppConfig`, and the preset owns the whole contract: the MF scope (derived from the package name, `@rise-x-apps/vendor-hub` -> `app_vendor_hub`), `remoteEntry.js`, the `./App` + `./lifecycle` exposes, and every share. The react family is shared `singleton` + `import: false` because the shell provides it eagerly and bundling a local fallback causes duplicate-React bugs — load-bearing, and now out of reach of a local edit, which is the point.
+
+An app may pass only `exposes` (merged over the defaults) and `define`. It **cannot add shares**: if one is genuinely needed, that is a change to the SDK preset, not to the app. You upgrade the contract by upgrading `@rise-x/apps-sdk`.
 
 The scaffolded `src/App.tsx` **is the canonical app layout** (left rail from
 the Nav primitives, PageHeader + content screens, no user UI). Build the app
@@ -292,7 +294,7 @@ const submit = useSubmitWork(); // submit.mutate({ workId, actionName }) — inv
 Rules:
 - **Never mount a `QueryClientProvider` with a client of your own** — that shadows the per-app client the shell mounts and breaks shell-managed caching. The SDK hooks need no provider at all: they pass the resolved client explicitly (host client when federated, per-bundle fallback standalone).
 - **If the app calls react-query directly, wrap it in `<AppQueryProvider>`** (SDK >= 0.7.0, from `@rise-x/apps-sdk/query`; the scaffold's `App.tsx` already does). Plain APIs — `useQuery(flowQueries.list(args))`, `useQueryClient()`, devtools — read the client from context, and standalone dev has no provider, so they throw *"No QueryClient set"* the moment you leave the SDK hooks. `AppQueryProvider` publishes the *resolved* client, so it re-publishes the host's client when federated and the fallback when standalone.
-- **Keep `'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' }` in the webpack `shared` block** (the scaffold has it, WITHOUT `import: false` — the bundled fallback is deliberate). Removing it breaks shell-managed caching.
+- **The `@tanstack/react-query` share is the preset's, not yours** — `{ singleton: true, requiredVersion: '^5.0.0' }`, deliberately WITHOUT `import: false` so the bundled fallback survives standalone dev. It comes with the SDK and there is nothing to keep in the app; shell-managed caching depends on it, so an app must not try to shadow it.
 - Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useWorkSearch/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetQuickSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
 - Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
 - Keys are environment-scoped (`['rise-apps-sdk', envId, …]`) — ecosystem switches refetch automatically; `queryKeys` is exported for targeted invalidation. Advanced react-query features (select/suspense/prefetch) go through the factories: `useQuery(flowQueries.list(args))`.
@@ -358,7 +360,7 @@ export const onUninstall: UninstallHook = async ({ manifest }) => {
 };
 ```
 
-If you change which hooks are exported, ensure `webpack.config.js` still has `'./lifecycle': './src/lifecycle'` in `exposes` (the scaffolder includes it; never remove it).
+`./lifecycle` is exposed by the preset for every app, so changing which hooks you export needs no config change — just keep the module at `src/lifecycle`.
 
 ### Standalone dev (outside the shell)
 
@@ -457,8 +459,9 @@ environment-orchestrator role.
    omit `app_id` for a brand-new app (a GUID is generated and returned); pass
    the existing GUID to release a new version. `version` comes from the app's
    `package.json` and must be unique per app — bump it every release.
-   `app_scope` is snake_case and **must match the `name` set by the app's
-   webpack `ModuleFederationPlugin`**.
+   `app_scope` is snake_case and **must match the MF scope the preset derives
+   from the package name** (`@rise-x-apps/vendor-hub` -> `app_vendor_hub`); the
+   scaffolder's `--json` output reports it as `scope`.
 
 The result carries the app `id` and the canonical manifest (`remoteUrl`,
 `version`, `scope`, `deployedAt`). Confirm the app loads in the shell after.
@@ -476,7 +479,7 @@ Provide these values for the user to copy/paste into the dialog:
 | --- | --- | --- |
 | `name` * | human-readable name |  |
 | `version` * | from the app's `package.json` |  |
-| `app_scope` * | `app_<slug_with_underscores>` | Must match the `name` set by the app's webpack `ModuleFederationPlugin`. Regex: `^[a-z][a-z0-9_]*$`. |
+| `app_scope` * | `app_<slug_with_underscores>` | Must match the MF scope the preset derives from the package name. Regex: `^[a-z][a-z0-9_]*$`. |
 | `bundle` * | the `.zip` you produced |  |
 | `description` | short description of the app |  |
 | `icon` | optional |  |

@@ -88,7 +88,7 @@ cleaned, but redeploying with the same `app_id` restores the app.
 
 1. **Zip the `dist/` contents, not the folder** — a zip with a top-level `dist/` directory
    deploys "successfully" but the shell 404s on `remoteEntry.js`.
-2. **`app_scope` mismatch** — deploy-time `app_scope` must match the webpack MF scope
+2. **`app_scope` mismatch** — deploy-time `app_scope` must match the app's MF scope
    (`app_<slug_with_underscores>` for scaffolded apps). Wrong scope = manifest loads, app never
    mounts.
 3. **Version reuse** — the platform rejects a duplicate version per app; `list_apps` shows the

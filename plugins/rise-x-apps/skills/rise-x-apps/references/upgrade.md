@@ -7,8 +7,11 @@ system and the docs conventions. Recognize them, and **ask before migrating**.
 
 Any of these marks the app as old:
 
-- `webpack.config.js` `shared` has no `@rise-x/ui` entry (often no
-  `@tanstack/react-query` either — only the react family).
+- A `webpack.config.js` at the app root. Current apps have a 17-line
+  `rsbuild.config.mts` instead, and the Module Federation contract lives in
+  `@rise-x/apps-sdk/rsbuild`, not in the app. An older still-on-webpack app whose
+  `shared` block has no `@rise-x/ui` entry (often no `@tanstack/react-query`
+  either, only the react family) predates the design system as well.
 - UI is not imported from `@rise-x/apps-sdk/ui`: hand-rolled CSS files, an
   own component kit or icon set, another component library.
 - Data fetched with hand-rolled `useEffect`/axios instead of the `/query`
@@ -37,14 +40,37 @@ user rather than guessing.
 
 1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
    outside), then `pnpm install`.
-2. **Align `webpack.config.js` `shared` with the current template**
-   (`node_modules/@rise-x/apps-sdk/template/webpack.config.js`;
-   `packages/apps-sdk/template/webpack.config.js` in the rise-x-app
-   monorepo): add `@rise-x/ui`
-   `{ singleton: true, requiredVersion: false, import: false }` and
-   `@tanstack/react-query` `{ singleton: true, requiredVersion: '^5.0.0' }`
-   (no `import: false` there — the bundled fallback is deliberate). Leave the
-   react-family entries as they are.
+2. **Move the build onto the preset.** Delete `webpack.config.js` and
+   `webpack.local.config.js`, and add an `rsbuild.config.mts` — copy the shape
+   from the SDK's `template/rsbuild.config.mts`
+   (`node_modules/@rise-x/apps-sdk/template/`; `packages/apps-sdk/template/` in
+   the rise-x-app monorepo):
+
+   ```ts
+   import { defineConfig } from '@rsbuild/core';
+   import { defineAppConfig } from '@rise-x/apps-sdk/rsbuild';
+   import pkg from './package.json';
+
+   export default defineConfig(({ envMode }) =>
+     defineAppConfig({ pkg, port: <this app's port>, standalone: envMode === 'standalone' }),
+   );
+   ```
+
+   Then swap the build dependencies and scripts: drop webpack and its loaders,
+   add `@rsbuild/core`, `@rsbuild/plugin-react` and `@rsbuild/plugin-type-check`
+   as devDependencies, and set `build: rsbuild build`,
+   `start: rsbuild dev --env-mode standalone`, `start:federated: rsbuild dev`.
+
+   **There is no `shared` block to align any more.** The preset owns the whole
+   Module Federation contract — the MF scope (derived from the package name,
+   `@rise-x-apps/vendor-hub` -> `app_vendor_hub`), `remoteEntry.js`, the
+   `./App` + `./lifecycle` exposes, and every share including `@rise-x/ui` and
+   `@tanstack/react-query`. You upgrade the contract by upgrading the SDK. An app
+   can pass only `exposes` (merged over the defaults) and `define`; it cannot add
+   shares, so an app that needed a custom one is a conversation with the SDK, not
+   a local edit. `.mts` rather than `.ts` is deliberate: it marks the file ESM,
+   which a plain `.ts` warns about on every build, and `"type": "module"` is not
+   an alternative because it breaks `commitlint.config.js`.
 3. **Rebuild the UI on `@rise-x/apps-sdk/ui`.** Replace hand-rolled
    CSS/components/icon sets with design-system components (lucide icons ship
    with it); delete what they cover. Move any top-bar navigation to a left

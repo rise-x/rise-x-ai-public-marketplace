@@ -34,7 +34,7 @@ Existing-app work skips straight to the matching phase:
 | "Add a feature to app <x>" — anything that adds or changes UI | `references/design.md` first (mock → approval), then `references/build.md` |
 | Shell hooks / connectors / query layer / lifecycle hooks — no UI change | `references/build.md` |
 | "Redesign screen X" / "what should this look like" / migrate to the design system | `references/design.md` (mock → approval), then `references/build.md` |
-| The app is OLD — no `@rise-x/ui` in webpack `shared`, hand-rolled UI, no `APP.md` | `references/upgrade.md` — ask about migrating before changing it; the migration itself goes mock-first |
+| The app is OLD — a `webpack.config.js` at its root, hand-rolled UI, no `APP.md` | `references/upgrade.md` — ask about migrating before changing it; the migration itself goes mock-first |
 | "Build/deploy the app" | `references/build.md` §Build and deploy |
 | Changing the `@rise-x/apps-sdk` package itself | Not this skill — that's SDK development inside the rise-x-app monorepo (see its root `AGENTS.md`). |
 
