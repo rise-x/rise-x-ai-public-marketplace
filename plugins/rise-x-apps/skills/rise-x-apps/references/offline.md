@@ -147,10 +147,10 @@ sticks. Follow through the same way that reference does: read the flag back befo
 (`get_flow_config(draftId, path="properties.featureFlags")`), and after `publish_flow` take the
 flow's **new published id** from the publish envelope — or re-resolve it via `list_flows` — since
 every id you held before publishing is stale except the `flowOriginId`, the one id stable across
-republishes (§3 relies on exactly that). `PATCH
-/api/v4/config/flow/{id}/properties` only applies a `featureFlags` update to a **draft** flow id; a
-properties update aimed at an already-**published** flow id silently strips everything except identity
-fields at the REST layer, and — via the MCP — surfaces as a `dropped_property` warning with
+republishes (§3 relies on exactly that).
+`PATCH /api/v4/config/flow/{id}/properties` only applies a `featureFlags` update to a **draft** flow
+id; a properties update aimed at an already-**published** flow id silently strips everything except
+identity fields at the REST layer, and — via the MCP — surfaces as a `dropped_property` warning with
 `changed: []`. So always target a draft: to change the flag later, open a new draft off the published
 flow, patch that draft's id, then publish again. The bag itself is a plain `string → bool` dictionary on
 the flow's properties — the key is exactly `isOfflineModeEnabled` — and it is shared with unrelated
