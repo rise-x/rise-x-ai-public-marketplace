@@ -1,7 +1,9 @@
-# Upgrading an old app — SDK + design system migration
+# Upgrading an old app — build, SDK and design-system migrations
 
-Apps scaffolded before the current `@rise-x/apps-sdk` predate the design
-system and the docs conventions. Recognize them, and **ask before migrating**.
+Apps scaffolded before the current `@rise-x/apps-sdk` may be behind on any of
+three fronts — the build (still webpack), the design system, and the docs
+conventions — and they move independently. Recognize which, and **ask before
+migrating**.
 
 ## Spotting an old app
 
@@ -46,8 +48,11 @@ present too: hand-rolled UI instead of `@rise-x/apps-sdk/ui`, `useEffect`/axios
 instead of the query hooks, no `APP.md`, an in-app top bar.
 
 An app that is already current on the design system and the query hooks but
-still on webpack needs **only 1, 2 and 6** — no design phase and no approval
-gate, because no screen changes. Don't run it through steps 3-5 out of habit.
+still on webpack needs **1, 2, 6 — and 5 if its docs are missing**: `APP.md` /
+`AGENTS.md` / `CLAUDE.md` are a separate axis from the UI, and the *Missing
+APP.md* section above applies whatever the build is. What it does not need is
+steps 3 and 4, and so no design phase and no approval gate, because no screen
+changes. Don't run it through those out of habit.
 
 1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
    outside), then `pnpm install`.
@@ -55,7 +60,8 @@ gate, because no screen changes. Don't run it through steps 3-5 out of habit.
    `webpack.local.config.js`** (its `devServer.port`) — that file is deleted in
    this step and it is the only place the value lives. Then delete
    `webpack.config.js` and `webpack.local.config.js`, and add an
-   `rsbuild.config.mts` — copy the shape
+   `rsbuild.config.mts` — copy the shape (the template's own file has a `__APP_PORT__`
+   placeholder the scaffolder substitutes, so take the structure, not the literal)
    from the SDK's `template/rsbuild.config.mts`
    (`node_modules/@rise-x/apps-sdk/template/`; `packages/apps-sdk/template/` in
    the rise-x-app monorepo):
@@ -66,8 +72,9 @@ gate, because no screen changes. Don't run it through steps 3-5 out of habit.
    import pkg from './package.json';
 
    export default defineConfig(({ envMode }) =>
-     // the port the old webpack.local.config.js devServer used
-     defineAppConfig({ pkg, port: 5101, standalone: envMode === 'standalone' }),
+     // the port the old webpack.local.config.js devServer used — NOT 5101, which
+     // is the scaffolder's default and must stay unique per app
+     defineAppConfig({ pkg, port: 5xxx, standalone: envMode === 'standalone' }),
    );
    ```
 
@@ -87,8 +94,8 @@ gate, because no screen changes. Don't run it through steps 3-5 out of habit.
    Module Federation contract — the MF scope (derived from the package name,
    `@rise-x-apps/vendor-hub` → `app_vendor_hub`), `remoteEntry.js`, the
    `./App` + `./lifecycle` exposes, and every share including `@rise-x/ui` and
-   `@tanstack/react-query`. You upgrade the contract by upgrading the SDK. Beyond the
-   required `pkg`, `port` and `standalone`, an app can pass only `exposes`
+   `@tanstack/react-query`. You upgrade the contract by upgrading the SDK. Beyond
+   `pkg`, `port` and `standalone` (`standalone` defaults to `false`), an app can pass only `exposes`
    (merged over the defaults) and `define`; it cannot add
    shares, so an app that needed a custom one is a conversation with the SDK, not
    a local edit.
@@ -103,10 +110,14 @@ gate, because no screen changes. Don't run it through steps 3-5 out of habit.
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
    in components; `/connectors` in event handlers and lifecycle hooks.
-5. **Add the docs the template now ships:** `APP.md` (see above), `AGENTS.md`,
-   and the one-line `CLAUDE.md` pointer — copy the shape from the SDK's
-   `template/` directory (`node_modules/@rise-x/apps-sdk/template/`;
-   `packages/apps-sdk/template/` in the rise-x-app monorepo).
+5. **Add the docs.** `AGENTS.md` and the one-line `CLAUDE.md` pointer can be
+   copied from the SDK's `template/` directory
+   (`node_modules/@rise-x/apps-sdk/template/`; `packages/apps-sdk/template/` in
+   the rise-x-app monorepo, which also ships a `README.md`). `APP.md` is **not**
+   in the template — it is per-app and you write it, see *Missing APP.md* above.
+   While you are in `package.json`, the template also ships
+   `typecheck: tsc --noEmit`; add it if absent, since `pluginTypeCheck` in the
+   preset is now the app's only type gate.
 6. **Verify and deploy** per `references/build.md`: `pnpm build` produces
    `dist/remoteEntry.js`, then the deploy question (test environment by
    default).

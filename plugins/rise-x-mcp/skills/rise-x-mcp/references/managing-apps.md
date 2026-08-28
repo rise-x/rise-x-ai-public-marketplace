@@ -78,10 +78,13 @@ cleaned, but redeploying with the same `app_id` restores the app.
 ## Validation rules (checked client-side before anything is consumed)
 
 - `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app.
-- `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `todo_app`). Must equal the
+- `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `app_todo_app`). Must equal the
   Module Federation scope the app was built with, or the shell can't mount it. For an app on
-  `@rise-x/apps-sdk` that scope is derived from the package name
-  (`@rise-x-apps/todo-app` -> `todo_app`) and reported as `scope` by the scaffolder's `--json`.
+  `@rise-x/apps-sdk` that scope is derived from the package name by stripping the npm scope and
+  replacing hyphens: `@rise-x-apps/todo-app` → **`app_todo_app`** — note the `app_` prefix. The
+  scaffolder reports it as `scope` in its `--json` output, which is the value to use rather than
+  deriving it by hand. (The preset honours an `APP_SCOPE` env override, for registering two builds
+  of one app side by side.)
 - `name` — non-empty.
 - Failing validation never consumes the staged upload — fix the field and call `deploy_app` again
   with the same `upload_id`.
