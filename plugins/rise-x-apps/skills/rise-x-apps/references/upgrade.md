@@ -48,7 +48,9 @@ user rather than guessing.
 3. **Rebuild the UI on `@rise-x/apps-sdk/ui`.** Replace hand-rolled
    CSS/components/icon sets with design-system components (lucide icons ship
    with it); delete what they cover. Move any top-bar navigation to a left
-   sidebar/rail (bottom tab bar on mobile). Run the design phase first —
+   sidebar/rail (bottom tab bar on mobile — on SDK >= 0.10.0 that is
+   `mobileNav="tabs"` on `AppFrame`, not a hand-built bar; see
+   `references/build.md`). Run the design phase first —
    always (`references/design.md`): mock the migrated screens on the design
    system and get explicit approval before rebuilding. A component-library
    migration changes every screen; it is never a silent swap.
