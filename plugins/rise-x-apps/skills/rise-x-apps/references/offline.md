@@ -9,8 +9,11 @@ cache too. This covers both, in the order an app author actually hits them: prep
 app, pull data down, read, write, stay fresh, watch the sync queue — then a consolidated list of
 platform gaps and a minimal example. That includes the `@rise-x/apps-sdk` connectors (`work`/`flows`/
 `attachments` reads, explicit writes, the `offline` connector's queue tools) function by function with
-their argument traps, the `onOfflineDownload` lifecycle hook, and why the `@rise-x/apps-sdk/query` hooks
-must not drive offline screens.
+their argument traps, the `onOfflineDownload` lifecycle hook, and which `@rise-x/apps-sdk` version the
+offline behaviour needs.
+
+Verified against `@rise-x/apps-sdk` **0.12.0** (bridge protocol v4) — where a claim is
+version-sensitive, the text says so.
 
 Not needed for an app that only wants a "you're offline" banner for UX copy — `offline.isOnline()`
 covers that alone (§6). Not needed while merely scaffolding a new app — that's the scaffold
@@ -29,8 +32,8 @@ subsystem; this list is the execution order.
    config of every task the app submits from (layout config — changeable in later flow versions).
 2. **The app-level flag** (§2) — plan to pass `feature_flags: {"isOfflineModeEnabled": true}` on
    `deploy_app`, or set it later via `update_app`.
-3. **Screens** (§4, §5) — reads through connectors called directly (not the query hooks — §8, gap 5),
-   every write routed by `writeMode` read fresh at the moment of the write.
+3. **Screens** (§4, §5) — reads through the connectors or the `/query` hooks (both answer from the
+   offline cache, §4), every write routed by `writeMode` read fresh at the moment of the write.
 4. **The data pull** (§3) — export `onOfflineDownload`; without it an offline-enabled app opens
    offline to an empty world.
 5. **Freshness and queue visibility** (§6, §7) — browser connectivity events, one Refresh control,
@@ -49,7 +52,7 @@ you reach for a function.
 | **Data** | Flow config, layouts, works, attachments, and every queued-but-unsent write | The connectors (`work`, `flows`, `attachments`, `offline`) from `@rise-x/apps-sdk` — this is what your app code calls |
 | **Availability** | Whether a download is actually complete and intact right now | Derived on every check, never a stored flag — storage can be evicted without telling the app |
 
-Asset-backed screens are online-only today — §8, gap 6.
+Asset-backed screens are online-only today — §8, gap 5.
 
 A download for an offline-enabled app captures three artifacts, in order: the app **manifest**
 (`remoteUrl` + `featureFlags`), a **file listing** enumerating every chunk the bundle needs, and the
@@ -89,8 +92,10 @@ Three rules govern everything past this point; each is expanded where it's actua
 
 ### The bridge under the connectors, mapped
 
-Everything offline rides on two handles the shell exposes over its versioned bridge
-(`SHELL_BRIDGE_VERSION` in the SDK): `getCache(): CacheApi | null`
+Everything offline rides on two handles the shell exposes over its versioned bridge — the
+`window.__DIANA_SHELL__` object `references/build.md`'s mock-shell setup also assigns; the SDK
+exports the protocol number as the `SHELL_BRIDGE_VERSION` constant, and 4 is the version that
+carries these: `getCache(): CacheApi | null`
 — raw, read-only views of exactly what a download stored — and `getOffline(): OfflineApi | null` —
 connectivity, queueing, sync, and downloads. Both are **internal transport between the shell and the
 SDK**; the connectors are the management layer your app talks to. `null` means the host predates the
@@ -137,7 +142,12 @@ and let the connectors carry everything your running UI does.
 
 **The flow's offline flag is set through the flow draft cycle, not a one-shot pre-publish edit.**
 `create_flow_draft` → `update_flow_properties(draftId, { featureFlags: … })` → `publish_flow` — the
-`rise-x-mcp` plugin documents the cycle, and it is the only path that sticks. `PATCH
+`rise-x-mcp` plugin's `references/managing-flows.md` documents the cycle, and it is the only path that
+sticks. Follow through the same way that reference does: read the flag back before publishing
+(`get_flow_config(draftId, path="properties.featureFlags")`), and after `publish_flow` take the
+flow's **new published id** from the publish envelope — or re-resolve it via `list_flows` — since
+every id you held before publishing is stale except the `flowOriginId`, the one id stable across
+republishes (§3 relies on exactly that). `PATCH
 /api/v4/config/flow/{id}/properties` only applies a `featureFlags` update to a **draft** flow id; a
 properties update aimed at an already-**published** flow id silently strips everything except identity
 fields at the REST layer, and — via the MCP — surfaces as a `dropped_property` warning with
@@ -184,25 +194,20 @@ than as a broken boot.
 
 The bundle download (§1) never fetches work data itself — only the manifest, file listing, and bundle
 chunks. Without your own hook, an offline-enabled app opens offline to an empty world. Export
-`onOfflineDownload` from `src/lifecycle.ts` alongside `onInstall`/`onUpdate`/`onUninstall`:
-
-```ts
-import type { OfflineDownloadHook } from "@rise-x/apps-sdk";
-
-export const onOfflineDownload: OfflineDownloadHook = async (_ctx, { offline, reportProgress }) => {
-  const result = await offline.downloadFlowWorks({
-    flowOriginId: FLOW_ORIGIN_ID, // flowOriginId — app config
-  });
-  reportProgress({ processed: result.total, total: result.total });
-};
-```
-
-The flow reference is app config, recorded once at integration time — not something to resolve by
+`onOfflineDownload` from `src/lifecycle.ts` alongside `onInstall`/`onUpdate`/`onUninstall`. The flow
+reference it needs is app config, recorded once at integration time — not something to resolve by
 searching flow names at runtime, since a shipped app that hardcodes a flow's display name breaks the
 moment a user renames the flow:
 
 ```ts
+import type { OfflineDownloadHook } from "@rise-x/apps-sdk";
+
 const FLOW_ORIGIN_ID = "…"; // flowOriginId — app config, recorded at integration time
+
+export const onOfflineDownload: OfflineDownloadHook = async (_ctx, { offline, reportProgress }) => {
+  const result = await offline.downloadFlowWorks({ flowOriginId: FLOW_ORIGIN_ID });
+  reportProgress({ processed: result.total, total: result.total });
+};
 ```
 
 `downloadFlowWorks` (§5) already throws when any work in the flow fails to pull, so the hook fails
@@ -257,9 +262,11 @@ online — or that offline miss — request bounded at 10s
   └─ unreachable/timeout/5xx, no cache → throw   ← where "offline and never downloaded" lands
 ```
 
-So `null` reaches your code for exactly one reason: the server said the thing does not exist. "Offline
-and not downloaded" is **not** a `null` — the miss falls through, the fetch fails, and the read
-**throws** — because a `null` that meant either would be indistinguishable
+So for `get`, `getMyAccess`, `getLayout`, `getConfig` and `getBlob`, `null` reaches your code for
+exactly one reason: the server said the thing does not exist. `getData` alone adds a second — a
+`path` that selects nothing also answers `null`, from either source (see its row below). "Offline
+and not downloaded" is **not** a `null` on any of them — the miss falls through, the fetch fails,
+and the read **throws** — because a `null` that meant either would be indistinguishable
 from "not downloaded".
 
 What your app experiences, function by function:
@@ -273,24 +280,20 @@ What your app experiences, function by function:
 | `flows.getConfig(flowId)` | Flow config from the network; an origin id is resolved to the latest version id | From the cached copy. Configs are cached under **version** ids, so an origin id — the stable one an app persists — is matched by scanning the downloaded configs and taking the **newest downloaded** version — the newest that *exists* would need the versions endpoint, i.e. the network | Same — 404 only | Same |
 | `attachments.getBlob({id, resourceId, thumb?, version?})` | Bytes from `/api/v4/attachments/{id}` (or `/thumb`) | From the offline blob store — resolves a still-pending offline upload first, then the downloaded cache | Same — 404 only | Same |
 
-`work.get()` also maps the work's attachments — `attachments: { id, fileName, title, path, mimeType }[]` — which is what the attachments part of §5 reads from.
+`work.get()` also maps the work's attachments — `attachments: { id, fileName, title, path,
+mimeType }[]` — which is what the attachments part of §5 reads from.
 
 **Every other read is network-only and throws offline** — `work.list`, `work.search`, `work.iterate`, `work.listRelated`, `work.getAudit`, `flows.list`, `flows.get`, and `flows.findTask` (which calls `flows.list`). Only the six rows above have a cache branch, and there is no `source` option to force one either way.
 
-**The `@rise-x/apps-sdk/query` hooks must not drive an offline screen.** `useWork`, `useWorkData`,
+**The `@rise-x/apps-sdk/query` hooks follow this same ladder.** `useWork`, `useWorkData`,
 `useFlowConfig`, `useFlowLayout` and the rest run these same connector reads as react-query
-`queryFn`s — but `createAppQueryClient` sets no `networkMode`, `SdkQueryOptions` does not accept one,
-and react-query's default mode `'online'` **pauses fetching while the browser reports offline**: a
-query mounted offline sits `isPending` with its `queryFn` never called, even though the connector one
-layer down would have answered from the cache instantly. Data fetched earlier in the session still
-renders from react-query's own memory, which makes the failure look intermittent — a screen "works
-offline" right up until its first cold offline mount. On any surface that must work offline, source
-the data without the hooks: the connectors called directly (plain async functions, answering from the
-platform's offline cache) are the provided tool, and an app that manages its own caching is free to
-use that instead; keep the hooks for online-only surfaces. (§8, gap 5.) One direct-connector shape is
-ordinary async state — `WorkDetail`
-and `ConnectorError` are both importable from `@rise-x/apps-sdk/connectors` — with all three outcomes
-of the read ladder handled:
+`queryFn`s, and `createAppQueryClient` sets `networkMode: 'offlineFirst'` with an offline-aware
+retry: mounted offline, a hook answers from the offline cache when the data is downloaded, and
+settles into its **error** state (recovering on reconnect) when it is not — the same two outcomes as
+a direct connector call. The hooks are a provided tool, not an obligation — an app that manages its
+own caching is free to use that instead. One direct-connector shape is ordinary async state —
+`WorkDetail` and `ConnectorError` are both importable from `@rise-x/apps-sdk/connectors` — with all
+three outcomes of the read ladder handled:
 
 ```tsx
 const [state, setState] = useState<
@@ -313,45 +316,68 @@ A screen that renders all three is offline-correct by construction — with "not
 through the **error** state (offline with nothing cached throws) and `null` meaning the work does not
 exist on the server.
 
-**Raw reads never show queued edits — the app owns its overlay.** `work.get()`/`work.getData()` map
-the network response and the cached copy through the *same* mapper, so the two sources are
-shape-identical by construction — but the cached copy is the server's document **as downloaded**, with
-nothing your app has since queued folded in. `listQueuedWorkOperations()` (§7) carries each queued
-operation's `payload` as the app queued it (its shape varies by `kind` — a `dataUpdate` carries
-`{ id, originId, path, operation, sectionId, value }`, with `operation` in the same name vocabulary
-`queueWorkDataUpdate` accepts), so an app can derive what is pending from the queue itself — no separate state, and
-nothing to reconcile, since a synced item leaves the queue and the derivation falls back to the
-server's value on its own:
+**Raw reads never show queued edits — the overlay is derived, not stored.** `work.get()`/
+`work.getData()` map the network response and the cached copy through the *same* mapper, so the two
+sources are shape-identical by construction — but the cached copy is the server's document **as
+downloaded**, with nothing your app has since queued folded in. `listQueuedWorkOperations()` (§7)
+carries each queued operation's `payload` as the app queued it (its shape varies by `kind` — a
+`dataUpdate` carries `{ id, originId, path, operation, sectionId, value }`, where the payload's `id`
+is the update's own id — distinct from the operation row's `id` — and `operation` is the same name
+vocabulary `queueWorkDataUpdate` accepts). So an app can derive what is pending from the queue itself
+— no separate state, and nothing to reconcile: the shell hands out only still-queued items (a synced
+item stops appearing; the `isSynced` field on the row is the raw outbox flag and reads `false` here),
+so the derivation falls back to the server's value on its own. Note the payload stores the write's
+path under `path`, not `dataPath` — the same rename `patchData` makes (§5); if that ever drifted, the
+match below would return "nothing pending" forever, which is why the helper matches on `path`
+deliberately:
 
 ```ts
 // The queue IS the overlay: the last queued write to a path is the pending value.
-const pendingValue = (workId: string, dataPath: string): unknown => {
+// hasPending keeps a queued null distinguishable from "nothing pending".
+const pendingValue = (
+  workId: string,
+  dataPath: string,
+): { hasPending: boolean; value?: unknown } => {
   const ops = offline.listQueuedWorkOperations({ workId, kind: "dataUpdate" });
   for (let i = ops.length - 1; i >= 0; i--) { // newest last — last write wins
+    if (ops[i].isSynced) continue; // free guard; the shell already filters synced items out
     const p = ops[i].payload as { path?: string; value?: unknown };
-    if (p?.path === dataPath) return p.value;
+    if (p?.path === dataPath) return { hasPending: true, value: p.value };
   }
-  return undefined;
+  return { hasPending: false };
 };
 
+// In the component: queueWorkDataUpdate returns void and there is no queue subscription (§6),
+// so nothing re-renders on its own — bump local state after every queue call.
+const [, setQueueTick] = useState(0);
+
 async function submitQty(workId: string, dataPath: string, value: unknown) {
+  // originId first: patchData requires it, and resolving it is a network read (§4's ladder) that
+  // must not sit between the writeMode read and the write. App config works here too (§3).
+  const originId = (await work.get(workId))?.flowOriginId;
+  if (!originId) throw new Error(`work ${workId} not found`);
   const { writeMode } = offline.getWorkSyncStatus(workId);
   if (writeMode === "queued") {
     offline.queueWorkDataUpdate({ workId, dataPath, value });
+    setQueueTick((t) => t + 1); // re-render so pendingValue is re-derived
   } else {
-    // originId (required) = the work's flowOriginId; the data key is `path`, not `dataPath` (§5).
-    const originId = (await work.get(workId))?.flowOriginId;
-    if (!originId) throw new Error(`work ${workId} not found`);
     await work.patchData(workId, { originId, path: dataPath, value });
   }
 }
 
-// Render: value shown = pendingValue(workId, dataPath) ?? (await work.getData(workId, { path: dataPath }))
+// Render:
+//   const pending = pendingValue(workId, dataPath);
+//   value shown = pending.hasPending ? pending.value
+//                                    : await work.getData(workId, { path: dataPath })
 ```
 
-Reading `value` as the pending state holds for plain value writes — `queueWorkDataUpdate`'s default.
-A queued `push`/`addToSet` payload carries the added item, not the resulting array; if your app
-passes `operation`, branch on `payload.operation` in the derivation too.
+Two boundaries of the derivation, both by construction. It matches paths by **string equality** — a
+queued write to `$.parts` is invisible to `pendingValue(workId, "$.parts[0].qty")` and vice versa, so
+derive at the same path granularity you write at. And it only sees `dataUpdate` operations — queued
+attachment uploads/deletions are their own kinds (§7), not writes to `$.attachments`. Reading `value`
+as the pending state holds for plain value writes — `queueWorkDataUpdate`'s default; a queued
+`push`/`addToSet` payload carries the added item, not the resulting array, so if your app passes
+`operation` (§5), branch on `payload.operation` in the derivation too.
 
 An app that prefers a hand-kept overlay (its own state written at queue time) is free to keep one —
 that variant needs reconciliation: clear a work's entries when `getWorkSyncStatus(workId).allSynced`
@@ -373,12 +399,15 @@ feature-detection for you, so don't probe the host for offline support yourself.
 ### Route every write by `writeMode`, read fresh at the moment of the write
 
 ```ts
+// Anything async the write needs (like patchData's originId) resolves BEFORE the
+// writeMode read — nothing may sit between the read and the write it routes.
+const originId = (await work.get(workId))?.flowOriginId;
+if (!originId) throw new Error(`work ${workId} not found`);
+
 const { writeMode } = offline.getWorkSyncStatus(workId);
 if (writeMode === "queued") {
   offline.queueWorkDataUpdate({ workId, dataPath, value }); // preserves order
 } else {
-  const originId = (await work.get(workId))?.flowOriginId;
-  if (!originId) throw new Error(`work ${workId} not found`);
   await work.patchData(workId, { originId, path: dataPath, value }); // clear to send
 }
 ```
@@ -425,6 +454,12 @@ it for you from the work. `work.patchData`'s `WorkDataPatch.originId` on the exa
 shell-side resolution, so a `'direct'`-routed write needs you to supply it yourself (read it off
 `(await work.get(workId))?.flowOriginId` first if you don't already have it). Writing one branch as if it
 mirrored the other's defaulting is a real trap the `writeMode` split invites.
+
+**The operation argument.** `queueWorkDataUpdate` (and `patchData`, via its own body) defaults to a
+plain **set**; `UpdateWorkDataArgs.operation` selects another patch operation by name —
+`"set" | "push" | "pull" | "unset" | "addToSet" | "merge"`. The queued payload carries the same name
+back out (§4's overlay derivation branches on it). Most apps never pass it — set is the write layout
+components make.
 
 **The task-node argument.** Every queue method takes the same optional `sectionId`, authorized against a
 node of the work's step tree: `work.steps` (steps) → `step.steps` (tasks) → `task.steps` (action
@@ -490,8 +525,9 @@ Queued, `offline.queueWorkAction({ workId, actionId })` — and that is the whol
 resolves everything else off the cached work: event name, step name, the task node, the queue-row
 label, and the configured invitees (resolved against current work data, exactly as the work page
 does). An `actionId` the work does not have **throws at the call site** rather than queueing a
-malformed replay — so read the actions fresh from `(await work.get(workId)).actions` instead of holding
-them across renders; a stale render's id may already be gone.
+malformed replay — so read the actions fresh from `(await work.get(workId))?.actions ?? []` (null =
+the work does not exist, §4) instead of holding them across renders; a stale render's id may already
+be gone.
 
 - `recipients?` overrides only `to`/`cc` per destination. Supply it **only** when the flow config
   resolves nobody and the action still needs a recipient — the case the work page shows a picker
@@ -539,9 +575,9 @@ the new attachment's id immediately after upload; re-fetch first.
 online. `offline.queueWorkAttachmentDeletion({ workId, id, fileName, folder, mimeType })` needs four
 more fields queued — there is no shell-side lookup that backfills them the way `patchData`'s `originId`
 gets defaulted on the queued data-update path. Read them off the work's own attachments —
-`(await work.get(workId)).attachments` carries `id`, `fileName`, `mimeType`, and `path`: pass `path`
-as `folder`, verbatim. The stored `path` IS the sanitized folder string the shell matches
-components on (see Folder binding, below).
+`(await work.get(workId))?.attachments` (guard the `null`, §4) carries `id`, `fileName`, `mimeType`,
+and `path`: pass `path` as `folder`, verbatim. The stored `path` IS the sanitized folder string the
+shell matches components on (see Folder binding, below).
 
 **Folder binding — exact-match, case-sensitive, and not an online/offline divergence.** An upload is
 visible in an Attachments/AttachmentsGrid layout component **if and only if** the `folder` your app
@@ -598,9 +634,8 @@ revalidate a single entry, and nothing repopulates a removed one. Practically: o
 flips for that work — not when `requestSync()` resolves, which only means "asked" (§7) — don't trust a
 cache-only read of it; call `work.get(workId)` (or `work.getData`), which is network-first while online
 by design and will hit the server rather than hand back a stale local copy. If the app also uses the
-`@rise-x/apps-sdk/query` hooks on its online surfaces (§4's hybrid), call
-`invalidateAppSdkQueries(useAppQueryClient())` at the same moment — otherwise those hooks keep serving
-react-query's pre-sync cache.
+`@rise-x/apps-sdk/query` hooks (§4), call `invalidateAppSdkQueries(useAppQueryClient())` at the same
+moment — otherwise those hooks keep serving react-query's pre-sync cache.
 
 ## 7. Sync + queue visibility
 
@@ -653,16 +688,7 @@ what's missing, the workaround, and what a fix would look like.
    the offline id list alone. Fix would look like: the sync orchestrator repopulating the cache entry
    instead of only removing it.
 
-5. **The SDK's react-query hooks pause offline.** `createAppQueryClient` sets no `networkMode`,
-   `SdkQueryOptions` doesn't accept one, and react-query's default `'online'` pauses every fetch while
-   the browser is offline — so `useWork`/`useWorkData`/`useFlowConfig`/`useFlowLayout` mounted offline
-   never call their `queryFn`, even though the connector underneath would answer from cache (§4).
-   Workaround: on screens that must work offline, skip the hooks — call the connectors directly, or
-   the app's own cache if it manages one. Fix would look like:
-   `networkMode: 'always'` in `createAppQueryClient` — the read ladder already routes connectivity
-   itself, so pausing above it only prevents answers.
-
-6. **Asset-backed screens have no offline support at all.** The asset-draft pattern
+5. **Asset-backed screens have no offline support at all.** The asset-draft pattern
    (`assets.create`/`assets.startEdit` → `work.patchData` → `work.submit`) is network-only end to end —
    nothing seeds the offline cache for the draft, entity flows are served by a separate API family the
    offline download never touches, and there is no queue or download primitive for assets.
@@ -713,8 +739,8 @@ the sixth back on the deployed environment.
    render from cache — not a skeleton, not a spinner.
 2. **Both offline read states.** A downloaded work renders its data; a work that was never downloaded
    surfaces your error/empty state via the read **throwing** (unreachable + nothing cached — it does
-   not resolve `null`). An infinite spinner here is the §8-gap-5 symptom — a query hook driving an
-   offline screen.
+   not resolve `null`). An infinite spinner here means the app's own loading state never settles —
+   the read (hook or direct call) either answers or errors; render both.
 3. **Offline write.** An edit queues: the shell's Sync view lists the item, your overlay shows the
    pending value, and the raw read still returns the pre-edit value (§4 — that is correct behavior,
    not a bug to fix).
@@ -755,15 +781,17 @@ import { offline, work } from "@rise-x/apps-sdk/connectors";
 
 async function submitQty(workId: string, dataPath: string, value: unknown) {
   try {
+    // originId first (patchData requires it; the queued call defaults it, §5) — the network
+    // read must not sit between the writeMode read and the write it routes.
+    const snapshot = await work.get(workId);
+    if (!snapshot?.flowOriginId) throw new Error(`work ${workId} not found`);
+
     const { writeMode } = offline.getWorkSyncStatus(workId);
     if (writeMode === "queued") {
       // Synchronous — no await. sectionId and originId both omitted; the shell resolves
       // the active task and defaults originId from the work (§5).
       offline.queueWorkDataUpdate({ workId, dataPath, value });
     } else {
-      // work.patchData's originId is required, unlike the queued call's optional one (§5).
-      const snapshot = await work.get(workId);
-      if (!snapshot?.flowOriginId) throw new Error(`work ${workId} not found`);
       await work.patchData(workId, {
         originId: snapshot.flowOriginId,
         path: dataPath,

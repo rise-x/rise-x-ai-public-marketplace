@@ -15,10 +15,10 @@ release an app end-to-end from a Claude session, no manual zip upload through th
 | Tool | What it does |
 |---|---|
 | `request_bundle_upload()` | Step 1 of a deploy: returns a one-time `uploadUrl` + `uploadId` for staging the bundle zip |
-| `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id` |
+| `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id`. `feature_flags` is a `string → bool` dict gating app behaviours (e.g. `{"isOfflineModeEnabled": true}`), stored on the manifest as `featureFlags` |
 | `list_apps()` | Registry listing — `id`, `name`, `version`, `scope`, `remoteUrl`, `lastModified` per app |
 | `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`, `featureFlags`) |
-| `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Does NOT touch the bundle |
+| `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Accepts `feature_flags` — **a passed dict replaces the stored flags wholesale** (one field, no per-key merge), so send it complete or keys you omit are silently dropped. Does NOT touch the bundle |
 | `delete_app(app_id)` | Soft-delete from the registry (bundle blobs cleaned). Redeploying under the same id restores it |
 
 ## Deploying a bundle (the three-step flow)
@@ -77,7 +77,10 @@ cleaned, but redeploying with the same `app_id` restores the app.
 
 ## Validation rules (checked client-side before anything is consumed)
 
-- `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app.
+- `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app — bump every release. The platform
+  enforces this narrowly: the 409 fires only when the string exactly equals the app's currently
+  live version, with no semver ordering or history check. Don't lean on that; reusing an older
+  version string is accepted and leaves a confusing registry.
 - `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `todo_app`). Must equal the
   `ModuleFederationPlugin` `name` the app was built with, or the shell can't mount it.
 - `name` — non-empty.
@@ -92,7 +95,8 @@ cleaned, but redeploying with the same `app_id` restores the app.
    (`app_<slug_with_underscores>` for scaffolded apps). Wrong scope = manifest loads, app never
    mounts.
 3. **Version reuse** — the platform rejects a duplicate version per app; `list_apps` shows the
-   current one to bump from.
+   current one to bump from — strictly, the 409 fires on an exact match with the currently live
+   version.
 4. **Deploy failed? The staged bundle survives.** Neither client-side validation errors nor
    platform failures (409 duplicate version, 403 missing role, 404 unknown app id) consume the
    upload — fix the manifest field (e.g. bump `version` after a 409) and call `deploy_app` again

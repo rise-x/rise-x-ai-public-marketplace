@@ -284,7 +284,7 @@ All connector failures normalize to `ConnectorError` (`code: 'SHELL_UNAVAILABLE'
 
 For component data, **default to `@rise-x/apps-sdk/query`** (react-query v5 over the connectors) instead of hand-rolling `useState`/`useEffect` fetches — caching, dedupe, refetch, and abort come free. The raw connectors remain the tool for event handlers, lifecycle hooks, and non-React code.
 
-**Except on screens that must work offline** — the query hooks pause fetching while the browser is offline, so they never resolve there. Source those screens' data another way: the connectors answer from the platform's offline cache when the flow's data is downloaded (`references/offline.md`), or the app's own storage if it manages caching itself.
+Offline, the hooks answer from the platform's offline cache when the flow's data is downloaded (SDK >= 0.12 — see `references/offline.md`).
 
 ```tsx
 import { useFlows, useWorkRows, useSubmitWork, dedupeRows } from '@rise-x/apps-sdk/query';
@@ -375,7 +375,8 @@ error state locally — the content path (tables, charts, totals) never executes
 until the app is deployed into a host. That is how content-path rendering bugs
 reach production: standalone dev cannot see them, so their first real execution
 is in front of a user. The `offline` connector is the exception: its methods
-throw when the offline bridge isn't available (`references/offline.md`).
+throw when the offline bridge isn't available — all but `offline.isOnline()`,
+which answers `true` there instead (`references/offline.md`).
 
 **Seed `fixtures` so the real screens render before you deploy** (SDK >= 0.7.0).
 This matters most when building **outside the `rise-x-app` monorepo** — the
