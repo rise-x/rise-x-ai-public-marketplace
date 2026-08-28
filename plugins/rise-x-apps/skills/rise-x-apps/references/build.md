@@ -58,9 +58,10 @@ scaffolded `AGENTS.md` and `README.md` point at it, and every later change
 reads and maintains it (see Writing app code).
 
 **Also fill `rise-x-app.json`** with the integration targets from the design
-phase: the scaffolded manifest declares the environments and no dependencies
-yet, and every flow, asset-type, or agent id the app depends on is declared
-there — never in source (see App dependencies below).
+phase: the scaffolded manifest declares `test` and no dependencies yet, and every
+flow, asset-type, or agent id the app depends on is declared there — never in
+source. Add another environment only once you have its ids (see App dependencies
+below).
 
 CLI flags worth knowing:
 
@@ -129,9 +130,14 @@ builds for every environment the app ships to. App code consumes them through
 selector) keep going through the generic connectors with a ref — those stay
 fully supported; nothing is deprecated.
 
+Below is a *mature* manifest, from an app that ships to all three environments —
+it shows the full shape, not the starting point. A new app declares only `test`
+(see Writing the file), so don't copy the extra environments in unless you have
+their ids.
+
 ```json
 {
-  "environments": ["test", "prod"],
+  "environments": ["test", "staging", "prod"],
   "dependencies": {
     "riskFlow": {
       "kind": "flow",
@@ -139,6 +145,7 @@ fully supported; nothing is deprecated.
       "description": "Source of all risk work items",
       "ids": {
         "test": { "flowOriginId": "11111111-1111-1111-1111-111111111111" },
+        "staging": { "flowOriginId": "1a1a1a1a-1a1a-1a1a-1a1a-1a1a1a1a1a1a" },
         "prod": { "flowOriginId": "22222222-2222-2222-2222-222222222222" }
       }
     },
@@ -147,6 +154,7 @@ fully supported; nothing is deprecated.
       "label": "Vessel",
       "ids": {
         "test": { "flowOriginId": "33333333-3333-3333-3333-333333333333" },
+        "staging": { "flowOriginId": "3a3a3a3a-3a3a-3a3a-3a3a-3a3a3a3a3a3a" },
         "prod": { "flowOriginId": "44444444-4444-4444-4444-444444444444" }
       }
     },
@@ -156,6 +164,7 @@ fully supported; nothing is deprecated.
       "description": "Answers identification questions from a photo",
       "ids": {
         "test": { "agentId": "55555555-5555-5555-5555-555555555555" },
+        "staging": { "agentId": "5a5a5a5a-5a5a-5a5a-5a5a-5a5a5a5a5a5a" },
         "prod": { "agentId": "66666666-6666-6666-6666-666666666666" }
       }
     }
@@ -163,9 +172,46 @@ fully supported; nothing is deprecated.
 }
 ```
 
+#### Writing the file
+
+**Declare only the environments you have real ids for.** A scaffolded app starts
+at `"environments": ["test"]` — that is where apps are built and first deployed.
+Most apps stay there for a while: the user usually has test ids and nothing else,
+and that is a complete, valid manifest, not a half-finished one.
+
+The rule that makes this matter: **every dependency needs an id for every
+environment listed in `environments`.** The alias sits above `ids`, so the alias
+set is identical across environments and each alias has to resolve in each one.
+That gives you exactly one correct way to handle an id you don't have:
+
+- ✅ **Leave the environment undeclared.** Ship `["test"]`, add `"staging"` or
+  `"prod"` to `environments` on the day you have their ids, adding the matching
+  `ids` block to every dependency in the same edit.
+- ❌ **Never invent, guess, copy, or reuse an id** to fill a gap — not the test
+  id in the prod slot, not a zero GUID, not a placeholder. A wrong-but-valid
+  GUID passes every local check and fails at deploy, or worse, resolves to some
+  unrelated object in that ecosystem.
+- ❌ **Never leave one dependency's ids partial** while its environment stays
+  declared. That build fails, and if you were to force it through, the bundle
+  would ship without that dependency and the app would throw
+  `unknown app dependency` in production.
+- ❌ **Never delete a declared environment just to make `pnpm validate` pass.**
+  If `prod` is declared, something ships there. Removing it is a decision for
+  the user, not a way to get a green check.
+
+If you need an id you don't have, **ask the user**, or look it up in that
+ecosystem with the Rise-X MCP (`list_flows`, `list_asset_types`, `list_agents`
+against the server for that environment — `rise-x-test` for test, `rise-x` for
+production). Discovery per environment is the whole reason ids are keyed this
+way.
+
+Fill `label` and `description` while you are there. They are optional to the
+parser and not optional in practice: they are what ecosystem management and Ask
+Diana show a human reading the app's dependencies later.
+
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `environments` | yes | the environments this app is built for; every `ids` key must appear here |
+| `environments` | yes | the environments this app is built for; every `ids` key must appear here, **and every dependency must supply an id for each** |
 | `<alias>.kind` | yes | `flow`, `assetType`, or `agent` |
 | `<alias>.label` / `.description` | no | human-readable name and what the app uses it for — **fill them**: they feed ecosystem management and Ask Diana, not just the reader |
 | `<alias>.ids.<env>.<idField>` | yes | the id on that environment (GUID) — the field name follows the `kind` |
@@ -210,12 +256,109 @@ keyspace the same way), or more than 100 dependencies.
 
 ```bash
 pnpm build                                    # → environment "test"
+pnpm build:staging                            # → environment "staging"
 pnpm build:prod                               # → environment "prod"
 ```
 
-`build:prod` is the template's own script — `cross-env APP_ENV=prod` in front
-of the build. Go through `cross-env` for any other environment too: the inline
+Those are the template's own scripts — `cross-env APP_ENV=<env>` in front of the
+build. Go through `cross-env` for any environment you add: the inline
 `APP_ENV=<env> pnpm build` form doesn't work in PowerShell or cmd.exe.
+
+The staging and prod scripts ship ahead of the environments themselves, so on a
+new app they fail until you declare the environment — with the list of what *is*
+declared, which is the answer to "why won't this build":
+
+```
+rise-x-app.json is invalid:
+  - unknown environment "prod" — declared environments: test
+```
+
+That is a manifest to extend (Writing the file), never a script to work around.
+
+**Check every environment before you ship, not just the one you build.** A build
+resolves only its own target, so `pnpm build` proves the test ids are complete
+and says nothing about any other environment — a broken block there surfaces at
+promotion, in someone else's hands:
+
+```bash
+pnpm validate                                 # every environment the manifest declares
+pnpm validate -- --env=prod                   # just one
+```
+
+It exits non-zero if any environment fails, names the alias and environment, and
+prints the ids each environment would ship. Run it after every edit to
+`rise-x-app.json` and before building a bundle to deploy. `--json` emits
+`{ ok, manifest, environments, scan }` if you need to read the result rather than
+the report. Validation is **structural and offline**: it cannot tell you an id has
+been deleted from the target ecosystem — the deploy checks that (see Build and
+deploy).
+
+#### Finding ids already hardcoded in the code
+
+A perfect manifest is no use if a GUID is pasted into a component anyway, so
+`validate` also scans the app's TypeScript and lists Rise-X ids the manifest does
+not declare. To run only that pass — and this is the command to reach for when
+**migrating an old app**, or when you want to know whether an app complies at all:
+
+```bash
+npx @rise-x/apps-sdk scan                 # undeclared ids, with kind, alias and file:line
+npx @rise-x/apps-sdk scan --show-ignored  # ...and what it set aside, and on what grounds
+npx @rise-x/apps-sdk scan --json          # machine-readable, for working through a list
+npx @rise-x/apps-sdk scan --strict        # exit non-zero on any finding (CI)
+```
+
+```
+  Hardcoded ids — declare these in rise-x-app.json:
+
+  920db6b4-9654-4839-a846-284d51ba1ef9  flow
+        alias?  riskMgmtFlow
+        src/App.tsx:13  (RISK_MGMT_FLOW.id)
+        src/App.tsx:14  (flowOriginId)
+
+  1 undeclared id (5 dismissed by rule)
+```
+
+Findings inside `validate` are **warnings** and never change its exit code, so
+never read a green `validate` as "no hardcoded ids" — read the warnings.
+
+It classifies by reading names: the property a GUID is assigned to, the connector
+or hook it goes into, the variable it is bound to. Each location names the
+identifier the verdict came from, so you can check it. An id it cannot attribute
+is reported with **no kind** rather than a guess — those are the ones to ask the
+user about, or to resolve with `list_flows` / `list_asset_types` / `list_agents`
+in that ecosystem.
+
+`suggestedAlias` is a starting point, not an answer. It is trimmed of the words
+that describe the id (`EXPENSE_FLOW_ORIGIN_ID` → `expenseFlow`), and it is
+**null** when the source never named the object — a bare `agents.get('<guid>')`
+has nothing to take a name from. An alias is the app's permanent handle on that
+dependency and appears throughout the code, so confirm it with the user rather
+than committing whatever the scan guessed, and never let two dependencies share
+one.
+
+**Check what it set aside before you trust a short list.** It skips what the
+manifest doesn't carry: GUIDs used as object keys (a step-id lookup table), names
+like `stepId` / `workId` / `assetId`, section and layout ids, integration
+`endpointId`s, `sample`/`mock`/`fixture` data, and a bare row id passed to
+`assets.get()` or `work.get()`. Those rules are a heuristic tuned on real apps, so
+on an app they weren't written for they can drop a genuine dependency — one named
+`seedFlow` would go. `--show-ignored` prints every dismissal with its file, line
+and the identifier that triggered it, and the summary counts the scanner's own
+judgements (`dismissed by rule`) apart from a human's (`silenced`, from a
+`rise-x-app-ignore` comment). On a migration, read that list.
+
+**It is a lint, not a proof.** It cannot see an id assembled at runtime or read
+from config, so a clean report is evidence, not a guarantee. For a GUID that
+genuinely isn't a Rise-X object, add `rise-x-app-ignore` in a comment on its line
+or the line above — and say why:
+
+```ts
+// rise-x-app-ignore — correlation id for the audit trace, not a Rise-X object
+const TRACE_ROOT = '0f9c1e77-...';
+```
+
+Never silence a finding you haven't understood, and never use the marker to get a
+`--strict` run green.
 
 **Runtime consumption.** The plugin injects the resolved manifest into the
 bundle as a compile-time constant, so the accessors are synchronous and the
@@ -643,7 +786,9 @@ see the SDK README's standalone-dev section.
 
 ```bash
 cd <name>
+pnpm validate                                 # every environment resolves — do this first
 pnpm build                                    # produces dist/ — APP_ENV defaults to "test"
+pnpm build:staging                            # staging bundle — carries staging ids only
 pnpm build:prod                               # prod bundle — carries prod ids only
 (cd dist && zip -r ../<name>-bundle.zip .)    # zip the CONTENTS of dist/, not the folder
 ```
@@ -659,6 +804,12 @@ the target ecosystem, with an error listing each failing dependency's alias,
 label, kind, and id — this is what catches a test bundle shipped to prod. The
 stored app then exposes a `dependencies` field, readable through the Rise-X
 MCP's `get_app`.
+
+`pnpm validate` before the build turns the structural half of that rejection into
+a local failure: it checks every declared environment, so it catches a missing or
+malformed id for the environment you are about to deploy to before the zip
+exists. What it can't catch is an id that no longer exists in the target
+ecosystem — only the deploy resolves ids against a live ecosystem.
 
 When the bundle is ready, **ask the user whether to deploy**. Two paths:
 
@@ -732,11 +883,26 @@ Whether you scaffolded a new app or modified an existing one, the user can't see
    (`/code-review --fix`) over the new app code and apply the fixes it
    confirms. If the skill isn't available, say so instead of skipping
    silently.
-4. **Build.** `pnpm build` succeeds and produces `dist/remoteEntry.js` — with
+4. **Validate the manifest, and read the scan warnings.** `pnpm validate` exits
+   zero, meaning every environment in `rise-x-app.json` resolves — not just the
+   one you build. A build checks its own target only, so this is what catches a
+   dependency you added for one environment and not the others it declares. Skip
+   it and the gap surfaces at promotion, as a deploy rejection in someone else's
+   hands. If an id is genuinely missing, ask the user for it or look it up in
+   that ecosystem with the Rise-X MCP; never invent one, and never delete a
+   declared environment to make the command pass.
+
+   The same command warns about Rise-X ids still hardcoded in `src/`. Those
+   warnings do **not** affect its exit code, so a green run is not a clean run:
+   read them, and either declare each id in the manifest or mark it
+   `rise-x-app-ignore` with a reason. Clear them before you deploy — the whole
+   point of the manifest is that promoting the app to another environment doesn't
+   need a code change.
+5. **Build.** `pnpm build` succeeds and produces `dist/remoteEntry.js` — with
    `APP_ENV` matching the environment the bundle will deploy to (default
    `test`), so `dist/rise-x-app.json` carries that environment's ids.
-5. **Zip `dist/` contents** into `<name>-bundle.zip` (see Build and deploy above for the exact command — must zip the contents, not the folder).
-6. **Ask the user whether to deploy.** If yes, deploy via the Rise-X MCP —
+6. **Zip `dist/` contents** into `<name>-bundle.zip` (see Build and deploy above for the exact command — must zip the contents, not the folder).
+7. **Ask the user whether to deploy.** If yes, deploy via the Rise-X MCP —
    **test environment unless the user names another** — following the steps in
    Build and deploy, and report the returned manifest (`id`, `version`,
    `remoteUrl`). If the MCP isn't available or the user prefers manual, output
@@ -755,6 +921,6 @@ Whether you scaffolded a new app or modified an existing one, the user can't see
      icon:       (optional)
    ```
 
-7. **Confirm the deploy landed.** Don't mark the task complete until the app loads in the shell — verify it yourself after an MCP deploy, or ask the user to confirm after a manual one.
+8. **Confirm the deploy landed.** Don't mark the task complete until the app loads in the shell — verify it yourself after an MCP deploy, or ask the user to confirm after a manual one.
 
-If any of steps 1–3 fail, stop and fix before reaching out to the user. A failing build is not a "done" — it's a regression to be reported and resolved.
+If any of steps 1–5 fail, stop and fix before reaching out to the user. A failing build or a manifest that doesn't validate is not a "done" — it's a regression to be reported and resolved.
