@@ -17,11 +17,19 @@ Each plugin's version lives **only** in its own
 just mask edits. This field is also Claude Code's update cache key: merging a
 change without bumping it means installed users receive nothing.
 
-Any PR touching `plugins/<name>/**` must bump that plugin:
+Any PR touching `plugins/<name>/**` must bump that plugin **once**:
 
 ```
 ./scripts/bump.sh <name> patch|minor|major
 ```
+
+**Once per PR, not once per commit.** The check compares the branch against the
+PR base, so a single bump covers the whole PR however many commits it takes, and
+nothing reaches an installed user until the PR merges. Bumping again for each
+later edit on an open branch just inflates the number: pick the size from the
+largest change the PR ends up carrying, and adjust that one number if the scope
+grows (a patch that turns into a feature becomes a minor). If the version is
+already above base, the branch is free to keep editing.
 
 Exempt: a PR whose changes under `plugins/<name>/` are limited to
 `plugins/<name>/README.md` and/or `plugins/<name>/tests/` or
