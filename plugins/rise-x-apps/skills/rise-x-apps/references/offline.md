@@ -663,7 +663,7 @@ what's missing, the workaround, and what a fix would look like.
    `flows.getConfig()` maps a task's `name` to a `taskDisplayName` ("Task 1"), also wrong. Workaround:
    read the raw cached flow document — the `taskName` on each step node of
    `getShell().getCache().readFlow(flowId)` — falling back online to
-   `getShellApiV4('config').get('/api/v4/config/flow/{flowId}')`. Fix would look like:
+   ``getShellApiV4('config').get(`/api/v4/config/flow/${flowId}`)``. Fix would look like:
    `FlowConfigTask` carrying the internal `taskName` alongside the display name.
 
 2. **An app can't discover a component's folder through the typed surface.** `LayoutComponent` (from
