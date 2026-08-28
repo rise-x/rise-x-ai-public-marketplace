@@ -56,53 +56,25 @@ changes. Don't run it through those out of habit.
 
 1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
    outside), then `pnpm install`.
-2. **Move the build onto the preset.** First **read the app's dev port out of
-   `webpack.local.config.js`** (its `devServer.port`) — that file is deleted in
-   this step and it is the only place the value lives. Then delete
-   `webpack.config.js` and `webpack.local.config.js`, and add an
-   `rsbuild.config.mts` — copy the shape (the template's own file has a `__APP_PORT__`
-   placeholder the scaffolder substitutes, so take the structure, not the literal)
-   from the SDK's `template/rsbuild.config.mts`
-   (`node_modules/@rise-x/apps-sdk/template/`; `packages/apps-sdk/template/` in
-   the rise-x-app monorepo):
+2. **Move the build onto the preset.** Read the app's dev port out of
+   `webpack.local.config.js` first (`devServer.port`) — that file goes in this
+   step and is the only place the value lives. Then delete `webpack.config.js`
+   and `webpack.local.config.js` and add an `rsbuild.config.mts`, copying the
+   shape from the SDK's `template/rsbuild.config.mts` (its `port` is a
+   scaffolder placeholder — use the port you just read). Swap the build deps and
+   scripts: drop webpack and its loaders, add `@rsbuild/core`,
+   `@rsbuild/plugin-react` and `@rsbuild/plugin-type-check`, and set
+   `build: rsbuild build`, `start: rsbuild dev --env-mode standalone`,
+   `start:federated: rsbuild dev`. Add `resolveJsonModule` to `tsconfig.json` if
+   absent — the config imports `package.json`.
 
-   ```ts
-   import { defineConfig } from '@rsbuild/core';
-   import { defineAppConfig } from '@rise-x/apps-sdk/rsbuild';
-   import pkg from './package.json';
-
-   export default defineConfig(({ envMode }) =>
-     // the port the old webpack.local.config.js devServer used — NOT 5101, which
-     // is the scaffolder's default and must stay unique per app
-     defineAppConfig({ pkg, port: 5xxx, standalone: envMode === 'standalone' }),
-   );
-   ```
-
-   Then swap the build dependencies and scripts: drop webpack and its loaders,
-   add `@rsbuild/core`, `@rsbuild/plugin-react` and `@rsbuild/plugin-type-check`
-   as devDependencies, and set `build: rsbuild build`,
-   `start: rsbuild dev --env-mode standalone`, `start:federated: rsbuild dev`.
-   The preset registers the two rsbuild plugins itself — they only need to
-   resolve. `import pkg from './package.json'` needs `resolveJsonModule` in
-   `tsconfig.json`, which a webpack-era config often lacks; add it if missing.
-
-   `.mts` rather than `.ts` marks the file ESM, which a plain `.ts` warns about
-   on every build. `"type": "module"` is not an alternative — it breaks
-   `commitlint.config.js`.
-
-   **There is no `shared` block to align any more.** The preset owns the whole
-   Module Federation contract — the MF scope (derived from the package name,
-   `@rise-x-apps/vendor-hub` → `app_vendor_hub`), `remoteEntry.js`, the
-   `./App` + `./lifecycle` exposes, and every share including `@rise-x/ui` and
-   `@tanstack/react-query`. You upgrade the contract by upgrading the SDK. Beyond
-   `pkg`, `port` and `standalone` (`standalone` defaults to `false`), an app can pass only `exposes`
-   (merged over the defaults) and `define`; it cannot add
-   shares, so an app that needed a custom one is a conversation with the SDK, not
-   a local edit.
+   **There is no `shared` block to align any more:** the preset owns the whole
+   Module Federation contract, and you upgrade it by upgrading the SDK. See
+   `references/build.md`.
 3. **Rebuild the UI on `@rise-x/apps-sdk/ui`.** Replace hand-rolled
    CSS/components/icon sets with design-system components (lucide icons ship
    with it); delete what they cover. Move any top-bar navigation to a left
-   sidebar/rail (bottom tab bar on mobile — on SDK >= 0.10.0 that is
+   sidebar/rail (bottom tab bar on mobile — on SDK >= 0.11.0 that is
    `mobileNav="tabs"` on `AppFrame`, not a hand-built bar; see
    `references/build.md`). Run the design phase first —
    always (`references/design.md`): mock the migrated screens on the design

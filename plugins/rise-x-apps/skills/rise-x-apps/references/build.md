@@ -62,7 +62,7 @@ CLI flags worth knowing:
 | Flag | Default | Use |
 | --- | --- | --- |
 | `--pm=<npm\|yarn\|pnpm>` | auto | Force a package manager. **Prefer `pnpm` whenever it's available** — it's what Rise-X uses, and the commands throughout this guide assume it. Without the flag the CLI auto-detects from lockfiles in the cwd (falling back to npm), so pass it explicitly when scaffolding into an empty directory. |
-| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — in the rise-x-app monorepo list what's taken with `node tools/list-app-ports.js` from the repo root. |
+| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — check the ports the other apps already use. |
 | `--skip-install` | off | Skip install (faster scaffold; the user installs later). |
 | `--json` | off | Emit `{ path, slug, scope, pkgName, port, pm, installed }` to stdout — useful for automation. |
 
@@ -85,32 +85,21 @@ What the scaffolder creates (**SDK >= 0.11.0** — earlier versions emit webpack
     └── lifecycle.ts       # the module exposed as ./lifecycle
 ```
 
-From **SDK >= 0.9.0** the whole build is one call (that is when the `@rise-x/apps-sdk/rsbuild` subpath shipped). `rsbuild.config.mts`:
-
-```ts
-import { defineConfig } from '@rsbuild/core';
-import { defineAppConfig } from '@rise-x/apps-sdk/rsbuild';
-import pkg from './package.json';
-
-export default defineConfig(({ envMode }) =>
-  defineAppConfig({ pkg, port: 5101, standalone: envMode === 'standalone' }),
-);
-```
-
-`.mts`, not `.ts`: it marks the file ESM, which a plain `.ts` warns about on every build, and `"type": "module"` is not an alternative because it breaks `commitlint.config.js`.
-
-**Two versions matter here and they are not the same one.** The preset — the `@rise-x/apps-sdk/rsbuild` subpath — shipped in **0.9.0**. The *scaffolder* only started emitting `rsbuild.config.mts` in **0.11.0**; 0.9.0 and 0.10.0 still generate `webpack.config.js` + `webpack.local.config.js`. So an app scaffolded on 0.9.0 or 0.10.0 is on a webpack config even though its SDK has the preset available, and moving it over is `references/upgrade.md`. Below 0.9.0 the subpath does not exist at all.
-
-On SDK >= 0.9.0 the app has **no Module Federation config of its own to edit.** `rsbuild.config.mts` just calls `defineAppConfig`, and the preset owns the whole contract: the MF scope (derived from the package name, `@rise-x-apps/vendor-hub` → `app_vendor_hub`), `remoteEntry.js`, the `./App` + `./lifecycle` exposes, and every share. The react family is shared `singleton` + `import: false` because the shell provides it eagerly and bundling a local fallback causes duplicate-React bugs — load-bearing, and now out of reach of a local edit, which is the point.
-
-Only `pkg` and `port` are required (`standalone` defaults to `false`). Beyond those three, the only knobs an app may pass are `exposes` (merged over the defaults) and `define`. It **cannot add shares**: if one is genuinely needed, that is a change to the SDK preset, not to the app. You upgrade the contract by upgrading `@rise-x/apps-sdk`.
+After scaffold there is **no Module Federation config in the app to edit** —
+`rsbuild.config.mts` just calls `defineAppConfig` from `@rise-x/apps-sdk/rsbuild`
+(SDK >= 0.9.0), and the preset owns the scope, `remoteEntry.js`, the `./App` +
+`./lifecycle` exposes and every share, including the react family as
+`singleton` + `import: false`. Read the scaffolded file if you need the shape.
+An app may pass `exposes` and `define`; it cannot add shares. The scaffolder
+emits this config from **0.11.0** — earlier versions emit webpack configs, see
+`references/upgrade.md`.
 
 The scaffolded `src/App.tsx` **is the canonical app layout** (left rail from
 the Nav primitives, PageHeader + content screens, no user UI). Build the app
 by extending it — add screens, swap the stubs for real content — and preserve
 its chrome composition; don't flatten it back to a bare component.
 
-From **SDK >= 0.10.0** that composition is `AppFrame` / `AppRail` /
+From **SDK >= 0.9.0** that composition is `AppFrame` / `AppRail` /
 `AppContent` from `@rise-x/apps-sdk/ui`: the frame is a CSS container, so the
 layout answers to the region the host gave the app rather than to the browser
 window, `AppRail` is the nav rail, and `AppContent` is the app's ONE scroller.
@@ -310,7 +299,7 @@ const submit = useSubmitWork(); // submit.mutate({ workId, actionName }) — inv
 Rules:
 - **Never mount a `QueryClientProvider` with a client of your own** — that shadows the per-app client the shell mounts and breaks shell-managed caching. The SDK hooks need no provider at all: they pass the resolved client explicitly (host client when federated, per-bundle fallback standalone).
 - **If the app calls react-query directly, wrap it in `<AppQueryProvider>`** (SDK >= 0.7.0, from `@rise-x/apps-sdk/query`; the scaffold's `App.tsx` already does). Plain APIs — `useQuery(flowQueries.list(args))`, `useQueryClient()`, devtools — read the client from context, and standalone dev has no provider, so they throw *"No QueryClient set"* the moment you leave the SDK hooks. `AppQueryProvider` publishes the *resolved* client, so it re-publishes the host's client when federated and the fallback when standalone.
-- **The `@tanstack/react-query` share is the preset's, not yours** — `{ singleton: true, requiredVersion: '^5.0.0' }`, deliberately WITHOUT `import: false` so the bundled fallback survives standalone dev. It comes with the SDK and there is nothing to keep in the app; shell-managed caching depends on it, so an app must not try to shadow it.
+- **Keep `'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' }`** — WITHOUT `import: false`, the bundled fallback is deliberate. On the preset it comes from the SDK rather than the app's own config; either way, don't shadow or remove it or shell-managed caching breaks.
 - Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useWorkSearch/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetQuickSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
 - Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
 - Keys are environment-scoped (`['rise-apps-sdk', envId, …]`) — ecosystem switches refetch automatically; `queryKeys` is exported for targeted invalidation. Advanced react-query features (select/suspense/prefetch) go through the factories: `useQuery(flowQueries.list(args))`.
@@ -346,7 +335,7 @@ implement the mobile UX level chosen in the design phase (see
 `references/design.md` §2 and the app's `APP.md`); the no-top-bar rule holds
 at every width.
 
-**SDK >= 0.10.0: don't hand-roll that bar.** Set `mobileNav="tabs"` on
+**SDK >= 0.11.0: don't hand-roll that bar.** Set `mobileNav="tabs"` on
 `AppFrame` (the scaffold template already does) and `AppRail` renders it once
 the frame is narrow — icon over label, safe-area padding, and a **More** sheet
 for the overflow past a handful of destinations. The SDK README's AppFrame
@@ -476,7 +465,7 @@ environment-orchestrator role.
    the existing GUID to release a new version. `version` comes from the app's
    `package.json` and must be unique per app — bump it every release.
    `app_scope` is snake_case and **must match the MF scope the preset derives
-   from the package name** (`@rise-x-apps/vendor-hub` → `app_vendor_hub`); the
+   from the package name** (`@rise-x-apps/my-app` → `app_my_app`); the
    scaffolder's `--json` output reports it as `scope`.
 
 The result carries the app `id` and the canonical manifest (`remoteUrl`,
