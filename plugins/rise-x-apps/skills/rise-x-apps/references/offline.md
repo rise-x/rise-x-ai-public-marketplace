@@ -94,12 +94,12 @@ Three rules govern everything past this point; each is expanded where it's actua
 
 ### The bridge under the connectors, mapped
 
-Everything offline rides on two handles the shell exposes over its versioned bridge — the
-`window.__DIANA_SHELL__` object `references/build.md`'s mock-shell setup also assigns; the SDK
-exports the protocol number as the `SHELL_BRIDGE_VERSION` constant, and 4 is the version that
-carries these: `getCache(): CacheApi | null`
-— raw, read-only views of exactly what a download stored — and `getOffline(): OfflineApi | null` —
-connectivity, queueing, sync, and downloads. Both are **internal transport between the shell and the
+Everything offline rides on two handles the shell exposes over its versioned bridge:
+`getCache(): CacheApi | null` — raw, read-only views of exactly what a download stored — and
+`getOffline(): OfflineApi | null` — connectivity, queueing, sync, and downloads. That bridge is the
+`window.__DIANA_SHELL__` object `references/build.md`'s mock-shell setup also assigns, and the SDK
+exports its protocol number as the `SHELL_BRIDGE_VERSION` constant: 4 is the version that carries
+these two handles. Both are **internal transport between the shell and the
 SDK**; the connectors are the management layer your app talks to. `null` means the host predates the
 handle, and a handle being present says nothing about which methods it carries — the connectors
 feature-detect the *method*, not the accessor, and throw `ConnectorError("SHELL_TOO_OLD", …)` where a
@@ -264,12 +264,13 @@ online — or that offline miss — request bounded at 10s
   └─ unreachable/timeout/5xx, no cache → throw   ← where "offline and never downloaded" lands
 ```
 
-So for `get`, `getMyAccess`, `getLayout`, `getConfig` and `getBlob`, `null` reaches your code for
-exactly one reason: the server said the thing does not exist. `getData` alone adds a second — a
-`path` that selects nothing also answers `null`, from either source (see its row below). "Offline
-and not downloaded" is **not** a `null` on any of them — the miss falls through, the fetch fails,
-and the read **throws** — because a `null` that meant either would be indistinguishable
-from "not downloaded".
+So for `work.get`, `work.getMyAccess`, `flows.getLayout`, `flows.getConfig` and
+`attachments.getBlob` — five of the six cache-backed reads, and note that `flows.get` is a different
+function with no cache branch at all (see below) — `null` reaches your code for exactly one reason:
+the server said the thing does not exist. `work.getData` alone adds a second — a `path` that selects
+nothing also answers `null`, from either source (see its row below). "Offline and not downloaded" is
+**not** a `null` on any of them — the miss falls through, the fetch fails, and the read **throws** —
+because a `null` that meant either would be indistinguishable from "not downloaded".
 
 What your app experiences, function by function:
 
