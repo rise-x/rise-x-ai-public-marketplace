@@ -284,7 +284,7 @@ All connector failures normalize to `ConnectorError` (`code: 'SHELL_UNAVAILABLE'
 
 For component data, **default to `@rise-x/apps-sdk/query`** (react-query v5 over the connectors) instead of hand-rolling `useState`/`useEffect` fetches — caching, dedupe, refetch, and abort come free. The raw connectors remain the tool for event handlers, lifecycle hooks, and non-React code.
 
-Offline, the hooks answer from the platform's offline cache when the flow's data is downloaded, and settle into their **error** state (recovering on reconnect) when it is not (SDK >= 0.12 — see `references/offline.md`). Render both states: a work that was never downloaded errors rather than resolving, so a screen that only handles the happy path sits on a spinner that never settles.
+Offline, the hooks answer from the platform's offline cache when the flow's data is downloaded, and settle into their **error** state (recovering on reconnect) when it is not (SDK >= 0.12, unreleased at the time of writing — see `references/offline.md`). Render both states: a work that was never downloaded errors rather than resolving, so a screen that only handles the happy path sits on a spinner that never settles.
 
 ```tsx
 import { useFlows, useWorkRows, useSubmitWork, dedupeRows } from '@rise-x/apps-sdk/query';
