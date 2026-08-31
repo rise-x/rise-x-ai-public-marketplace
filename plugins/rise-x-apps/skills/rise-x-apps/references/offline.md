@@ -437,23 +437,23 @@ write-side counterpart.
 `work.patchData`, `work.submit`, `attachments.upload`, `attachments.delete` are **network-only** — they
 throw (via `ConnectorError`) if the request fails and do not know how to queue. Calling one while
 offline is a caller error, not a supported path. `offline.queue*` methods are the queued counterparts.
-On a host with no offline support at all, every one of them (except `isOnline()`, §5) throws
-`ConnectorError("SHELL_TOO_OLD", …)` rather than a bare `TypeError` — the connector does this
-feature-detection for you, so don't probe the host for offline support yourself.
+On a host with no offline support at all, every one of them (except `isOnline()` — see the signature
+table below) throws `ConnectorError("SHELL_TOO_OLD", …)` rather than a bare `TypeError` — the
+connector does this feature-detection for you, so don't probe the host for offline support yourself.
 
 ### Route every write by `writeMode`, read fresh at the moment of the write
 
 ```ts
-// Anything async the write needs (like patchData's originId) resolves BEFORE the
-// writeMode read — nothing may sit between the read and the write it routes.
-const originId = (await work.get(workId))?.flowOriginId;
-if (!originId) throw new Error(`work ${workId} not found`);
-
+// FLOW_ORIGIN_ID is app config (§3). patchData needs an originId and the queued call defaults it,
+// so taking it from config keeps the queued branch network-free — resolving it from the work is a
+// network read that throws offline with nothing cached (§4's ladder), which would gate a queued
+// write on the very failure queueing exists for. Anything async the write genuinely needs resolves
+// BEFORE the writeMode read — nothing may sit between that read and the write it routes.
 const { writeMode } = offline.getWorkSyncStatus(workId);
 if (writeMode === "queued") {
   offline.queueWorkDataUpdate({ workId, dataPath, value }); // preserves order
 } else {
-  await work.patchData(workId, { originId, path: dataPath, value }); // clear to send
+  await work.patchData(workId, { originId: FLOW_ORIGIN_ID, path: dataPath, value }); // clear to send
 }
 ```
 
@@ -496,14 +496,18 @@ stored and read back exactly as passed — nothing coerces it. Numeric inputs co
 `offline.queueWorkDataUpdate`'s `originId` (the flow's `flowOriginId`) is optional — the shell resolves
 it for you from the work. `work.patchData`'s `WorkDataPatch.originId` on the exact same field is
 **required** — it is a thin wrapper over the raw `PATCH /api/v4/work/{id}/data` body with no
-shell-side resolution, so a `'direct'`-routed write needs you to supply it yourself (read it off
-`(await work.get(workId))?.flowOriginId` first if you don't already have it). Writing one branch as if it
-mirrored the other's defaulting is a real trap the `writeMode` split invites.
+shell-side resolution, so a `'direct'`-routed write needs you to supply it yourself. Take it from app
+config (§3) rather than earning it with a `work.get(workId)` read for its `flowOriginId`: that read is
+a network call that throws offline with nothing cached, so an offline-capable app that leans on it has
+put the network back in front of its writes — and if you do fall back to it, it has to complete before
+the `writeMode` read, never between that read and the write. Writing one branch as if it mirrored the
+other's defaulting is a real trap the `writeMode` split invites.
 
 **The operation argument.** `queueWorkDataUpdate` (and `patchData`, via its own body) defaults to a
 plain **set**; `UpdateWorkDataArgs.operation` selects another patch operation by name —
 `"set" | "push" | "pull" | "unset" | "addToSet" | "merge"`. The queued payload carries the same name
-back out (§4's overlay derivation branches on it). Most apps never pass it — set is the write layout
+back out, so §4's overlay derivation *should* branch on it — the helper shipped there reads
+`payload.value` and leaves that branch to you. Most apps never pass it — set is the write layout
 components make.
 
 **The task-node argument.** Every queue method takes the same optional `sectionId`, authorized against a
@@ -824,13 +828,15 @@ still shows the pre-edit value.
 ```ts
 import { offline, work } from "@rise-x/apps-sdk/connectors";
 
+const FLOW_ORIGIN_ID = "…"; // flowOriginId — app config, recorded at integration time (§3)
+
 async function submitQty(workId: string, dataPath: string, value: unknown) {
   try {
-    // originId first (patchData requires it; the queued call defaults it, §5) — the network
-    // read must not sit between the writeMode read and the write it routes.
-    const snapshot = await work.get(workId);
-    if (!snapshot?.flowOriginId) throw new Error(`work ${workId} not found`);
-
+    // originId comes from app config, not from a work read: patchData requires it, the queued
+    // call defaults it (§5), and reading it off the work would be a network call (§4's ladder)
+    // that throws offline with nothing cached — gating the queued write on exactly the failure
+    // queueing exists for. It would also have to sit before the writeMode read, since nothing
+    // may sit between that read and the write it routes.
     const { writeMode } = offline.getWorkSyncStatus(workId);
     if (writeMode === "queued") {
       // Synchronous — no await. sectionId and originId both omitted; the shell resolves
@@ -838,7 +844,7 @@ async function submitQty(workId: string, dataPath: string, value: unknown) {
       offline.queueWorkDataUpdate({ workId, dataPath, value });
     } else {
       await work.patchData(workId, {
-        originId: snapshot.flowOriginId,
+        originId: FLOW_ORIGIN_ID,
         path: dataPath,
         value,
       });
