@@ -574,9 +574,12 @@ Queued, `offline.queueWorkAction({ workId, actionId })` — and that is the whol
 resolves everything else off the cached work: event name, step name, the task node, the queue-row
 label, and the configured invitees (resolved against current work data, exactly as the work page
 does). An `actionId` the work does not have **throws at the call site** rather than queueing a
-malformed replay — so read the actions fresh from `(await work.get(workId))?.actions ?? []` (null =
-the work does not exist, §4) instead of holding them across renders; a stale render's id may already
-be gone.
+malformed replay — so read the actions fresh instead of holding them across renders; a stale render's
+id may already be gone. Guard that read with this file's own idiom rather than defaulting it —
+`const snapshot = await work.get(workId)`, then `if (!snapshot) throw`, and only then
+`snapshot.actions`. Collapsing it to `?? []` turns §4's only meaning for `null` here — the work does
+not exist — into "this work has no actions", and the reader meets that as the `actionId` throw above
+instead of as a missing work.
 
 - `recipients?` overrides only `to`/`cc` per destination. Supply it **only** when the flow config
   resolves nobody and the action still needs a recipient — the case the work page shows a picker
@@ -623,10 +626,12 @@ the new attachment's id immediately after upload; re-fetch first.
 **Deletion's args differ far more than `patchData`'s.** `attachments.delete({ id })` takes just the id
 online. `offline.queueWorkAttachmentDeletion({ workId, id, fileName, folder, mimeType })` needs four
 more fields queued — there is no shell-side lookup that backfills them the way `patchData`'s `originId`
-gets defaulted on the queued data-update path. Read them off the work's own attachments —
-`(await work.get(workId))?.attachments` (guard the `null`, §4) carries `id`, `fileName`, `mimeType`,
-and `path`: pass `path` as `folder`, verbatim. The stored `path` IS the sanitized folder string the
-shell matches components on (see Folder binding, below).
+gets defaulted on the queued data-update path. Read them off the work's own attachments, guarding the
+work read itself rather than reaching straight through it: `const snapshot = await work.get(workId)`,
+then `if (!snapshot) throw` — a `null` there means the work does not exist (§4), and destructuring an
+attachment off it instead surfaces as an unexplained `undefined`. `snapshot.attachments` carries
+`id`, `fileName`, `mimeType`, and `path`: pass `path` as `folder`, verbatim. The stored `path` IS the
+sanitized folder string the shell matches components on (see Folder binding, below).
 
 **Folder binding — exact-match, case-sensitive, and not an online/offline divergence.** An upload is
 visible in an Attachments/AttachmentsGrid layout component **if and only if** the `folder` your app
