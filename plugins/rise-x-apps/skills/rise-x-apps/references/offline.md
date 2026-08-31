@@ -287,17 +287,22 @@ mimeType }[]` — which is what the attachments part of §5 reads from.
 
 **Every other read is network-only and throws offline** — `work.list`, `work.search`, `work.iterate`, `work.listRelated`, `work.getAudit`, `flows.list`, `flows.get`, and `flows.findTask` (which calls `flows.list`). Only the six rows above have a cache branch, and there is no `source` option to force one either way.
 
-**The `@rise-x/apps-sdk/query` hooks follow this same ladder.** `useWork`, `useWorkData`,
+**The `@rise-x/apps-sdk/query` hooks follow this same ladder — from 0.12.** `useWork`, `useWorkData`,
 `useFlowConfig`, `useFlowLayout` and the rest run these same connector reads as react-query
-`queryFn`s, and `createAppQueryClient` sets `networkMode: 'offlineFirst'` with an offline-aware
-retry: mounted offline, a hook answers from the offline cache when the data is downloaded, and
-settles into its **error** state (recovering on reconnect) when it is not — the same two outcomes as
-a direct connector call. The hooks are a provided tool, not an obligation — an app that manages its
-own caching is free to use that instead. One direct-connector shape is ordinary async state —
+`queryFn`s, and from that version `createAppQueryClient` sets `networkMode: 'offlineFirst'` with an
+offline-aware retry: mounted offline, a hook answers from the offline cache when the data is
+downloaded, and settles into its **error** state (recovering on reconnect) when it is not — the same
+two outcomes as a direct connector call. The hooks are a provided tool, not an obligation — an app
+that manages its own caching is free to use that instead. One direct-connector shape is ordinary
+async state —
 `WorkDetail` and `ConnectorError` are both importable from `@rise-x/apps-sdk/connectors` — with all
-three outcomes of the read ladder handled:
+three outcomes of the read ladder handled (the two statements below are fragments from inside a
+component body, not module scope):
 
 ```tsx
+import { useEffect, useState } from "react";
+import { work, type ConnectorError, type WorkDetail } from "@rise-x/apps-sdk/connectors";
+
 const [state, setState] = useState<
   | { kind: "loading" }
   | { kind: "ready"; work: WorkDetail | null } // null = does not exist on the server (404)
@@ -333,7 +338,12 @@ path under `path`, not `dataPath` — the same rename `patchData` makes (§5); i
 match below would return "nothing pending" forever, which is why the helper matches on `path`
 deliberately:
 
-```ts
+```tsx
+import { useEffect, useState } from "react";
+import { offline, work } from "@rise-x/apps-sdk/connectors";
+
+const FLOW_ORIGIN_ID = "…"; // flowOriginId — app config, recorded at integration time (§3)
+
 // The queue IS the overlay: the last queued write to a path is the pending value.
 // hasPending keeps a queued null distinguishable from "nothing pending".
 const pendingValue = (
@@ -342,35 +352,68 @@ const pendingValue = (
 ): { hasPending: boolean; value?: unknown } => {
   const ops = offline.listQueuedWorkOperations({ workId, kind: "dataUpdate" });
   for (let i = ops.length - 1; i >= 0; i--) { // newest last — last write wins
-    if (ops[i].isSynced) continue; // free guard; the shell already filters synced items out
+    // Belt and braces rather than free: the shell already filters synced items out, so this line
+    // pays off only if that ever changes. Keep it, but don't read it as a live case.
+    if (ops[i].isSynced) continue;
     const p = ops[i].payload as { path?: string; value?: unknown };
     if (p?.path === dataPath) return { hasPending: true, value: p.value };
   }
   return { hasPending: false };
 };
 
-// In the component: queueWorkDataUpdate returns void and there is no queue subscription (§6),
-// so nothing re-renders on its own — bump local state after every queue call.
-const [, setQueueTick] = useState(0);
+export function QtyField({ workId, dataPath }: { workId: string; dataPath: string }) {
+  const [read, setRead] = useState<
+    { kind: "loading" } | { kind: "ready"; value: unknown } | { kind: "error" }
+  >({ kind: "loading" });
+  // queueWorkDataUpdate returns void and there is no queue subscription (§6), so nothing
+  // re-renders on its own. One tick does both jobs: re-derive the overlay, and re-read the
+  // server (§6's "re-read after your own writes").
+  const [tick, setTick] = useState(0);
+  const [draft, setDraft] = useState<string | null>(null); // null = not editing
 
-async function submitQty(workId: string, dataPath: string, value: unknown) {
-  // originId first: patchData requires it, and resolving it is a network read (§4's ladder) that
-  // must not sit between the writeMode read and the write. App config works here too (§3).
-  const originId = (await work.get(workId))?.flowOriginId;
-  if (!originId) throw new Error(`work ${workId} not found`);
-  const { writeMode } = offline.getWorkSyncStatus(workId);
-  if (writeMode === "queued") {
-    offline.queueWorkDataUpdate({ workId, dataPath, value });
-    setQueueTick((t) => t + 1); // re-render so pendingValue is re-derived
-  } else {
-    await work.patchData(workId, { originId, path: dataPath, value });
-  }
+  // The server value is an ASYNC read, so it belongs in an effect — work.getData() inside a render
+  // expression is the async-state bug the example above exists to prevent. The overlay on top of it
+  // is synchronous, which is why only one of the two needs state at all.
+  useEffect(() => {
+    let alive = true;
+    work.getData(workId, { path: dataPath }).then(
+      (v) => alive && setRead({ kind: "ready", value: v }),
+      () => alive && setRead({ kind: "error" }), // unreachable + not downloaded throws (§4)
+    );
+    return () => { alive = false; };
+  }, [workId, dataPath, tick]);
+
+  const pending = pendingValue(workId, dataPath); // synchronous — re-derived on every render
+  const shown = pending.hasPending ? pending.value : read.kind === "ready" ? read.value : undefined;
+
+  const commit = async (value: unknown) => {
+    const { writeMode } = offline.getWorkSyncStatus(workId);
+    if (writeMode === "queued") {
+      offline.queueWorkDataUpdate({ workId, dataPath, value });
+    } else {
+      // originId from app config, never from a work read: that read is a network call (§4's
+      // ladder) and must not sit between the writeMode read and the write it routes (§5).
+      await work.patchData(workId, { originId: FLOW_ORIGIN_ID, path: dataPath, value });
+    }
+    setTick((t) => t + 1);
+  };
+
+  if (read.kind === "loading") return <span>…</span>;
+  // Both read outcomes are rendered, never just the happy one — a queued edit still shows through
+  // the overlay even when the underlying read failed.
+  if (read.kind === "error" && !pending.hasPending) return <span>not available offline</span>;
+
+  return (
+    <label>
+      <input
+        value={draft ?? String(shown ?? "")} // the draft wins, so a re-read can't clobber typing (§6)
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { if (draft === null) return; void commit(draft); setDraft(null); }}
+      />
+      {pending.hasPending && <span> pending sync</span>}
+    </label>
+  );
 }
-
-// Render:
-//   const pending = pendingValue(workId, dataPath);
-//   value shown = pending.hasPending ? pending.value
-//                                    : await work.getData(workId, { path: dataPath })
 ```
 
 Two boundaries of the derivation, both by construction. It matches paths by **string equality** — a
