@@ -13,9 +13,9 @@ their argument traps, the `onOfflineDownload` lifecycle hook, and which `@rise-x
 offline behaviour needs.
 
 Verified against `@rise-x/apps-sdk` **0.12.0** (bridge protocol v4) — the release the offline SDK
-surface documented here lands in, and one that is **not published yet** (npm's latest is 0.11.x, so
-run `npm view @rise-x/apps-sdk version` before telling anyone they can install it); where a claim is
-version-sensitive, the text says so.
+surface documented here lands in. Before telling anyone they can install it, confirm that version
+has shipped (`npm view @rise-x/apps-sdk version`); where a claim is version-sensitive, the text
+says so.
 
 Not needed for an app that only wants a "you're offline" banner for UX copy — `offline.isOnline()`
 covers that alone (§6). Not needed while merely scaffolding a new app — that's the scaffold
@@ -108,7 +108,10 @@ app actually calls; if a bridge method has no app-facing row, that is a decision
 Both handles are also session-guarded — the cache and outbox are keyed to the signed-in user. Before
 the shell has a session, every **read** fails soft — the cache reads answer `null`, and the `offline`
 connector's list reads (`listQueuedWorkOperations`, `listDownloadedWorkIds`, `listDownloadedFlowIds`)
-answer `[]`; nothing user-keyed legitimately exists yet. Every **write** (`queue*`,
+answer `[]`; nothing user-keyed legitimately exists yet. Those `null`s are the bridge layer's, not
+answers your app sees: through the connectors, a pre-session cache miss just falls through §4's
+ladder — the network's answer online, the throw offline — so a connector read's `null` keeps its §4
+meaning and is never a session artifact. Every **write** (`queue*`,
 `downloadFlowWorks`) **throws** rather than file into a bucket nothing will ever sync. `requestSync`
 silently no-ops pre-session — or offline (§7).
 

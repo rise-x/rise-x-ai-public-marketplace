@@ -58,9 +58,9 @@ user rather than guessing.
    in components; `/connectors` in event handlers and lifecycle hooks. In an
    offline-capable app, bump `@rise-x/apps-sdk` to >= 0.12 before this step —
    that is where the hooks' offline-cache behaviour lives
-   (`references/offline.md` §4). Check that version is out first
-   (`npm view @rise-x/apps-sdk version`): 0.12 was unreleased when this was
-   written, so on an older SDK this step lands without the offline behaviour.
+   (`references/offline.md` §4). Check that version is available first
+   (`npm view @rise-x/apps-sdk version`) — on an older SDK this step lands
+   without the offline behaviour.
 5. **Add the docs the template now ships:** `APP.md` (see above), `AGENTS.md`,
    and the one-line `CLAUDE.md` pointer — copy the shape from the SDK's
    `template/` directory (`node_modules/@rise-x/apps-sdk/template/`;
