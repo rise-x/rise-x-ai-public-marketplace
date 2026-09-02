@@ -1,0 +1,80 @@
+name: create-release
+
+# Cuts the integration branch for the next release.
+#
+# main is the live marketplace: Claude Code installs plugins from it and the
+# private marketplace mirrors it unpinned, so every merge to main is a release.
+# Unreleased work therefore collects on release/<name>, cut here from main.
+# Feature PRs target that branch; release-pr.yml keeps a draft PR from it into
+# main open, and merging that PR is the release (sync-internal-marketplace
+# then propagates the new plugin versions to the org).
+#
+# One release is open at a time: this refuses to cut while any release/*
+# branch exists, so PR authors never have to guess the target.
+#
+# The branch is pushed with GITHUB_TOKEN, which does not start other
+# workflows (GitHub anti-recursion). That is fine here: release-pr.yml has
+# nothing to open until the first PR lands on the branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Release name; the branch becomes release/<name> (for example 2026-09). Letters, digits, dots, dashes.'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: create-release
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    name: Cut release/${{ inputs.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$NAME" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'; then
+            echo "::error::name '$NAME' must be letters, digits, dots, or dashes (for example 2026-09)"
+            exit 1
+          fi
+          # The regex above still admits names git rejects (a.., x.lock, y.),
+          # which would otherwise surface as a raw refspec error mid-push.
+          if ! git check-ref-format "refs/heads/release/${NAME}"; then
+            echo "::error::'release/${NAME}' is not a valid git branch name"
+            exit 1
+          fi
+          open="$(git ls-remote --heads origin 'release/*' | awk '{ sub("refs/heads/", "", $2); print $2 }')"
+          if [[ -n "$open" ]]; then
+            echo "::error::a release is already open: ${open//$'\n'/, }. Merge or delete it before cutting another."
+            exit 1
+          fi
+
+      - name: Create and push the release branch
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          branch="release/${NAME}"
+          git push origin "HEAD:refs/heads/${branch}"
+          sha="$(git rev-parse HEAD)"
+          echo "Pushed ${branch} at ${sha}"
+          {
+            echo "## Cut \`${branch}\` at \`${sha}\`"
+            echo
+            echo "- Open feature PRs against \`${branch}\` (base branch, not \`main\`)."
+            echo "- The first merge into it opens a draft PR \`${branch}\` -> \`main\`."
+            echo "- When the release is ready: mark that PR ready for review, get it approved, merge it."
+          } >> "$GITHUB_STEP_SUMMARY"
