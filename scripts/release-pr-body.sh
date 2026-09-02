@@ -16,14 +16,16 @@
 #                       "- <PR title> (#<n>)", then "## Other" for PRs
 #                       touching nothing under plugins/
 #
-# The four heading forms are a cross-repo contract, not cosmetic. The
+# The five heading forms are a cross-repo contract, not cosmetic. The
 # release-notes skill in rise-x/rise-x-ai-marketplace matches them literally
 # and hard-stops on NOT BUMPED; it records the same contract in its
 # references/sources.md. Renaming one here silently breaks it:
-#   ## <plugin> <old> -> <new>       version bumped this release
-#   ## <plugin> <version> (NOT BUMPED)   changed but unbumped; validate blocks
-#   ## <plugin> <version> (new plugin)   absent from main
-#   ## <plugin> (removed)                gone from the release branch
+#   ## <plugin> <old> -> <new>            version bumped this release
+#   ## <plugin> <version> (NOT BUMPED)     changed but unbumped; validate blocks
+#   ## <plugin> <version> (no bump needed) docs or tests only, which
+#                                          check-version.sh exempts
+#   ## <plugin> <version> (new plugin)     absent from main
+#   ## <plugin> (removed)                  gone from the release branch
 #
 # Versions come from git (origin/main vs the working tree), so run it with the
 # release branch checked out and origin/main fetched. PR titles come from gh.
@@ -86,10 +88,24 @@ version_at() { # $1=ref-or-empty for worktree, $2=plugin
     || die "cannot read .version from ${path} at ${ref:-the working tree}"
 }
 
-# Plugins with any change on this branch relative to main. Three-dot: the
-# release's own delta, so a plugin only main touched is not listed.
-changed_plugins="$(git -C "$repo_root" diff --name-only "origin/main...HEAD" \
+# Files changed on this branch relative to main. Three-dot: the release's own
+# delta, so a plugin only main touched is not listed.
+changed_files="$(git -C "$repo_root" diff --name-only "origin/main...HEAD")"
+changed_plugins="$(printf '%s\n' "$changed_files" \
   | sed -n 's|^plugins/\([^/]*\)/.*|\1|p' | sort -u)"
+
+# Kept identical to check-version.sh: a plugin whose whole release delta is
+# docs or tests needs no bump, so an unchanged version there is correct, not
+# a mistake. Emitting NOT BUMPED for it would be a false alarm, and the
+# release-notes tooling hard-stops on that marker.
+exempt_regex='(^plugins/[^/]+/README\.md$|^plugins/[^/]+/tests/|^plugins/[^/]+/test/)'
+
+needs_bump() { # $1=plugin; true when its delta includes a non-exempt file
+  local own
+  own="$(printf '%s\n' "$changed_files" | grep -E "^plugins/$1/" || true)"
+  [[ -n "$own" ]] || return 1
+  printf '%s\n' "$own" | grep -qEv "$exempt_regex"
+}
 
 # One call: number, title and file list for every PR merged into the branch.
 pr_limit=500
@@ -146,8 +162,12 @@ emit_prs() { # $1=plugin name, empty for the Other section
     elif [[ -z "$old" ]]; then
       printf '## %s %s (new plugin)\n\n' "$name" "$new"
     elif [[ "$old" == "$new" ]]; then
-      # validate blocks the release PR while this is true; surface it here too.
-      printf '## %s %s (NOT BUMPED)\n\n' "$name" "$new"
+      if needs_bump "$name"; then
+        # validate blocks the release PR while this is true; surface it here.
+        printf '## %s %s (NOT BUMPED)\n\n' "$name" "$new"
+      else
+        printf '## %s %s (no bump needed)\n\n' "$name" "$new"
+      fi
     else
       printf '## %s %s -> %s\n\n' "$name" "$old" "$new"
     fi
