@@ -71,6 +71,14 @@ jobs:
             exit 1
           fi
 
+          # Two open PRs cannot normally share a head and base, but a
+          # same-named branch on a fork can match --head. Refusing beats
+          # refreshing one at random and leaving the other stale.
+          if (( open_count > 1 )); then
+            echo "::error::${open_count} open PRs match ${BRANCH} -> main: $(printf '%s' "$open_json" | jq -r 'map("#\(.number)")|join(" ")'). Close the ones that are not the release PR."
+            exit 1
+          fi
+
           if [[ "$open_count" != "0" ]]; then
             number="$(printf '%s' "$open_json" | jq -r '.[0].number')"
             gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/current-body.md"

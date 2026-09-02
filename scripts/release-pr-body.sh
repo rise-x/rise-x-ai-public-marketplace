@@ -76,10 +76,14 @@ version_at() { # $1=ref-or-empty for worktree, $2=plugin
     [[ -f "${repo_root}/${path}" ]] || { printf ''; return 0; }
     raw="$(cat "${repo_root}/${path}")"
   else
+    # Absent at that ref is legitimate: the plugin is new this release.
     raw="$(git -C "$repo_root" show "${ref}:${path}" 2>/dev/null || printf '')"
   fi
   [[ -z "$raw" ]] && { printf ''; return 0; }
-  printf '%s' "$raw" | jq -r '.version // empty' 2>/dev/null || printf ''
+  # Present but unparseable is not legitimate. Swallowing it would label a
+  # broken manifest "(new plugin)" or "(removed)" and read as deliberate.
+  printf '%s' "$raw" | jq -r '.version // empty' \
+    || die "cannot read .version from ${path} at ${ref:-the working tree}"
 }
 
 # Plugins with any change on this branch relative to main. Three-dot: the
@@ -88,9 +92,15 @@ changed_plugins="$(git -C "$repo_root" diff --name-only "origin/main...HEAD" \
   | sed -n 's|^plugins/\([^/]*\)/.*|\1|p' | sort -u)"
 
 # One call: number, title and file list for every PR merged into the branch.
+pr_limit=500
 prs="$(gh pr list --repo "${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}" \
-  --state merged --base "$branch" --limit 200 \
+  --state merged --base "$branch" --limit "$pr_limit" \
   --json number,title,files)" || die "cannot list merged PRs for base '$branch'"
+# Hitting the limit would drop the oldest PRs from the notes with no sign of
+# it, so stop instead of publishing a changelog that is quietly incomplete.
+pr_total="$(printf '%s' "$prs" | jq length)" || die "cannot count the PR list"
+(( pr_total < pr_limit )) \
+  || die "'$branch' has at least ${pr_limit} merged PRs; raise pr_limit"
 
 # "<plugin>\t<n>\t<title>" for every (plugin, PR) pair, with an empty first
 # field for PRs touching nothing under plugins/. A PR spanning two plugins is

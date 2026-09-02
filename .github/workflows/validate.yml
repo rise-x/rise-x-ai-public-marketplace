@@ -1,8 +1,10 @@
 name: validate
 on:
   pull_request:
-    # ready_for_review: the release PR is opened as a draft by release-pr.yml
-    # with GITHUB_TOKEN, which starts no run; marking it ready must.
+    # ready_for_review re-runs the check when a draft is marked ready with no
+    # new commits. That matters for the release PR: check-version.sh compares
+    # against origin/main, so a bump landing on main after the last run can
+    # invalidate a green result that no push would refresh.
     types: [opened, synchronize, reopened, ready_for_review]
 permissions:
   contents: read

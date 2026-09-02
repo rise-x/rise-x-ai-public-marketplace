@@ -5,22 +5,24 @@ name: create-release
 # main is the live marketplace: Claude Code installs plugins from it and the
 # private marketplace mirrors it unpinned, so every merge to main is a release.
 # Unreleased work therefore collects on release/<name>, cut here from main.
-# Feature PRs target that branch; release-pr.yml keeps a draft PR from it into
-# main open, and merging that PR is the release (sync-internal-marketplace
-# then propagates the new plugin versions to the org).
+# Feature PRs target that branch. Someone opens the draft PR from it into
+# main by hand, once, using the command this workflow prints: the enterprise
+# forbids Actions from creating pull requests. release-pr.yml then refreshes
+# that PR's body on every push. Merging it is the release, and
+# sync-internal-marketplace propagates the new plugin versions to the org.
 #
 # One release is open at a time: this refuses to cut while any release/*
 # branch exists, so PR authors never have to guess the target.
 #
 # The branch is pushed with GITHUB_TOKEN, which does not start other
-# workflows (GitHub anti-recursion). That is fine here: release-pr.yml has
-# nothing to open until the first PR lands on the branch.
+# workflows (GitHub anti-recursion). That is fine here: a freshly cut branch
+# is level with main, so release-pr.yml would have nothing to report anyway.
 
 on:
   workflow_dispatch:
     inputs:
       name:
-        description: 'Release name; the branch becomes release/<name> (for example 2026-09). Letters, digits, dots, dashes.'
+        description: 'Release name; the branch becomes release/<name> (for example 2026-09). Letters, digits, dots, dashes, underscores.'
         type: string
         required: true
 
@@ -47,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           if ! printf '%s' "$NAME" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'; then
-            echo "::error::name '$NAME' must be letters, digits, dots, or dashes (for example 2026-09)"
+            echo "::error::name '$NAME' must be letters, digits, dots, dashes, or underscores (for example 2026-09)"
             exit 1
           fi
           # The regex above still admits names git rejects (a.., x.lock, y.),
