@@ -58,12 +58,17 @@ placeholder='_Replace this line with a short release summary. It is preserved wh
 # Carry the hand-written block across. Everything outside the markers is
 # regenerated, so only this is read back from the existing body. awk rather
 # than sed: the block is multi-line and may itself contain markdown.
+#
+# The markers are anchored to a whole line, which is how this script emits
+# them. Matching them as substrings let a note that merely mentioned the
+# closing marker end the block early and silently drop everything a person
+# had written after it.
 notes="$placeholder"
 if [[ -n "$existing_body" && -f "$existing_body" ]]; then
   carried="$(awk '
-    /<!-- \/notes -->/ { inblock = 0 }
-    inblock            { print }
-    /<!-- notes -->/   { inblock = 1 }
+    /^[[:space:]]*<!-- \/notes -->[[:space:]]*$/ { inblock = 0 }
+    inblock                                       { print }
+    /^[[:space:]]*<!-- notes -->[[:space:]]*$/    { inblock = 1 }
   ' "$existing_body")"
   # A block holding only whitespace falls back to the placeholder, so an
   # accidentally emptied block does not silently strip the prompt.
