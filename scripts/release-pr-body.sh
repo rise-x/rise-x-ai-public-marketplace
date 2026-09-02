@@ -121,10 +121,17 @@ pr_total="$(printf '%s' "$prs" | jq length)" || die "cannot count the PR list"
 # "<plugin>\t<n>\t<title>" for every (plugin, PR) pair, with an empty first
 # field for PRs touching nothing under plugins/. A PR spanning two plugins is
 # listed under both, which is what the diff actually says.
+#
+# The select() is redundant: capture() yields nothing for a path that does not
+# match, so non-plugin paths drop out either way and such a PR falls to the
+# Other section. It is spelled out because relying on that is easy to misread
+# as a crash waiting to happen, and it states the intent at the line itself.
 pr_rows="$(printf '%s' "$prs" | jq -r '
   .[]
   | . as $pr
-  | ([.files[].path | capture("^plugins/(?<p>[^/]+)/").p] | unique) as $plugins
+  | ([.files[].path
+      | select(startswith("plugins/"))
+      | capture("^plugins/(?<p>[^/]+)/").p] | unique) as $plugins
   | if ($plugins | length) == 0
     then "\t\($pr.number)\t\($pr.title)"
     else $plugins[] | "\(.)\t\($pr.number)\t\($pr.title)"
