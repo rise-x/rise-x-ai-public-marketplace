@@ -290,8 +290,9 @@ prints the ids each environment would ship. Run it after every edit to
 `rise-x-app.json` and before building a bundle to deploy. `--json` emits
 `{ ok, manifest, environments, scan }` if you need to read the result rather than
 the report. Validation is **structural and offline**: it cannot tell you an id has
-been deleted from the target ecosystem — the deploy checks that (see Build and
-deploy).
+been deleted from the target ecosystem, and neither can the deploy, which only
+checks the manifest's shape (see Build and deploy). A stale id surfaces in the
+running app.
 
 #### Finding ids already hardcoded in the code
 
@@ -799,17 +800,18 @@ pnpm build:prod                               # prod bundle — carries prod ids
 `rise-x-app.json` for the `APP_ENV` environment and emits the single-environment
 result into `dist/`, so it rides the zip — a test build carries test ids only
 (see §App dependencies). At deploy time the backend reads that file from the
-zip and **rejects the deploy** if any declared dependency doesn't resolve in
-the target ecosystem, with an error listing each failing dependency's alias,
-label, kind, and id — this is what catches a test bundle shipped to prod. The
-stored app then exposes a `dependencies` field, readable through the Rise-X
-MCP's `get_app`.
+zip, validates its **shape**, and stores the declarations. It does **not** look
+the ids up, so **the deploy does not catch a test bundle shipped to prod**: it
+succeeds, the wrong ids are stored, and the app breaks at runtime. The stored
+app exposes `dependencies` plus a `dependencyEnvironment` naming the build
+target the manifest claimed, both readable through the Rise-X MCP's `get_app` —
+`dependencyEnvironment` is advisory, and comparing it against the ecosystem is
+on you.
 
-`pnpm validate` before the build turns the structural half of that rejection into
-a local failure: it checks every declared environment, so it catches a missing or
-malformed id for the environment you are about to deploy to before the zip
-exists. What it can't catch is an id that no longer exists in the target
-ecosystem — only the deploy resolves ids against a live ecosystem.
+`pnpm validate` before the build is therefore the only check that sees every
+environment: it catches a missing or malformed id for the environment you are
+about to deploy to before the zip exists. What nothing catches is an id that is
+well-formed but names an object that no longer exists.
 
 When the bundle is ready, **ask the user whether to deploy**. Two paths:
 
@@ -819,10 +821,10 @@ Load the `rise-x-mcp` skill first (mandatory before any Rise-X MCP call), then
 pick the server for the target environment: **`rise-x-test` → test,
 `rise-x` → production. If the user doesn't name an environment, deploy to
 test** — most users want to try the app there first. Deploying requires the
-environment-orchestrator role. The bundle must be **built for the same
-environment** (`APP_ENV` above): the backend validates the zip's
-`rise-x-app.json` against the target ecosystem and rejects the deploy when a
-declared dependency doesn't resolve there.
+environment-orchestrator role. Build the bundle for the **same environment** you
+deploy to (`APP_ENV` above), and check it yourself: the backend only validates
+the shape of the zip's `rise-x-app.json`, so a bundle carrying another
+environment's ids deploys without complaint and fails in the running app.
 
 1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
 2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
@@ -887,8 +889,9 @@ Whether you scaffolded a new app or modified an existing one, the user can't see
    zero, meaning every environment in `rise-x-app.json` resolves — not just the
    one you build. A build checks its own target only, so this is what catches a
    dependency you added for one environment and not the others it declares. Skip
-   it and the gap surfaces at promotion, as a deploy rejection in someone else's
-   hands. If an id is genuinely missing, ask the user for it or look it up in
+   it and the gap surfaces at promotion, as a broken app in someone else's hands:
+   the deploy checks the manifest's shape, not the ids, so it will not stop you.
+   If an id is genuinely missing, ask the user for it or look it up in
    that ecosystem with the Rise-X MCP; never invent one, and never delete a
    declared environment to make the command pass.
 
