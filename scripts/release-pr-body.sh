@@ -162,4 +162,4 @@ emit_prs() { # $1=plugin name, empty for the Other section
     printf '\n'
   fi
   printf '<!-- /changelog -->\n'
-} 
+}
