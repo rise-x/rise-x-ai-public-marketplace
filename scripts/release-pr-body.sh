@@ -17,8 +17,9 @@
 #                       touching nothing under plugins/
 #
 # The four heading forms are a cross-repo contract, not cosmetic. The
-# release-notes tooling matches them literally and hard-stops on NOT BUMPED.
-# Renaming one silently breaks it:
+# release-notes skill in rise-x/rise-x-ai-marketplace matches them literally
+# and hard-stops on NOT BUMPED; it records the same contract in its
+# references/sources.md. Renaming one here silently breaks it:
 #   ## <plugin> <old> -> <new>       version bumped this release
 #   ## <plugin> <version> (NOT BUMPED)   changed but unbumped; validate blocks
 #   ## <plugin> <version> (new plugin)   absent from main
