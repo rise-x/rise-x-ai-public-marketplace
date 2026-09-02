@@ -72,20 +72,28 @@ if [[ -n "$existing_body" && -f "$existing_body" ]]; then
   fi
 fi
 
-version_at() { # $1=ref-or-empty for worktree, $2=plugin
-  local ref="$1" name="$2" path="plugins/$2/.claude-plugin/plugin.json" raw
+version_at() { # $1=ref, empty for the working tree; $2=plugin
+  local ref="$1" path="plugins/$2/.claude-plugin/plugin.json" raw version
+  local where="${ref:-the working tree}"
   if [[ -z "$ref" ]]; then
+    # Absent is legitimate: the plugin was removed on this branch.
     [[ -f "${repo_root}/${path}" ]] || { printf ''; return 0; }
     raw="$(cat "${repo_root}/${path}")"
   else
-    # Absent at that ref is legitimate: the plugin is new this release.
-    raw="$(git -C "$repo_root" show "${ref}:${path}" 2>/dev/null || printf '')"
+    # Absent at that ref is legitimate too: the plugin is new this release.
+    # Test the exit status, not the output: git show prints nothing both for
+    # a missing path and for a file that exists and is empty.
+    raw="$(git -C "$repo_root" show "${ref}:${path}" 2>/dev/null)" \
+      || { printf ''; return 0; }
   fi
-  [[ -z "$raw" ]] && { printf ''; return 0; }
-  # Present but unparseable is not legitimate. Swallowing it would label a
-  # broken manifest "(new plugin)" or "(removed)" and read as deliberate.
-  printf '%s' "$raw" | jq -r '.version // empty' \
-    || die "cannot read .version from ${path} at ${ref:-the working tree}"
+  # Present is a different matter. Empty, unparseable, or carrying no .version
+  # all mean a broken manifest, and reporting one as "(new plugin)" or
+  # "(removed)" would dress a defect up as a deliberate change.
+  [[ -n "$raw" ]] || die "${path} is empty at ${where}"
+  version="$(printf '%s' "$raw" | jq -r '.version // empty')" \
+    || die "cannot parse ${path} at ${where}"
+  [[ -n "$version" ]] || die "${path} has no .version at ${where}"
+  printf '%s' "$version"
 }
 
 # Files changed on this branch relative to main. Three-dot: the release's own

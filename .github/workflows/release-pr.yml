@@ -64,7 +64,11 @@ jobs:
 
           # Fail closed: an empty count must not read as "a PR already exists",
           # which would skip the refresh silently.
-          open_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number)"
+          # --head matches on branch name alone, so a fork carrying the same
+          # branch would qualify. gh has no owner-qualified --head, so filter
+          # on the head repo's owner instead.
+          open_raw="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number,headRepositoryOwner)"
+          open_json="$(printf '%s' "$open_raw" | jq --arg owner "${GITHUB_REPOSITORY%%/*}" '[.[] | select(.headRepositoryOwner.login == $owner)]')"
           open_count="$(printf '%s' "$open_json" | jq length)"
           if ! [[ "$open_count" =~ ^[0-9]+$ ]]; then
             echo "::error::could not determine whether a release PR is open (got '$open_count')"
