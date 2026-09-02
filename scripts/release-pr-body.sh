@@ -144,19 +144,30 @@ pr_total="$(printf '%s' "$prs" | jq length)" || die "cannot count the PR list"
 # field for PRs touching nothing under plugins/. A PR spanning two plugins is
 # listed under both, which is what the diff actually says.
 #
-# The select() is redundant: capture() yields nothing for a path that does not
-# match, so non-plugin paths drop out either way and such a PR falls to the
-# Other section. It is spelled out because relying on that is easy to misread
-# as a crash waiting to happen, and it states the intent at the line itself.
-pr_rows="$(printf '%s' "$prs" | jq -r '
-  .[]
+# Each PR is first cut down to the files that survive into the release delta.
+# protect-release requires a PR to touch the branch, so merging main back in
+# is itself a merged PR whose files are already on main and are therefore
+# absent from origin/main...HEAD. Listing it would credit this release with
+# work it does not ship. A PR left with nothing in the delta drops out, which
+# also covers one whose changes were later reverted on the branch.
+#
+# The select() on plugins/ is redundant: capture() yields nothing for a path
+# that does not match. It is spelled out because relying on that is easy to
+# misread as a crash waiting to happen.
+pr_rows="$(printf '%s' "$prs" | jq -r --arg delta "$changed_files" '
+  ($delta | split("\n") | map(select(length > 0)) | INDEX(.)) as $shipped
+  | .[]
   | . as $pr
-  | ([.files[].path
-      | select(startswith("plugins/"))
-      | capture("^plugins/(?<p>[^/]+)/").p] | unique) as $plugins
-  | if ($plugins | length) == 0
-    then "\t\($pr.number)\t\($pr.title)"
-    else $plugins[] | "\(.)\t\($pr.number)\t\($pr.title)"
+  | [.files[].path | select($shipped[.])] as $paths
+  | if ($paths | length) == 0
+    then empty
+    else ([$paths[]
+            | select(startswith("plugins/"))
+            | capture("^plugins/(?<p>[^/]+)/").p] | unique) as $plugins
+      | if ($plugins | length) == 0
+        then "\t\($pr.number)\t\($pr.title)"
+        else $plugins[] | "\(.)\t\($pr.number)\t\($pr.title)"
+        end
     end
 ')" || die "cannot parse the PR list"
 
