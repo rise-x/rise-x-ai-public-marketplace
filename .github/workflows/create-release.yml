@@ -74,7 +74,16 @@ jobs:
           {
             echo "## Cut \`${branch}\` at \`${sha}\`"
             echo
-            echo "- Open feature PRs against \`${branch}\` (base branch, not \`main\`)."
-            echo "- The first merge into it opens a draft PR \`${branch}\` -> \`main\`."
-            echo "- When the release is ready: mark that PR ready for review, get it approved, merge it."
+            echo "1. Open feature PRs against \`${branch}\`, not \`main\`."
+            echo "2. Once it is ahead of \`main\`, open the release PR. Actions may not"
+            echo "   create pull requests in this enterprise, so run this once:"
+            echo
+            echo '```'
+            echo "gh pr create --repo ${GITHUB_REPOSITORY} --base main --head ${branch} --draft --title 'release: ${NAME}'"
+            echo '```'
+            echo
+            echo "   Every later push to \`${branch}\` refreshes that PR's changelog body."
+            echo "3. To release: merge \`main\` in if it moved, mark the PR ready for review,"
+            echo "   get the code-owner approval, and merge it with a merge commit."
+            echo "4. Delete \`${branch}\` afterwards so the next cut can run."
           } >> "$GITHUB_STEP_SUMMARY"

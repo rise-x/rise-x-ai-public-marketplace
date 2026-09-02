@@ -1,32 +1,33 @@
 name: release-pr
 
-# Keeps the release PR (release/<name> -> main) open and its body current
-# while a release is assembled, so the delta that will ship is always visible
-# and merging that PR is the release.
+# Keeps the release PR (release/<name> -> main) current while a release is
+# assembled, so the delta that will ship is always visible and merging that
+# PR is the release.
 #
 # The body is regenerated on every push to the release branch by
 # scripts/release-pr-body.sh: a per-plugin changelog with each plugin's
 # version bump and the PRs merged into the branch, behind stable
-# <!-- notes --> / <!-- changelog --> markers that release-notes tooling
+# <!-- notes --> and <!-- changelog --> markers that release-notes tooling
 # parses. Whatever a human writes in the notes block is preserved.
 #
-# A PR opened with GITHUB_TOKEN does not itself start validate.yml. Marking
-# the PR ready for review does (validate listens for ready_for_review), and
-# so does every later push to the branch, so the required check is present by
-# the time anyone can merge.
+# The release PR itself is opened BY HAND, once per release. This enterprise
+# forbids GitHub Actions from creating pull requests, so GITHUB_TOKEN cannot
+# open it and this workflow does not try: with no PR open it prints the exact
+# command and stays green. Everything after that is automatic, because
+# editing an existing PR is a plain pull-requests:write call that the policy
+# does not restrict.
 #
-# REQUIRES the repository setting "Allow GitHub Actions to create and approve
-# pull requests" (Settings -> Actions -> General -> Workflow permissions).
-# Without it GitHub refuses the create call and no release PR ever appears —
-# the step below says so explicitly rather than failing with a bare API error.
+# A PR opened by a human starts validate.yml on its own, and so does every
+# later push to the branch, so the required check is present well before
+# anyone can merge.
 
 on:
   push:
     branches:
       - 'release/**'
-  # Recovery path: re-run against a release branch after a transient failure,
-  # or after enabling the Actions setting above. Dispatch it ON the release
-  # branch — the branch is taken from the ref, not an input.
+  # Run by hand right after opening the release PR to fill in the body
+  # without waiting for the next push, or to recover from a failed run.
+  # Dispatch it ON the release branch: the branch comes from the ref.
   workflow_dispatch:
 
 permissions:
@@ -39,7 +40,7 @@ concurrency:
 
 jobs:
   ensure-pr:
-    name: Ensure release PR exists and is current
+    name: Refresh the release PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -49,7 +50,7 @@ jobs:
           # origin/main and diffs the release delta against it.
           fetch-depth: 0
 
-      - name: Open or refresh the release PR
+      - name: Refresh the release PR body
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ github.ref_name }}
@@ -61,8 +62,8 @@ jobs:
             exit 1
           fi
 
-          # Fail closed: an empty count means the query did not answer, which
-          # must not be read as "a PR already exists" (that would skip silently).
+          # Fail closed: an empty count must not read as "a PR already exists",
+          # which would skip the refresh silently.
           open_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number)"
           open_count="$(printf '%s' "$open_json" | jq length)"
           if ! [[ "$open_count" =~ ^[0-9]+$ ]]; then
@@ -90,13 +91,18 @@ jobs:
             exit 0
           fi
 
-          bash scripts/release-pr-body.sh "$BRANCH" > "$RUNNER_TEMP/pr-body.md"
           name="${BRANCH#release/}"
-          if ! gh pr create --repo "$GITHUB_REPOSITORY" \
-                 --base main --head "$BRANCH" --draft \
-                 --title "release: ${name}" \
-                 --body-file "$RUNNER_TEMP/pr-body.md"; then
-            echo "::error::could not create the release PR. If the error mentions that GitHub Actions is not permitted to create pull requests, enable Settings -> Actions -> General -> 'Allow GitHub Actions to create and approve pull requests', then re-run this workflow on ${BRANCH}. Otherwise open the PR by hand: gh pr create --base main --head ${BRANCH} --draft --title 'release: ${name}'"
-            exit 1
-          fi
-          echo "Opened draft release PR for ${BRANCH}." >> "$GITHUB_STEP_SUMMARY"
+          cmd="gh pr create --repo ${GITHUB_REPOSITORY} --base main --head ${BRANCH} --draft --title 'release: ${name}'"
+          echo "::warning::no release PR is open for ${BRANCH}. Open it with: ${cmd}"
+          {
+            echo "## Open the release PR"
+            echo
+            echo "\`${BRANCH}\` is ${ahead} commit(s) ahead of \`main\` and has no open PR."
+            echo "GitHub Actions may not create pull requests in this enterprise, so open it once, by hand:"
+            echo
+            echo '```'
+            echo "${cmd}"
+            echo '```'
+            echo
+            echo "Then re-run this workflow on \`${BRANCH}\` to fill in the changelog body, or let the next push do it."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -25,7 +25,7 @@ Any PR touching `plugins/<name>/**` must bump that plugin:
 
 This holds for a PR into a release branch too (see "Release process"): the
 check compares against that branch, so each PR bumps again. Several bumps
-within one release are expected and harmless — users receive the final value.
+within one release are expected and harmless: users receive the final value.
 
 Exempt: a PR whose changes under `plugins/<name>/` are limited to
 `plugins/<name>/README.md` and/or `plugins/<name>/tests/` or
@@ -59,10 +59,10 @@ from it.
    a `name` such as `2026-09`. It pushes `release/<name>` from `main`. Only one
    release branch may exist at a time; the workflow refuses otherwise.
 2. **Collect.** Open feature PRs against `release/<name>`, not `main`. Each
-   still bumps the version of every plugin it changes, as usual. Every push to
-   the release branch runs `release-pr`, which opens the draft PR
-   `release/<name>` -> `main` on the first push that puts it ahead of `main`,
-   and regenerates that PR's body on each later push.
+   still bumps the version of every plugin it changes, as usual. Open the draft
+   PR `release/<name>` -> `main` yourself once the branch is ahead of `main`,
+   using the command `create-release` printed; every push to the release branch
+   then runs `release-pr`, which regenerates that PR's body.
 3. **Release.** Merge `main` into the release branch if `main` moved, so the
    version check is judged against what it will actually merge into. Then mark
    the release PR ready for review (this starts `validate` on it), get the
@@ -78,24 +78,32 @@ regeneration; everything else is overwritten on every push.
 
 A fix that must ship on its own can still go straight to `main` as a normal
 PR. Merge `main` into the open release branch afterwards, and re-bump any
-plugin whose version now collides — until you do, the release PR's version
+plugin whose version now collides. Until you do, the release PR's version
 check compares against a `main` the branch has not caught up with.
 
 Release-blocking dependencies:
 
-- **"Allow GitHub Actions to create and approve pull requests"** (Settings ->
-  Actions -> General -> Workflow permissions) must be **on**, or GitHub refuses
-  `release-pr`'s create call and no release PR appears. It is currently **off**
-  for this repo. After enabling it, re-run `release-pr` on the release branch
-  (`workflow_dispatch`) to open the PR that the failed run missed.
+- **Someone opens the release PR by hand, once per release.** The enterprise
+  forbids GitHub Actions from creating pull requests, so `GITHUB_TOKEN` cannot
+  open it. The repo-level setting cannot override this: enabling it returns
+  `409 The enterprise does not allow GitHub Actions to create or approve pull
+  requests`. Both `create-release` and `release-pr` print the exact
+  `gh pr create` command in their run summary. Refreshing an already-open PR
+  is unaffected, since editing is not creating.
+
+  To automate the one manual step, give the repo a fine-grained PAT or GitHub
+  App token with Contents read and Pull requests write, and use it in place of
+  `github.token` in `release-pr`. That trades the manual command for a second
+  expiring credential, on top of `PRIVATE_MARKETPLACE_TOKEN`.
 - Merging the release PR runs `sync-internal-marketplace` only when the merge
-  touches a `plugins/*/.claude-plugin/plugin.json` — which every real release
+  touches a `plugins/*/.claude-plugin/plugin.json`, which every real release
   does. A release limited to docs or workflows pushes to `main` without
   triggering the sync, correctly, since no plugin version moved.
 
-Branch protection for `release/*` is a separate concern from these workflows:
-the `protect-main` ruleset covers only the default branch, so nothing yet
-requires a PR or a passing `validate` to land on a release branch.
+The `protect-release` ruleset gates `release/*` the way `protect-main` gates
+`main`: a PR, one code-owner approval, resolved threads, a passing `validate`,
+and no force-push. It deliberately omits the `deletion` rule that
+`protect-main` carries, because each release deletes its branch afterwards.
 
 ## Private marketplace sync
 

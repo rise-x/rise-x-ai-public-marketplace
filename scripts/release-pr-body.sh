@@ -10,13 +10,13 @@
 # the <!-- notes --> markers in it is carried across verbatim; everything else
 # is regenerated. Pass nothing on the first run.
 #
-# Body shape (stable — release-notes tooling parses these markers):
+# Body shape (stable; release-notes tooling parses these markers):
 #   <!-- notes -->      hand-written summary, preserved
 #   <!-- changelog -->  one section per changed plugin, each listing
 #                       "- <PR title> (#<n>)", then "## Other" for PRs
 #                       touching nothing under plugins/
 #
-# The four heading forms are a cross-repo contract, not cosmetic — the
+# The four heading forms are a cross-repo contract, not cosmetic. The
 # release-notes tooling matches them literally and hard-stops on NOT BUMPED.
 # Renaming one silently breaks it:
 #   ## <plugin> <old> -> <new>       version bumped this release
@@ -48,7 +48,7 @@ existing_body="${2:-}"
 
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gh >/dev/null 2>&1 || die "gh is required"
-git -C "$repo_root" rev-parse origin/main >/dev/null 2>&1 || die "origin/main does not resolve — fetch it first"
+git -C "$repo_root" rev-parse origin/main >/dev/null 2>&1 || die "origin/main does not resolve; fetch it first"
 
 placeholder='_Replace this line with a short release summary. It is preserved when the changelog regenerates._'
 
