@@ -98,7 +98,9 @@ version_at() { # $1=ref, empty for the working tree; $2=plugin
 
 # Files changed on this branch relative to main. Three-dot: the release's own
 # delta, so a plugin only main touched is not listed.
-changed_files="$(git -C "$repo_root" diff --name-only "origin/main...HEAD")"
+if ! changed_files="$(git -C "$repo_root" diff --name-only "origin/main...HEAD")"; then
+  die "cannot diff 'origin/main...HEAD'; no merge base? Fetch enough history that origin/main and HEAD share an ancestor"
+fi
 changed_plugins="$(printf '%s\n' "$changed_files" \
   | sed -n 's|^plugins/\([^/]*\)/.*|\1|p' | sort -u)"
 
