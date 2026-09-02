@@ -50,6 +50,13 @@ jobs:
           # origin/main and diffs the release delta against it.
           fetch-depth: 0
 
+      # fetch-depth: 0 already fetches every head, so this is normally a no-op.
+      # It is here because that is a detail of actions/checkout rather than a
+      # promise, the push path cannot be exercised before merge, and the cost
+      # of being wrong is a release workflow that fails the first time it runs.
+      - name: Make sure origin/main is present
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
       - name: Refresh the release PR body
         env:
           GH_TOKEN: ${{ github.token }}

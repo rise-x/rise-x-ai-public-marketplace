@@ -98,7 +98,14 @@ version_at() { # $1=ref, empty for the working tree; $2=plugin
 
 # Files changed on this branch relative to main. Three-dot: the release's own
 # delta, so a plugin only main touched is not listed.
-if ! changed_files="$(git -C "$repo_root" diff --name-only "origin/main...HEAD")"; then
+#
+# --no-renames because the question here is which plugin DIRECTORIES the
+# release touched. With rename detection on, moving plugins/foo to plugins/bar
+# reports only the new path, so foo would drop out of the notes entirely and
+# the release would not mention that it is gone. Turning it off reports the
+# rename as a delete plus an add, which lands foo under (removed) and bar
+# under (new plugin) - two true statements about the release.
+if ! changed_files="$(git -C "$repo_root" diff --name-only --no-renames "origin/main...HEAD")"; then
   die "cannot diff 'origin/main...HEAD'; no merge base? Fetch enough history that origin/main and HEAD share an ancestor"
 fi
 changed_plugins="$(printf '%s\n' "$changed_files" \
