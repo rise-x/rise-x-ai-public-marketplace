@@ -74,7 +74,13 @@ jobs:
           # --head matches on branch name alone, so a fork carrying the same
           # branch would qualify. gh has no owner-qualified --head, so filter
           # on the head repo's owner instead.
-          open_raw="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number,headRepositoryOwner)"
+          # Test the call, not just its output: under set -e a failing command
+          # substitution ends the step before any check below could report it,
+          # so the message meant for that case would never be printed.
+          if ! open_raw="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number,headRepositoryOwner)"; then
+            echo "::error::cannot list open PRs for ${BRANCH}"
+            exit 1
+          fi
           open_json="$(printf '%s' "$open_raw" | jq --arg owner "${GITHUB_REPOSITORY%%/*}" '[.[] | select(.headRepositoryOwner.login == $owner)]')"
           open_count="$(printf '%s' "$open_json" | jq length)"
           if ! [[ "$open_count" =~ ^[0-9]+$ ]]; then
@@ -100,7 +106,13 @@ jobs:
           fi
 
           # A branch that only merged main back in has nothing to PR yet.
-          ahead="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${BRANCH}" --jq .ahead_by)"
+          # The ref goes in unencoded on purpose: the compare route takes a
+          # slash in a branch name as part of the ref. Verified both ways
+          # against this repo, so encoding it would be noise, not a fix.
+          if ! ahead="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${BRANCH}" --jq .ahead_by)"; then
+            echo "::error::cannot compare main...${BRANCH}; does the branch still exist?"
+            exit 1
+          fi
           if ! [[ "$ahead" =~ ^[0-9]+$ ]]; then
             echo "::error::could not compare main...${BRANCH} (got '$ahead')"
             exit 1
