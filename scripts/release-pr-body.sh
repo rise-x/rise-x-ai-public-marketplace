@@ -122,11 +122,16 @@ changed_plugins="$(printf '%s\n' "$changed_files" \
 # release-notes tooling hard-stops on that marker.
 exempt_regex='(^plugins/[^/]+/README\.md$|^plugins/[^/]+/tests/|^plugins/[^/]+/test/)'
 
-needs_bump() { # $1=plugin; true when its delta includes a non-exempt file
-  local own
-  own="$(printf '%s\n' "$changed_files" | grep -E "^plugins/$1/" || true)"
-  [[ -n "$own" ]] || return 1
-  printf '%s\n' "$own" | grep -qEv "$exempt_regex"
+needs_bump() { # $1=plugin; true when its release delta has a non-exempt file
+  # Prefix-matched with ==, not grep: the plugin name is a directory name, not
+  # a pattern, and a "." or "+" in one would otherwise match a sibling
+  # directory and pin the wrong bump verdict on this plugin.
+  local prefix="plugins/$1/" f
+  while IFS= read -r f; do
+    [[ "$f" == "$prefix"* ]] || continue
+    [[ "$f" =~ $exempt_regex ]] || return 0
+  done <<< "$changed_files"
+  return 1
 }
 
 # One call: number, title and file list for every PR merged into the branch.
