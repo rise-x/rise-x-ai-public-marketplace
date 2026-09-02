@@ -250,9 +250,13 @@ resolves the manifest for **one** environment — `APP_ENV`, default `test` — 
 emits the flat, single-environment result as `dist/rise-x-app.json`, so it rides
 the bundle zip. Ids for other environments never ship. The build fails, naming
 the alias and environment, on an unknown environment, a missing id, an
-unsupported `kind`, an id field that doesn't belong to the `kind`, a non-GUID
-id, two aliases that differ only by case (the deploy side folds the alias
-keyspace the same way), or more than 100 dependencies.
+unsupported `kind`, an id field that doesn't belong to the `kind`, a non-GUID or
+empty-GUID id, an alias or environment name that isn't a 1-64 character
+identifier (letters, digits, `.`, `-`, `_`, starting with a letter or digit), a
+`label` over 200 or a `description` over 1,000 characters, a control character in
+either, two aliases that differ only by case, or more than 100 dependencies.
+These are the deploy's own shape rules, mirrored so a manifest that builds also
+deploys.
 
 ```bash
 pnpm build                                    # → environment "test"
