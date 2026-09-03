@@ -185,12 +185,19 @@ pr_total="$(printf '%s' "$prs" | jq length)" || die "cannot count the PR list"
 # field for PRs touching nothing under plugins/. A PR spanning two plugins is
 # listed under both, which is what the diff actually says.
 #
-# Each PR is first cut down to the files that survive into the release delta.
-# protect-release requires a PR to touch the branch, so merging main back in
-# is itself a merged PR whose files are already on main and are therefore
-# absent from origin/main...HEAD. Listing it would credit this release with
-# work it does not ship. A PR left with nothing in the delta drops out, which
-# also covers one whose changes were later reverted on the branch.
+# Each PR is cut down to its files that appear in the release delta, and one
+# left with none drops out. protect-release requires a PR to touch the branch,
+# so merging main back in is itself a merged PR whose files are already on
+# main and therefore absent from origin/main...HEAD; listing it would credit
+# this release with work it does not ship.
+#
+# The test is path overlap, not whether a PR's own changes survived. A PR
+# whose hunks a later PR overwrote is still listed, because the file it
+# touched still differs from the merge base. A reverted PR only disappears if
+# the revert put every file it touched back to its merge-base state. That is
+# the right granularity for release notes, which credit the PRs that shaped a
+# file rather than the last one to win a line, but it is weaker than "these
+# changes shipped".
 #
 # The select() on plugins/ is redundant: capture() yields nothing for a path
 # that does not match. It is spelled out because relying on that is easy to

@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       name:
-        description: 'Release name; the branch becomes release/<name> (for example 2026-09). Letters, digits, dots, dashes, underscores.'
+        description: 'Release name; the branch becomes release/<name> (for example 2026-09). Up to 64 characters; letters, digits, dots, dashes, underscores, starting with a letter or digit.'
         type: string
         required: true
 
@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           if ! printf '%s' "$NAME" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'; then
-            echo "::error::name '$NAME' must be letters, digits, dots, dashes, or underscores (for example 2026-09)"
+            echo "::error::name '$NAME' must start with a letter or digit, then up to 63 more letters, digits, dots, dashes, or underscores (for example 2026-09)"
             exit 1
           fi
           # The regex above still admits names git rejects (a.., x.lock, y.),
