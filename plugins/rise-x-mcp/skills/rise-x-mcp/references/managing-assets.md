@@ -68,9 +68,9 @@ Step 2: Set field values (repeat per field)
 
 Step 3: Finalize
   # Before submitting, call get_work(workId, format="full") to find the
-  # actual submit step & event — slim's actions[] already covers most flows (see
+  # actual submit step & event — summary's actions[] already covers most flows (see
   # Common Mistakes #8), but this fallback still needs steps[], which is dropped
-  # by the default slim view.
+  # by the default summary view.
   # Look inside steps[] for a nested step with displayName: "Submitted" and
   # name: "SubmitUntitledStep/Generated-..." — this full name is what you need
   # for BOTH step_name AND event_name (they are identical).
