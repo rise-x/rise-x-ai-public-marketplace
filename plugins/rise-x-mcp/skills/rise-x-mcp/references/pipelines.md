@@ -96,7 +96,8 @@ Fetch the exact payload before authoring: `get_schema("pipelines", "pipeline/if/
 
 Pipelines run **server-side** when watched work data changes on a **published**
 flow — they do not fire while you edit a draft. Verify the effect with
-`get_work` (use `format="compact"`; the standard work payload is large).
+`get_work` — the default `response_format="slim"` already includes `data`, so
+there's no need for the larger `"full"` document.
 
 ## Editing / removing
 

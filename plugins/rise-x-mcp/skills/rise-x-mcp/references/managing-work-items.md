@@ -38,17 +38,17 @@ This is **Step 1** of the work creation pattern:
 2. `update_work_data(workId, ...)` → set field values (repeat as needed)
 3. `submit_work(workId, eventName, stepName)` → advance to the next step
 
-### `get_work(id: str, format: str = "standard")`
+### `get_work(id: str, response_format: str = "slim")`
 Get a work item by its GUID.
 
-- `format="standard"` — full data including all fields, steps, actions, attachments
-- `format="compact"` — the form `data` plus identity/status fields, active step, and minimal action/user stubs; steps, cardLayout, roles, and per-role user lists are stripped. Typically an order of magnitude smaller than `standard` — prefer it whenever you only need field values (e.g. reading many work items to aggregate)
+- `response_format="slim"` (default) — identity, flow ids, status/state (`statusLabel`, `statusColor`, `flowState`, `workStateName`, `currentState`), assigned users, roles, attachments, `data`, `relationships`, `tasks`, `globalActions`, `createdBy`/`lastModifiedBy` stubs, and `actions` (each `{stepName, stepId, stepDisplayName, canExecute, invitation, events: [{id, eventName, name, displayName}]}`). Adds an `omitted` note listing the dropped top-level keys (`steps`, `users`, `chains`, `cardLayout`, `companies`, `company`, …) so you know what's missing.
+- `response_format="full"` — the raw v3 document, `steps` and all. Pass this when you need something the `omitted` note flagged.
 
-Key fields in response:
+Key fields in the slim response:
 - `id` — work item GUID
 - `activeStepName` — current step the work is on
-- `actions` — available actions (each has `name`/`eventName`)
-- `dataMap` — structured data storage with field values
+- `actions` — available actions, with `events[].eventName` for `submit_work`
+- `data` — form field values
 - `status` — Open, Closed, or Terminated
 
 ### `duplicate_work(id: str, response_format="summary")`
@@ -79,7 +79,7 @@ Response rows are **projected** to the useful fields only (cardLayout, per-role 
 - Permissions: `canEdit`, `canDelete`, `canDelegate`, `roleName`
 - Audit: `createdBy` / `lastModifiedBy` (each `{id, email, displayName}`), `createdDate`, `lastModifiedDate`
 
-For the full record (form data, cardLayout, users, etc.), call `get_work(id)`.
+For the full record (form data, status, actions, etc.), call `get_work(id)`; for `cardLayout`, per-role user lists, `chains`, or `steps`, call `get_work(id, response_format="full")`.
 
 ### `search_works(filter, sort, fields, page, page_size, enforce_fields, include_total_count)`
 **Advanced Work search with filter tree, sort, projection, and paging — including dynamic `data.*` fields.** This is the right tool whenever the user describes a filter, a sort, or wants specific fields. Full reference in `references/advanced-search.md`. Quick template:

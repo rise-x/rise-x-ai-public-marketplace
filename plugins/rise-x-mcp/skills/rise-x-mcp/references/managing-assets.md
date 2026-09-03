@@ -21,8 +21,8 @@ Prefer `search_flows` (above), which returns the same fields (including `entityT
 
 Response: `[{"thingType": "vessel", "displayName": "Vessel", "assetId": "flow-guid", "flowOriginId": "origin-guid"}]`
 
-### `get_asset_type_properties(asset_id: str)`
-Get field labels and dataPaths for an asset type. Takes the `assetId` (not flowOriginId).
+### `get_asset_type_properties(flow_id: str)`
+Get field labels and dataPaths for an asset type. Takes the asset type's flow id (the `assetId` from `search_flows`/`list_asset_types`, not flowOriginId). `asset_id` still works as a deprecated alias — it logs a warning and is not an asset instance id.
 
 Response: `[{"Vessel Name": {"id": "comp-guid", "dataPath": "$.vesselDetails.vesselName"}}]`
 
@@ -31,7 +31,7 @@ Response: `[{"Vessel Name": {"id": "comp-guid", "dataPath": "$.vesselDetails.ves
 | Identifier | What it is | Source | Used in |
 |---|---|---|---|
 | `flowOriginId` | Identifies the asset type | `search_flows` / `list_asset_types()` | `create_asset`, `list_assets` |
-| `assetId` | Internal flow ID | `search_flows` (as `id`) / `list_asset_types()` | `get_asset_type_properties` |
+| `assetId` | Internal flow ID | `search_flows` (as `id`) / `list_asset_types()` | `get_asset_type_properties` (as `flow_id`) |
 | `entityId` | Specific asset instance | `create_asset` response, `list_assets`, `get_asset` | `get_asset`, `edit_asset`, `delete_asset` |
 | `workId` | Draft work item for in-progress create/edit | `create_asset`/`edit_asset` response | `update_work_data`, `submit_work` |
 
@@ -67,7 +67,10 @@ Step 2: Set field values (repeat per field)
   )
 
 Step 3: Finalize
-  # Before submitting, call get_work(workId) to find the actual submit step & event.
+  # Before submitting, call get_work(workId, response_format="full") to find the
+  # actual submit step & event — slim's actions[] already covers most flows (see
+  # Common Mistakes #7), but this fallback still needs steps[], which is dropped
+  # by the default slim view.
   # Look inside steps[] for a nested step with displayName: "Submitted" and
   # name: "SubmitUntitledStep/Generated-..." — this full name is what you need
   # for BOTH step_name AND event_name (they are identical).
@@ -174,7 +177,7 @@ search_flows(filter={"field": "flowResourceType", "operator": "equals", "values"
 # Find: {"displayName": "Vessel", "flowOriginId": "abc-123", "id": "def-456", "entityType": "vessel"}
 
 # 2. Get field paths
-get_asset_type_properties("def-456")
+get_asset_type_properties(flow_id="def-456")
 # Returns: [{"Vessel Name": {"dataPath": "$.vesselDetails.vesselName"}}, ...]
 
 # 3. Find the step id, then fetch the full step to get its taskName
@@ -200,7 +203,7 @@ update_work_data("work-789", "$.vesselDetails.imoNumber", "set", "9876543", sect
 update_work_data("work-789", "$.vesselDetails.flagState", "set", "Panama", section_name="UntitledTask/Generated-xxx")
 
 # 6. Find the real submit step + event name, and the invitation payload
-get_work("work-789")
+get_work("work-789", response_format="full")
 # Inside steps[] find the nested step with displayName: "Submitted" and
 # name: "SubmitUntitledStep/Generated-yyy" — that is BOTH step_name and event_name.
 # Also grab actions[0].invitation to route to End.
