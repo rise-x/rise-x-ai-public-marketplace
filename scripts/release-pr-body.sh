@@ -27,7 +27,8 @@
 #   ## <plugin> <version> (new plugin)     absent from main
 #   ## <plugin> (removed)                  gone from the release branch
 #
-# Versions come from git (origin/main vs the working tree), so run it with the
+# Versions come from git: the merge base with origin/main, which is the point
+# this release branched from, against the working tree. Run it with the
 # release branch checked out and origin/main fetched. PR titles come from gh.
 #
 # Output: the body on stdout.
