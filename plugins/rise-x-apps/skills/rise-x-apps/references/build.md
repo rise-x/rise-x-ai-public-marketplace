@@ -128,8 +128,8 @@ work on old foundations.
 
 ### App dependencies (`rise-x-app.json`) — no GUID literals in source
 
-**Needs `@rise-x/apps-sdk` >= 0.12.0.** This section is the one place that
-states the gate; everything else about the manifest points here.
+**Needs `@rise-x/apps-sdk` >= 0.12.0.** This section is the normative statement
+of the gate; the other mentions repeat it and point here.
 
 **A flow, asset-type, or agent GUID in app source is a bug.** Every such id the
 app depends on is declared in `rise-x-app.json` at the app project root — one
@@ -448,9 +448,14 @@ missing dependency surfaces before them: the accessors above throw a
 `ConnectorError` naming the fix when no manifest reached the bundle, and
 `getAppDependency` lists the declared aliases when the alias isn't one of them.
 
-**Prefetch (optional, needs a manifest).** It reads the declared dependencies,
-and it no-ops when no manifest reached the bundle, so `void`ing it in an effect
-is safe even in an app that may ship without one.
+**Prefetch (optional).** Unlike the accessors, which throw on a missing
+manifest because a read that returns nothing would hide a bug,
+`prefetchAppDependencies` returns without doing anything when no manifest
+reached the bundle: it is a cache warm, so there is nothing to fail loudly
+about, and an app that ships without a manifest can keep the call. That is
+what makes `void`ing it in an effect safe (the SDK pins it in
+`query/__tests__/dependencies.test.ts`, "no-ops when the app declares no
+manifest").
 `prefetchAppDependencies(client)` from
 `@rise-x/apps-sdk/query` warms react-query with what each declared dependency
 needs: a flow or asset type gets its flow config and the layouts that config
