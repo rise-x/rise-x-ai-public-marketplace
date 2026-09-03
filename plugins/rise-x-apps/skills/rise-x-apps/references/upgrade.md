@@ -1,14 +1,19 @@
-# Upgrading an old app — SDK + design system migration
+# Upgrading an old app — build, SDK and design-system migrations
 
-Apps scaffolded before the current `@rise-x/apps-sdk` predate the design
-system and the docs conventions. Recognize them, and **ask before migrating**.
+Apps scaffolded before the current `@rise-x/apps-sdk` may be behind on any of
+three fronts — the build (still webpack), the design system, and the docs
+conventions — and they move independently. Recognize which, and **ask before
+migrating**.
 
 ## Spotting an old app
 
 Any of these marks the app as old:
 
-- `webpack.config.js` `shared` has no `@rise-x/ui` entry (often no
-  `@tanstack/react-query` either — only the react family).
+- A `webpack.config.js` at the app root. Current apps have a thin
+  `rsbuild.config.mts` instead, and the Module Federation contract lives in
+  `@rise-x/apps-sdk/rsbuild`, not in the app. An older still-on-webpack app whose
+  `shared` block has no `@rise-x/ui` entry (often no `@tanstack/react-query`
+  either, only the react family) predates the design system as well.
 - UI is not imported from `@rise-x/apps-sdk/ui`: hand-rolled CSS files, an
   own component kit or icon set, another component library.
 - Data fetched with hand-rolled `useEffect`/axios instead of the `/query`
@@ -35,20 +40,44 @@ user rather than guessing.
 
 ## Migration checklist
 
+**Three independent migrations share this list — check which ones you're doing.**
+
+| Axis | Steps | Applies when |
+| --- | --- | --- |
+| build | 1, 2, 6 | the app is still on a webpack config |
+| design system + data layer | 3, 4 | hand-rolled UI instead of `@rise-x/apps-sdk/ui`, or `useEffect`/axios instead of the query hooks, or an in-app top bar |
+| docs | 5 | `APP.md` / `AGENTS.md` / `CLAUDE.md` are missing |
+
+They move independently. An app already current on the design system and the
+query hooks but still on webpack needs the build axis and, if its docs are
+missing, the docs axis — not steps 3 and 4, and so no design phase and no
+approval gate, because no screen changes. Don't run it through those out of
+habit.
+
 1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
    outside), then `pnpm install`.
-2. **Align `webpack.config.js` `shared` with the current template**
-   (`node_modules/@rise-x/apps-sdk/template/webpack.config.js`;
-   `packages/apps-sdk/template/webpack.config.js` in the rise-x-app
-   monorepo): add `@rise-x/ui`
-   `{ singleton: true, requiredVersion: false, import: false }` and
-   `@tanstack/react-query` `{ singleton: true, requiredVersion: '^5.0.0' }`
-   (no `import: false` there — the bundled fallback is deliberate). Leave the
-   react-family entries as they are.
+2. **Move the build onto the preset.** Read the app's dev port out of
+   `webpack.local.config.js` first (`devServer.port`) — that file goes in this
+   step and is the only place the value lives. Then delete `webpack.config.js`
+   and `webpack.local.config.js` and add an `rsbuild.config.mts`, copying the
+   shape from the SDK's `template/rsbuild.config.mts` (its `port` is a
+   scaffolder placeholder — use the port you just read). Swap the build deps and
+   scripts: drop webpack and its loaders, add `@rsbuild/core`,
+   `@rsbuild/plugin-react` and `@rsbuild/plugin-type-check`, and set
+   `build: rsbuild build`, `start: rsbuild dev --env-mode standalone`,
+   `start:federated: rsbuild dev`. Keep the extension `.mts`: it marks the file
+   ESM, which a plain `.ts` warns about on every build. Do **not** reach for
+   `"type": "module"` in `package.json` instead — it breaks
+   `commitlint.config.js`. Add `resolveJsonModule` to `tsconfig.json` if
+   absent — the config imports `package.json`.
+
+   **There is no `shared` block to align any more:** the preset owns the whole
+   Module Federation contract, and you upgrade it by upgrading the SDK. See
+   `references/build.md`.
 3. **Rebuild the UI on `@rise-x/apps-sdk/ui`.** Replace hand-rolled
    CSS/components/icon sets with design-system components (lucide icons ship
    with it); delete what they cover. Move any top-bar navigation to a left
-   sidebar/rail (bottom tab bar on mobile — on SDK >= 0.10.0 that is
+   sidebar/rail (bottom tab bar on mobile — on SDK >= 0.11.0 that is
    `mobileNav="tabs"` on `AppFrame`, not a hand-built bar; see
    `references/build.md`). Run the design phase first —
    always (`references/design.md`): mock the migrated screens on the design
@@ -56,10 +85,15 @@ user rather than guessing.
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
    in components; `/connectors` in event handlers and lifecycle hooks.
-5. **Add the docs the template now ships:** `APP.md` (see above), `AGENTS.md`,
-   and the one-line `CLAUDE.md` pointer — copy the shape from the SDK's
-   `template/` directory (`node_modules/@rise-x/apps-sdk/template/`;
-   `packages/apps-sdk/template/` in the rise-x-app monorepo).
+5. **Add the docs.** `AGENTS.md` and the one-line `CLAUDE.md` pointer can be
+   copied from the SDK's `template/` directory
+   (`node_modules/@rise-x/apps-sdk/template/`; `packages/apps-sdk/template/` in
+   the rise-x-app monorepo, which also ships a `README.md`). `APP.md` is **not**
+   in the template — it is per-app and you write it, see *Missing APP.md* above.
+   While you are in `package.json`, the template also ships
+   `typecheck: tsc --noEmit`; add it if absent. The preset's `pluginTypeCheck`
+   only runs inside an rsbuild invocation, so this script is how you type-check
+   without doing a full build.
 6. **Verify and deploy** per `references/build.md`: `pnpm build` produces
    `dist/remoteEntry.js`, then the deploy question (test environment by
    default).
