@@ -61,6 +61,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          # A branch name may legally contain backticks, which would break the
+          # code spans below and let a crafted name reshape the comment's
+          # formatting. Stripped rather than escaped: a correct escape needs a
+          # fence sized to the content, and this value is only ever displayed,
+          # never used as a ref.
+          safe_ref="${HEAD_REF//\`/}"
+
           # Name the branch that is actually open, so the instructions below
           # can be pasted rather than translated.
           # --paginate, because a single page would quietly omit branches and
@@ -106,7 +113,7 @@ jobs:
           esac
 
           {
-            echo "Closing this: \`main\` takes pull requests from \`release/*\` and \`hotfix/*\` only, and this one comes from \`${HEAD_REF}\`."
+            echo "Closing this: \`main\` takes pull requests from \`release/*\` and \`hotfix/*\` only, and this one comes from \`${safe_ref}\`."
             echo
             echo "\`main\` is the live marketplace. Merging into it publishes to customers immediately, so changes are staged on a release branch and ship when that branch merges. A feature merged straight into \`main\` skips the release it belongs to."
             echo
@@ -126,5 +133,5 @@ jobs:
           {
             echo "## Closed #${PR}"
             echo
-            echo "Head \`${HEAD_REF}\` is neither \`release/*\` nor \`hotfix/*\`."
+            echo "Head \`${safe_ref}\` is neither \`release/*\` nor \`hotfix/*\`."
           } >> "$GITHUB_STEP_SUMMARY"
