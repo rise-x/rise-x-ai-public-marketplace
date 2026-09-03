@@ -68,11 +68,11 @@ CLI flags worth knowing:
 | Flag | Default | Use |
 | --- | --- | --- |
 | `--pm=<npm\|yarn\|pnpm>` | auto | Force a package manager. **Prefer `pnpm` whenever it's available** — it's what Rise-X uses, and the commands throughout this guide assume it. Without the flag the CLI auto-detects from lockfiles in the cwd (falling back to npm), so pass it explicitly when scaffolding into an empty directory. |
-| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — in the rise-x-app monorepo check what's taken with `grep -n "port:" apps/*/webpack.config.js`. |
+| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — grep the sibling apps for `port:` in their `rsbuild.config.mts`, or `devServer.port` in a `webpack.local.config.js` if they predate the preset. |
 | `--skip-install` | off | Skip install (faster scaffold; the user installs later). |
-| `--json` | off | Emit `{ path, slug, scope, pkgName, port, pm }` to stdout — useful for automation. |
+| `--json` | off | Emit `{ path, slug, scope, pkgName, port, pm, installed }` to stdout — useful for automation. |
 
-What the scaffolder creates:
+What the scaffolder creates (**SDK >= 0.11.0** — earlier versions emit webpack configs):
 
 ```
 <name>/
@@ -82,8 +82,8 @@ What the scaffolder creates:
 ├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod
 ├── rise-x-app.json        # app dependency manifest — alias → per-environment ids; the build preset resolves it (no dependencies yet)
 ├── tsconfig.json          # jsx: "react-jsx", strict
-├── webpack.config.js      # MF: exposes ./App and ./lifecycle, shares react/react-dom/jsx-runtime as singleton+import:false
-├── webpack.local.config.js # standalone dev config — what `pnpm start` runs (no shell needed)
+├── rsbuild.config.mts     # thin: calls defineAppConfig from @rise-x/apps-sdk/rsbuild
+│                          # (the MF contract lives in the preset, not here)
 ├── public/index.html
 └── src/
     ├── index.tsx          # `import('./bootstrap')` — MF async boundary
@@ -92,17 +92,26 @@ What the scaffolder creates:
     └── lifecycle.ts       # the module exposed as ./lifecycle
 ```
 
-After scaffold, **do not** modify `webpack.config.js` shares for react-family — the singleton+`import: false` pattern is load-bearing. (The shell provides them eagerly; bundling a local fallback causes duplicate-React bugs.) Adding *other* shares is fine.
+After scaffold there is **no Module Federation config in the app to edit** —
+`rsbuild.config.mts` just calls `defineAppConfig` from `@rise-x/apps-sdk/rsbuild`
+(SDK >= 0.9.0), and the preset owns the scope, `remoteEntry.js`, the `./App` +
+`./lifecycle` exposes and every share, including the react family as
+`singleton` + `import: false`. Read the scaffolded file if you need the shape.
+An app may pass `exposes`, and `define` from **0.11.0**; it cannot add shares. The scaffolder
+emits this config from **0.11.0** — earlier versions emit webpack configs, see
+`references/upgrade.md`.
 
 The scaffolded `src/App.tsx` **is the canonical app layout** (left rail from
 the Nav primitives, PageHeader + content screens, no user UI). Build the app
 by extending it — add screens, swap the stubs for real content — and preserve
 its chrome composition; don't flatten it back to a bare component.
 
-From **SDK >= 0.10.0** that composition is `AppFrame` / `AppRail` /
-`AppContent` from `@rise-x/apps-sdk/ui`: the frame is a CSS container, so the
-layout answers to the region the host gave the app rather than to the browser
-window, `AppRail` is the nav rail, and `AppContent` is the app's ONE scroller.
+From **SDK >= 0.9.0** that composition is `AppFrame` / `AppRail` /
+`AppContent` from `@rise-x/apps-sdk/ui`: `AppRail` is the nav rail and
+`AppContent` is the app's ONE scroller. **From 0.11.0** the frame is also a CSS
+container, so the layout answers to the region the host gave the app rather than
+to the browser window; on 0.9.0 it is media-query based and answers to the
+browser window.
 Props are in `node_modules/@rise-x/apps-sdk/build/ui/components/app-frame.d.ts`
 (`packages/apps-sdk/...` in the rise-x-app monorepo). Earlier SDKs hand-build
 an `<aside>` rail in the template instead.
@@ -650,7 +659,7 @@ const submit = useSubmitWork(); // submit.mutate({ workId, actionName }) — inv
 Rules:
 - **Never mount a `QueryClientProvider` with a client of your own** — that shadows the per-app client the shell mounts and breaks shell-managed caching. The SDK hooks need no provider at all: they pass the resolved client explicitly (host client when federated, per-bundle fallback standalone).
 - **If the app calls react-query directly, wrap it in `<AppQueryProvider>`** (SDK >= 0.7.0, from `@rise-x/apps-sdk/query`; the scaffold's `App.tsx` already does). Plain APIs — `useQuery(flowQueries.list(args))`, `useQueryClient()`, devtools — read the client from context, and standalone dev has no provider, so they throw *"No QueryClient set"* the moment you leave the SDK hooks. `AppQueryProvider` publishes the *resolved* client, so it re-publishes the host's client when federated and the fallback when standalone.
-- **Keep `'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' }` in the webpack `shared` block** (the scaffold has it, WITHOUT `import: false` — the bundled fallback is deliberate). Removing it breaks shell-managed caching.
+- **The `@tanstack/react-query` share — `{ singleton: true, requiredVersion: '^5.0.0' }`, WITHOUT `import: false`** — belongs to the preset on a preset-built app, and to the app's own `shared` block on a webpack one. The missing `import: false` is deliberate: the bundled fallback keeps the app working on a host that doesn't share it. Don't shadow or remove it either way, or shell-managed caching breaks.
 - Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useWorkSearch/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetQuickSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
 - Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
 - Keys are environment-scoped (`['rise-apps-sdk', envId, …]`) — ecosystem switches refetch automatically; `queryKeys` is exported for targeted invalidation. Advanced react-query features (select/suspense/prefetch) go through the factories: `useQuery(flowQueries.list(args))`.
@@ -667,10 +676,10 @@ the design system has no fitting primitive, and compose it from `cn` + the
 existing pieces. Uphold the Rise-X experience principles
 (`references/experience-principles.md`). Typings come from the SDK; the runtime
 and its Tailwind CSS come from the **host** (the Diana app) via the Module
-Federation share scope (`@rise-x/ui` in the template's `shared`, no bundled
+Federation share scope (the preset shares `@rise-x/ui` with no bundled
 fallback) when running federated, and components follow the host's
 light/dark theme automatically (tokens switch on a root-level `dark` class
-the host controls). In standalone dev (`pnpm start`) the template aliases
+the host controls). In standalone dev (`pnpm start`) the preset aliases
 `@rise-x/ui` to the SDK's compiled standalone bundle instead — a
 self-contained snapshot with its own CSS injected, so components render for
 real without a host. It's a snapshot, not the source of truth: verify in a
@@ -686,13 +695,14 @@ implement the mobile UX level chosen in the design phase (see
 `references/design.md` §2 and the app's `APP.md`); the no-top-bar rule holds
 at every width.
 
-**SDK >= 0.10.0: don't hand-roll that bar.** Set `mobileNav="tabs"` on
+**SDK >= 0.11.0: don't hand-roll that bar.** Set `mobileNav="tabs"` on
 `AppFrame` (the scaffold template already does) and `AppRail` renders it once
 the frame is narrow — icon over label, safe-area padding, and a **More** sheet
 for the overflow past a handful of destinations. The SDK README's AppFrame
 section is the source of truth for that threshold and for `moreLabel`, which
-localises the label. On earlier SDKs there is no such rail and the bar is
-yours to build.
+localises the label. On earlier SDKs `AppRail` does not render one — on 0.9.0
+it exists but goes to a horizontal scrolling strip at narrow widths — so the
+bar is yours to build.
 
 ### Lifecycle hooks (`src/lifecycle.ts`)
 
@@ -716,7 +726,7 @@ export const onUninstall: UninstallHook = async ({ manifest }) => {
 };
 ```
 
-If you change which hooks are exported, ensure `webpack.config.js` still has `'./lifecycle': './src/lifecycle'` in `exposes` (the scaffolder includes it; never remove it).
+`./lifecycle` is exposed by the preset for every app, so changing which hooks you export needs no config change — just keep the module at `src/lifecycle`.
 
 ### Standalone dev (outside the shell)
 
@@ -846,8 +856,9 @@ environment's ids deploys without complaint and fails in the running app.
    omit `app_id` for a brand-new app (a GUID is generated and returned); pass
    the existing GUID to release a new version. `version` comes from the app's
    `package.json` and must be unique per app — bump it every release.
-   `app_scope` is snake_case and **must match the `name` set by the app's
-   webpack `ModuleFederationPlugin`**.
+   `app_scope` is snake_case and **must match the MF scope the preset derives
+   from the package name** (`@rise-x-apps/my-app` → `app_my_app`); the
+   scaffolder's `--json` output reports it as `scope`.
 
 The result carries the app `id` and the canonical manifest (`remoteUrl`,
 `version`, `scope`, `deployedAt`). Confirm the app loads in the shell after.
@@ -865,7 +876,7 @@ Provide these values for the user to copy/paste into the dialog:
 | --- | --- | --- |
 | `name` * | human-readable name |  |
 | `version` * | from the app's `package.json` |  |
-| `app_scope` * | `app_<slug_with_underscores>` | Must match the `name` set by the app's webpack `ModuleFederationPlugin`. Regex: `^[a-z][a-z0-9_]*$`. |
+| `app_scope` * | `app_<slug_with_underscores>` | Must match the MF scope the preset derives from the package name. Regex: `^[a-z][a-z0-9_]*$`. |
 | `bundle` * | the `.zip` you produced |  |
 | `description` | short description of the app |  |
 | `icon` | optional |  |
@@ -876,7 +887,7 @@ manifest with the live `remoteUrl` and `module` (defaults to `./App`).
 
 ## Don'ts
 
-- **Don't** bundle your own React. The scaffolder's `import: false` on react/react-dom/jsx-runtime is intentional. If you remove it, you'll get cross-React-instance hook crashes when the app mounts inside the shell.
+- **Don't try to shadow the preset's shares.** The preset shares react/react-dom/jsx-runtime as `singleton` + `import: false`, so the app uses the host's copy and MF rewires every `react` request regardless of what the app's `package.json` says. Re-declaring those shares yourself is what gives you cross-React-instance hook crashes when the app mounts inside the shell. Note that *declaring* `react` and `react-dom` is required, not forbidden — the template ships both in `devDependencies` and the preset's standalone branch resolves them from the app, so removing them breaks standalone dev.
 - **Don't** import shell internals. The contract is `@rise-x/apps-sdk` — full stop. If you need something the SDK doesn't expose, propose it as an SDK addition in a separate PR (or request it from the Rise-X team) — don't reach into the host.
 - **Don't** wire your own auth or call backend services directly. Go through a declared dependency first (`deps.<alias>`), then the query hooks, then the connectors (`@rise-x/apps-sdk/connectors`), and only then `getShellApiV4` (§Runtime APIs).
 - **Don't** put a flow, asset-type, or agent GUID literal in app source. Declare it in `rise-x-app.json` and read it through `useAppDependencies()` (§App dependencies); the generic connectors with a ref are for what a dependency can't express, starting with flows the user picks at runtime.

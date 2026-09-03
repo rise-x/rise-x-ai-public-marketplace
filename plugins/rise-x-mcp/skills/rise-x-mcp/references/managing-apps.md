@@ -37,7 +37,7 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
      upload_id = <uploadId>,
      name      = "My App",            # human-readable display name
      version   = "1.0.0",             # semver; must be unique per app — bump every release
-     app_scope = "my_app",            # MF scope, snake_case: [a-z][a-z0-9_]*
+     app_scope = "app_my_app",        # MF scope: app_<slug_with_underscores>, from --json
      app_id    = <GUID>,              # ONLY when releasing a new version of an existing app
    )
      → app id + canonical manifest (remoteUrl, version, scope, deployedAt, sizeBytes,
@@ -145,8 +145,13 @@ cleaned, but redeploying with the same `app_id` restores the app.
 ## Validation rules (checked client-side before anything is consumed)
 
 - `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app.
-- `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `todo_app`). Must equal the
-  `ModuleFederationPlugin` `name` the app was built with, or the shell can't mount it.
+- `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `app_todo_app`). Must equal the
+  Module Federation scope the app was built with, or the shell can't mount it. For an app on
+  `@rise-x/apps-sdk` that scope is derived from the package name by stripping the npm scope and
+  replacing hyphens: `@rise-x-apps/todo-app` → **`app_todo_app`** — note the `app_` prefix. The
+  scaffolder reports it as `scope` in its `--json` output, which is the value to use rather than
+  deriving it by hand. (The preset honours an `APP_SCOPE` env override, for registering two builds
+  of one app side by side.)
 - `name` — non-empty.
 - Failing validation never consumes the staged upload — fix the field and call `deploy_app` again
   with the same `upload_id`.
@@ -155,7 +160,7 @@ cleaned, but redeploying with the same `app_id` restores the app.
 
 1. **Zip the `dist/` contents, not the folder** — a zip with a top-level `dist/` directory
    deploys "successfully" but the shell 404s on `remoteEntry.js`.
-2. **`app_scope` mismatch** — deploy-time `app_scope` must match the webpack MF scope
+2. **`app_scope` mismatch** — deploy-time `app_scope` must match the app's MF scope
    (`app_<slug_with_underscores>` for scaffolded apps). Wrong scope = manifest loads, app never
    mounts.
 3. **Version reuse** — the platform rejects a duplicate version per app; `list_apps` shows the

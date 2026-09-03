@@ -6,7 +6,7 @@ description: Create a Rise-X (Diana) federated app end-to-end - design interview
 # rise-x-apps
 
 Rise-X apps are independent React bundles loaded into the Diana shell at
-runtime via Webpack Module Federation. The `@rise-x/apps-sdk` package (public
+runtime via Module Federation. The `@rise-x/apps-sdk` package (public
 npm) provides the SDK and a scaffolder CLI. Apps are built in two contexts:
 **standalone** in your own project (the common case), or under `apps/*`
 inside the `rise-x-app` monorepo (Rise-X internal).
@@ -34,7 +34,7 @@ Existing-app work skips straight to the matching phase:
 | "Add a feature to app <x>" — anything that adds or changes UI | `references/design.md` first (mock → approval), then `references/build.md` |
 | Shell hooks / connectors / query layer / lifecycle hooks — no UI change | `references/build.md` |
 | "Redesign screen X" / "what should this look like" / migrate to the design system | `references/design.md` (mock → approval), then `references/build.md` |
-| The app is OLD — no `@rise-x/ui` in webpack `shared`, hand-rolled UI, no `APP.md` | `references/upgrade.md` — ask about migrating before changing it; the migration itself goes mock-first |
+| The app is OLD — a `webpack.config.js` at its root, hand-rolled UI, no `APP.md` | `references/upgrade.md` — ask about migrating before changing it; a design-system migration goes mock-first, a build-only swap does not |
 | "Build/deploy the app" | `references/build.md` §Build and deploy |
 | Changing the `@rise-x/apps-sdk` package itself | Not this skill — that's SDK development inside the rise-x-app monorepo (see its root `AGENTS.md`). |
 
@@ -42,7 +42,7 @@ Existing-app work skips straight to the matching phase:
 
 1. **No implementation before design approval.** Every change that adds or alters UI — a new app, a new feature in an existing app, a redesign, or a design-system upgrade — starts with an HTML design mock the user has **explicitly approved**. Only changes with no UI surface (pure logic, data wiring, fixes that don't change what's rendered) skip the mock.
 2. **App UI MUST be built exclusively from `@rise-x/apps-sdk/ui`** (the `@rise-x/ui` design system). No hand-rolled markup for covered primitives, no other component libraries, no one-off styles. Design mocks carry the same requirement: one self-contained HTML file with the design-system stylesheet from `@rise-x/apps-sdk` inlined.
-3. **The host owns the chrome.** App navigation is a LEFT rail built from the `Nav` primitives directly on the page background — never inside a Card, never a top bar (the host renders its own). No user/account UI in the app, ever — the host top bar owns identity. On mobile widths a bottom tab bar is the native pattern; from `@rise-x/apps-sdk` 0.10.0 the rail renders one for you — set `mobileNav="tabs"` on `AppFrame` (the scaffold does) rather than hand-rolling one. The canonical layout is the scaffold template's `App.tsx` (in a scaffolded app: its own `src/App.tsx`; the pristine template ships at `node_modules/@rise-x/apps-sdk/template/src/App.tsx`) — **read it first, and preserve its composition**.
+3. **The host owns the chrome.** App navigation is a LEFT rail built from the `Nav` primitives directly on the page background — never inside a Card, never a top bar (the host renders its own). No user/account UI in the app, ever — the host top bar owns identity. On mobile widths a bottom tab bar is the native pattern; from `@rise-x/apps-sdk` 0.11.0 the rail renders one for you — set `mobileNav="tabs"` on `AppFrame` (the scaffold does) rather than hand-rolling one. The canonical layout is the scaffold template's `App.tsx` (in a scaffolded app: its own `src/App.tsx`; the pristine template ships at `node_modules/@rise-x/apps-sdk/template/src/App.tsx`) — **read it first, and preserve its composition**.
 4. **Mobile UX is a deliberate choice, not an afterthought.** Most apps deserve a dedicated mobile experience; pick the level (distinct experiences / native-feel adaptation / desktop-first) from the personas' devices — suggest with reasoning, or ask when unclear (`references/design.md` §2).
 5. **Follow the Rise-X experience principles** — read `references/experience-principles.md` before any design or UI work: visual language, interaction rules, AI-state grammar, and the same care for empty/loading/error states as the happy path.
 6. **Deploys are asked-for, and default to test.** Never deploy unprompted; when the user says deploy without naming an environment, use test (`rise-x-test` MCP server).

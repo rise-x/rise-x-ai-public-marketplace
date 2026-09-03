@@ -1,6 +1,12 @@
 name: validate
 on:
   pull_request:
+    # ready_for_review re-runs the check when a draft is marked ready with no
+    # new commits. That matters for the release PR: check-version.sh compares
+    # against the PR's own base, which for that PR is main, so a bump landing
+    # on main after the last run can invalidate a green result no push would
+    # refresh.
+    types: [opened, synchronize, reopened, ready_for_review]
 permissions:
   contents: read
 jobs:
