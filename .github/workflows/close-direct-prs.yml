@@ -1,0 +1,142 @@
+name: close-direct-prs
+
+# main takes pull requests from release/* and hotfix/* only.
+#
+# main is the live marketplace, so a merge into it reaches customers straight
+# away. Work is staged on a release branch and ships when that branch merges,
+# which means a feature merged directly into main skips the release it was
+# meant to be part of. A fix that genuinely cannot wait goes through hotfix/*.
+#
+# This closes a wrongly targeted PR and says how to retarget it, so the branch
+# and the review history survive. It is a guardrail, not a gate: a ruleset
+# cannot restrict which head branch may open a PR, so this reacts rather than
+# prevents. protect-main still governs the merge itself.
+#
+# Fork PRs are left to close-outside-prs.yml, so an outside contributor does
+# not receive two closing comments.
+#
+# pull_request_target, not pull_request: it runs the workflow file from the
+# default branch, so the guard cannot be dodged by a head branch that was cut
+# before this landed and therefore does not contain it. Nothing from the head
+# is checked out or executed, and the PR's own fields reach the script through
+# env rather than expression interpolation, which is what makes the elevated
+# token safe here.
+
+on:
+  pull_request_target:
+    # synchronize matters as much as opened: a PR already open into main when
+    # this landed never fires opened again, and without it a push plus an
+    # approval would merge outside any release. edited catches a retarget
+    # onto main after the fact.
+    types: [opened, reopened, edited, synchronize]
+    branches: [main]
+
+permissions:
+  contents: read        # listing the release/* refs below
+  pull-requests: write
+
+concurrency:
+  group: close-direct-prs-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  close:
+    name: Close PRs not from release/* or hotfix/*
+    # The state check keeps an edit to an already-closed PR from posting a
+    # second comment, since edited fires on closed PRs too.
+    if: >-
+      github.event.pull_request.state == 'open'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && !startsWith(github.event.pull_request.head.ref, 'release/')
+      && !startsWith(github.event.pull_request.head.ref, 'hotfix/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Close it and say where the change belongs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          # A branch name may legally contain backticks, which would break the
+          # code spans below and let a crafted name reshape the comment's
+          # formatting. Stripped rather than escaped: a correct escape needs a
+          # fence sized to the content, and this value is only ever displayed,
+          # never used as a ref.
+          safe_ref="${HEAD_REF//\`/}"
+
+          # A release branch name reaches both a code span and a pasteable
+          # command. Strip backticks for the span; quote for the command,
+          # where stripping would name a branch that does not exist.
+          sq() { local v=${1//\'/\'\\\'\'}; printf "'%s'" "$v"; }
+
+          # Name the branch that is actually open, so the instructions below
+          # can be pasted rather than translated.
+          # --paginate, because a single page would quietly omit branches and
+          # the count below is what decides whether the advice is trustworthy.
+          # One ref per line so pages flatten; a per-page join would leave one
+          # line each and only the first would be read.
+          if ! refs="$(gh api --paginate "repos/${REPO}/git/matching-refs/heads/release/" \
+                        --jq '.[].ref | sub("^refs/heads/";"")')"; then
+            echo "::error::cannot list release branches"
+            exit 1
+          fi
+          branches=()
+          while IFS= read -r line; do
+            [[ -n "$line" ]] && branches+=("$line")
+          done <<< "$refs"
+          listing="${branches[*]:-}"
+
+          case "${#branches[@]}" in
+            0)
+              belongs="a release branch, and none is open yet"
+              retarget="gh pr edit ${PR} --base release/<name>"
+              closing="Ask a maintainer to run the **create-release** workflow, or use a \`hotfix/*\` branch if this genuinely cannot wait for the next release."
+              ;;
+            1)
+              belongs="the open release branch \`${branches[0]//\`/}\`"
+              retarget="gh pr edit ${PR} --base $(sq "${branches[0]}")"
+              closing="If this genuinely cannot wait for the next release, move it to a \`hotfix/*\` branch and target \`main\` from there instead."
+              ;;
+            *)
+              # create-release permits only one at a time, so several means one
+              # was pushed by hand or a shipped release was never deleted. The
+              # PR is still closed: the guard's job does not depend on the
+              # count, and failing here would let a wrongly targeted PR stand
+              # because of an unrelated problem with the repo's branches.
+              echo "::warning::${#branches[@]} release branches exist (${listing}); only one should be open at a time"
+              list=""
+              for b in "${branches[@]}"; do list+="\`${b//\`/}\`, "; done
+              list="${list%, }"
+              belongs="a release branch, but ${#branches[@]} are open at once: ${list}"
+              retarget="gh pr edit ${PR} --base <the current release branch>"
+              closing="Only one release should be open at a time, so check with a maintainer which of those is current before retargeting."
+              ;;
+          esac
+
+          {
+            echo "Closing this: \`main\` takes pull requests from \`release/*\` and \`hotfix/*\` only, and this one comes from \`${safe_ref}\`."
+            echo
+            echo "\`main\` is the live marketplace. Merging into it publishes to customers immediately, so changes are staged on a release branch and ship when that branch merges. A feature merged straight into \`main\` skips the release it belongs to."
+            echo
+            echo "Your change belongs on ${belongs}. Nothing is lost and you do not need a new pull request. Retarget this one, then reopen it, in this order:"
+            echo
+            echo '```'
+            echo "${retarget}"
+            echo "gh pr reopen ${PR}"
+            echo '```'
+            echo
+            echo "Reopening first would only close it again, because the base would still be \`main\`."
+            echo
+            echo "${closing}"
+          } > "$RUNNER_TEMP/comment.md"
+
+          gh pr close "$PR" --repo "$REPO" --comment "$(cat "$RUNNER_TEMP/comment.md")"
+          {
+            echo "## Closed #${PR}"
+            echo
+            echo "Head \`${safe_ref}\` is neither \`release/*\` nor \`hotfix/*\`."
+          } >> "$GITHUB_STEP_SUMMARY"
