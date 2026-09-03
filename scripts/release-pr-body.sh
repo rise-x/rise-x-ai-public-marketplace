@@ -178,8 +178,10 @@ pr_rows="$(printf '%s' "$prs" | jq -r --arg delta "$changed_files" '
 
 emit_prs() { # $1=plugin name, empty for the Other section
   local key="$1" found=0 row rest num title
-  # Split with parameter expansion, not `read`: a tab in IFS is whitespace, so
-  # `read` would strip the empty leading field that marks an Other row.
+  # read with IFS cleared takes whole lines; the fields are then split with
+  # parameter expansion. Letting read split them on a tab would not work: a
+  # tab in IFS counts as whitespace, so it would strip the empty leading
+  # field that marks an Other row.
   while IFS= read -r row; do
     [[ -z "$row" ]] && continue
     [[ "${row%%$'\t'*}" == "$key" ]] || continue
@@ -220,8 +222,10 @@ emit_prs() { # $1=plugin name, empty for the Other section
     printf '\n'
   done <<< "$changed_plugins"
 
-  # A leading tab marks a PR that touched nothing under plugins/.
-  if printf '%s' "$pr_rows" | grep -q '^	'; then
+  # A leading tab marks a PR that touched nothing under plugins/. Written as
+  # $'\t' rather than a literal tab, which is invisible here and one careless
+  # editor away from becoming spaces.
+  if printf '%s' "$pr_rows" | grep -q $'^\t'; then
     printf '## Other\n\n'
     emit_prs ''
     printf '\n'
