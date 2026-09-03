@@ -40,19 +40,19 @@ user rather than guessing.
 
 ## Migration checklist
 
-**Two different migrations share this list — check which one you're doing.**
-Steps 1, 2 and 6 are the *build* migration (webpack → the Rsbuild preset), and
-they apply to any app still on a webpack config. Steps 3, 4 and 5 are the
-*design-system and data-layer* migration, and apply only when those signals are
-present too: hand-rolled UI instead of `@rise-x/apps-sdk/ui`, `useEffect`/axios
-instead of the query hooks, no `APP.md`, an in-app top bar.
+**Three independent migrations share this list — check which ones you're doing.**
 
-An app that is already current on the design system and the query hooks but
-still on webpack needs **1, 2, 6 — and 5 if its docs are missing**: `APP.md` /
-`AGENTS.md` / `CLAUDE.md` are a separate axis from the UI, and the *Missing
-APP.md* section above applies whatever the build is. What it does not need is
-steps 3 and 4, and so no design phase and no approval gate, because no screen
-changes. Don't run it through those out of habit.
+| Axis | Steps | Applies when |
+| --- | --- | --- |
+| build | 1, 2, 6 | the app is still on a webpack config |
+| design system + data layer | 3, 4 | hand-rolled UI instead of `@rise-x/apps-sdk/ui`, or `useEffect`/axios instead of the query hooks, or an in-app top bar |
+| docs | 5 | `APP.md` / `AGENTS.md` / `CLAUDE.md` are missing |
+
+They move independently. An app already current on the design system and the
+query hooks but still on webpack needs the build axis and, if its docs are
+missing, the docs axis — not steps 3 and 4, and so no design phase and no
+approval gate, because no screen changes. Don't run it through those out of
+habit.
 
 1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
    outside), then `pnpm install`.
@@ -65,7 +65,10 @@ changes. Don't run it through those out of habit.
    scripts: drop webpack and its loaders, add `@rsbuild/core`,
    `@rsbuild/plugin-react` and `@rsbuild/plugin-type-check`, and set
    `build: rsbuild build`, `start: rsbuild dev --env-mode standalone`,
-   `start:federated: rsbuild dev`. Add `resolveJsonModule` to `tsconfig.json` if
+   `start:federated: rsbuild dev`. Keep the extension `.mts`: it marks the file
+   ESM, which a plain `.ts` warns about on every build. Do **not** reach for
+   `"type": "module"` in `package.json` instead — it breaks
+   `commitlint.config.js`. Add `resolveJsonModule` to `tsconfig.json` if
    absent — the config imports `package.json`.
 
    **There is no `shared` block to align any more:** the preset owns the whole
@@ -88,8 +91,9 @@ changes. Don't run it through those out of habit.
    the rise-x-app monorepo, which also ships a `README.md`). `APP.md` is **not**
    in the template — it is per-app and you write it, see *Missing APP.md* above.
    While you are in `package.json`, the template also ships
-   `typecheck: tsc --noEmit`; add it if absent, since `pluginTypeCheck` in the
-   preset is now the app's only type gate.
+   `typecheck: tsc --noEmit`; add it if absent. The preset's `pluginTypeCheck`
+   only runs inside an rsbuild invocation, so this script is how you type-check
+   without doing a full build.
 6. **Verify and deploy** per `references/build.md`: `pnpm build` produces
    `dist/remoteEntry.js`, then the deploy question (test environment by
    default).

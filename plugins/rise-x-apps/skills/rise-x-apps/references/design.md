@@ -101,12 +101,14 @@ Nav primitives on the page background, PageHeader + content screens, no user
 UI — and the mock follows the same composition.
 
 From **0.9.0** that composition is three primitives out of
-`@rise-x/apps-sdk/ui`, and the rest of this section names them:
+`@rise-x/apps-sdk/ui`, and the rest of this section names them. Note the split:
+the primitives **exist** from 0.9.0, but the container-query behaviour and
+`mobileNav` arrive in **0.11.0** — 0.9.0's frame is media-query based:
 
 | Primitive | What it is |
 | --- | --- |
-| `AppFrame` | The app's whole region. A CSS container, so every breakpoint below answers to the width the app was given rather than to the browser window, and a phone-sized frame renders the phone layout even on a desktop screen. |
-| `AppRail` | The left nav rail. With `mobileNav="tabs"` on the frame it becomes a bottom tab bar once the frame is narrow. |
+| `AppFrame` | The app's whole region. **On 0.11.0+** it is a CSS container, so every breakpoint below answers to the width the app was given rather than to the browser window, and a phone-sized frame renders the phone layout even on a desktop screen. On 0.9.0 it is a plain flexbox built from `md:` media-query utilities, so it answers to the *browser* width. |
+| `AppRail` | The left nav rail. **On 0.11.0+**, with `mobileNav="tabs"` on the frame, it becomes a bottom tab bar once the frame is narrow. On 0.9.0 the narrow rail is a horizontal scrolling strip and there is no `mobileNav` prop. |
 | `AppContent` | The one scrolling column. |
 
 Props are in `node_modules/@rise-x/apps-sdk/build/ui/components/app-frame.d.ts`.
@@ -208,7 +210,7 @@ How to build the mock:
   invent for the mock has no rule — write the layout as small custom CSS
   instead, and keep it to layout. Media-query utilities (`md:`) are worse than
   useless in a mock: they answer to the browser window, so a phone-width frame
-  on a desktop screen still gets desktop styles. `AppFrame` (**0.9.0+**) does not have
+  on a desktop screen still gets desktop styles. `AppFrame` (**0.11.0+**) does not have
   that problem — it is a CSS container and measures itself — so a mock frame
   sized like a phone renders the real mobile layout.
 - **Dark/light**: tokens switch on the `dark` class on `<html>` — review both
@@ -227,7 +229,7 @@ props/variants read `node_modules/@rise-x/apps-sdk/build/ui/components/*.d.ts`
 — or the `packages/ui/src/components/` sources in the rise-x-app monorepo):
 button, input (+numeric/field/action/group/affix), textarea, select, checkbox,
 radio, switch, slider, toggle, toggle-group, segmented, label, badge, avatar,
-card, table, data-table, list, nav, app-frame (0.9.0+), page-header,
+card, table, data-table, list, nav, app-frame (exists 0.9.0+, rendered specimen 0.11.0+), page-header,
 empty-state, statistic, chart,
 stepper, timeline, progress, skeleton, spinner, dialog, alert-dialog, sheet,
 popover, dropdown-menu, tooltip, alert, snackbar, sonner (toasts), message, ai,

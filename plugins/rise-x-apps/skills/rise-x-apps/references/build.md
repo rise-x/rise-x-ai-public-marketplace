@@ -62,7 +62,7 @@ CLI flags worth knowing:
 | Flag | Default | Use |
 | --- | --- | --- |
 | `--pm=<npm\|yarn\|pnpm>` | auto | Force a package manager. **Prefer `pnpm` whenever it's available** — it's what Rise-X uses, and the commands throughout this guide assume it. Without the flag the CLI auto-detects from lockfiles in the cwd (falling back to npm), so pass it explicitly when scaffolding into an empty directory. |
-| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — check the ports the other apps already use. |
+| `--port=<n>` | `5101` | Standalone dev-server port. Must not collide with other apps — grep the sibling apps for `port:` in their `rsbuild.config.mts`, or `devServer.port` in a `webpack.local.config.js` if they predate the preset. |
 | `--skip-install` | off | Skip install (faster scaffold; the user installs later). |
 | `--json` | off | Emit `{ path, slug, scope, pkgName, port, pm, installed }` to stdout — useful for automation. |
 
@@ -90,7 +90,7 @@ After scaffold there is **no Module Federation config in the app to edit** —
 (SDK >= 0.9.0), and the preset owns the scope, `remoteEntry.js`, the `./App` +
 `./lifecycle` exposes and every share, including the react family as
 `singleton` + `import: false`. Read the scaffolded file if you need the shape.
-An app may pass `exposes` and `define`; it cannot add shares. The scaffolder
+An app may pass `exposes`, and `define` from **0.11.0**; it cannot add shares. The scaffolder
 emits this config from **0.11.0** — earlier versions emit webpack configs, see
 `references/upgrade.md`.
 
@@ -100,9 +100,11 @@ by extending it — add screens, swap the stubs for real content — and preserv
 its chrome composition; don't flatten it back to a bare component.
 
 From **SDK >= 0.9.0** that composition is `AppFrame` / `AppRail` /
-`AppContent` from `@rise-x/apps-sdk/ui`: the frame is a CSS container, so the
-layout answers to the region the host gave the app rather than to the browser
-window, `AppRail` is the nav rail, and `AppContent` is the app's ONE scroller.
+`AppContent` from `@rise-x/apps-sdk/ui`: `AppRail` is the nav rail and
+`AppContent` is the app's ONE scroller. **From 0.11.0** the frame is also a CSS
+container, so the layout answers to the region the host gave the app rather than
+to the browser window; on 0.9.0 it is media-query based and answers to the
+browser window.
 Props are in `node_modules/@rise-x/apps-sdk/build/ui/components/app-frame.d.ts`
 (`packages/apps-sdk/...` in the rise-x-app monorepo). Earlier SDKs hand-build
 an `<aside>` rail in the template instead.
@@ -299,7 +301,7 @@ const submit = useSubmitWork(); // submit.mutate({ workId, actionName }) — inv
 Rules:
 - **Never mount a `QueryClientProvider` with a client of your own** — that shadows the per-app client the shell mounts and breaks shell-managed caching. The SDK hooks need no provider at all: they pass the resolved client explicitly (host client when federated, per-bundle fallback standalone).
 - **If the app calls react-query directly, wrap it in `<AppQueryProvider>`** (SDK >= 0.7.0, from `@rise-x/apps-sdk/query`; the scaffold's `App.tsx` already does). Plain APIs — `useQuery(flowQueries.list(args))`, `useQueryClient()`, devtools — read the client from context, and standalone dev has no provider, so they throw *"No QueryClient set"* the moment you leave the SDK hooks. `AppQueryProvider` publishes the *resolved* client, so it re-publishes the host's client when federated and the fallback when standalone.
-- **Keep `'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' }`** — WITHOUT `import: false`, the bundled fallback is deliberate. On the preset it comes from the SDK rather than the app's own config; either way, don't shadow or remove it or shell-managed caching breaks.
+- **The `@tanstack/react-query` share — `{ singleton: true, requiredVersion: '^5.0.0' }`, WITHOUT `import: false`** — belongs to the preset on a preset-built app, and to the app's own `shared` block on a webpack one. The missing `import: false` is deliberate: the bundled fallback keeps the app working on a host that doesn't share it. Don't shadow or remove it either way, or shell-managed caching breaks.
 - Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useWorkSearch/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetQuickSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
 - Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
 - Keys are environment-scoped (`['rise-apps-sdk', envId, …]`) — ecosystem switches refetch automatically; `queryKeys` is exported for targeted invalidation. Advanced react-query features (select/suspense/prefetch) go through the factories: `useQuery(flowQueries.list(args))`.

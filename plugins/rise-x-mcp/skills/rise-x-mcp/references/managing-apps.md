@@ -37,7 +37,7 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
      upload_id = <uploadId>,
      name      = "My App",            # human-readable display name
      version   = "1.0.0",             # semver; must be unique per app — bump every release
-     app_scope = "my_app",            # MF scope, snake_case: [a-z][a-z0-9_]*
+     app_scope = "app_my_app",        # MF scope: app_<slug_with_underscores>, from --json
      app_id    = <GUID>,              # ONLY when releasing a new version of an existing app
    )
      → app id + canonical manifest (remoteUrl, version, scope, deployedAt, sizeBytes)
