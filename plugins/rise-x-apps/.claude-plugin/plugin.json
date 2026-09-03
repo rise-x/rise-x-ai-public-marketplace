@@ -2,7 +2,7 @@
   "name": "rise-x-apps",
   "displayName": "Rise-X Apps",
   "description": "Design, build, and deploy federated apps for the Rise-X platform with @rise-x/apps-sdk — design interview, HTML design mock on the Rise-X design system, scaffold, implement, deploy. Pair with the rise-x-mcp plugin for MCP-driven integration and deploys.",
-  "version": "1.3.0",
+  "version": "1.5.0",
   "author": {
     "name": "Rise-X",
     "url": "https://rise-x.io"

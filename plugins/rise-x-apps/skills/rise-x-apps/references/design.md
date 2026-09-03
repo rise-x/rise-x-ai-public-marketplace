@@ -19,8 +19,9 @@ Which sections apply:
 is never skipped, on any of those paths.
 
 For a new app the output is: a problem statement the user confirmed, a list
-of integration targets (origin ids), an **explicitly approved** HTML design
-mock, and the material for the app's `APP.md` (personas + user journeys).
+of integration targets (per-environment origin ids, ready for
+`rise-x-app.json`), an **explicitly approved** HTML design mock, and the
+material for the app's `APP.md` (personas + user journeys).
 For changes to an existing app, the output is the approved mock plus the
 `APP.md` updates the change implies.
 
@@ -66,18 +67,37 @@ they land in `APP.md` and shape the mock below.
 Ask whether the app should integrate with existing **flows (workflows), assets,
 or agents**:
 
-- **Yes, existing ones** — discover the exact targets and record their
-  **origin ids** (`flowOriginId`, asset-type origin id, agent id); those go
-  into the app config at implementation time. Discover via the Rise-X MCP
-  (`list_flows`, `list_asset_types`, `list_agents`) or ask the user to point
-  at them.
+- **Yes, existing ones** — discover the exact targets and record their ids
+  (`flowOriginId` for a flow and for an asset type, `agentId` for an agent).
+  Discover via the Rise-X MCP (`list_flows`, `list_asset_types`,
+  `list_agents`) or ask the user to point at them. All three land in the
+  app's `rise-x-app.json` at scaffold
+  time — one alias per target, with a `label` and `description`, and ids
+  **per environment**: the same flow has a different origin id on each
+  environment. Declare only the environments you have real ids for: a new app
+  starts at test only, and every dependency needs an id for every environment
+  listed in `environments`. Collect another environment's ids when the app
+  ships there, per MCP server (`rise-x-test` → test, `rise-x` → production).
+  The plugin ships no staging server, so staging ids come from the user or the
+  staging shell. An agent is declared with
+  `kind: "agent"` and its id field is `agentId`, not `flowOriginId`; an agent
+  is created per ecosystem with no promotion path, so its id always differs
+  between environments and the per-environment block is mandatory. See
+  `references/build.md` §App dependencies.
 - **Nothing suitable exists yet** — ask whether to **build the flow / assets /
   agent first using the Rise-X MCP**, so the app has something real to
   integrate with, then come back here. For an agent, create the configuration
   with the agent-management tools (`create_agent` — the `rise-x-mcp` skill's
   managing-agents reference covers it): the returned `id` **is** the agent id
-  the app integrates against — record it.
+  the app integrates against — record it, per environment.
 - **No integration** — fine; note it and move on.
+
+**What an agent dependency does and doesn't buy.** Declaring it records the
+agent for ecosystem management and Ask Diana, and gives app code a bound
+surface (`deps.<alias>.agent.run()` and friends). It does **not** let Diana
+invoke the agent: there is no MCP tool that runs or spawns an agent, so the
+agent only runs when the app's own code calls it. Don't promise the user
+Diana-driven agent runs.
 
 If the Rise-X MCP isn't available (the `rise-x-mcp` plugin isn't installed or
 its servers aren't connected), don't invent ids: either ask the user to
@@ -100,27 +120,31 @@ scaffolded app it became `src/App.tsx`). It encodes the chrome contract — left
 Nav primitives on the page background, PageHeader + content screens, no user
 UI — and the mock follows the same composition.
 
-From **0.10.0** that composition is three primitives out of
-`@rise-x/apps-sdk/ui`, and the rest of this section names them:
+From **0.9.0** that composition is three primitives out of
+`@rise-x/apps-sdk/ui`, and the rest of this section names them. Note the split:
+the primitives **exist** from 0.9.0, but the container-query behaviour and
+`mobileNav` arrive in **0.11.0** — 0.9.0's frame is media-query based:
 
 | Primitive | What it is |
 | --- | --- |
-| `AppFrame` | The app's whole region. A CSS container, so every breakpoint below answers to the width the app was given rather than to the browser window, and a phone-sized frame renders the phone layout even on a desktop screen. |
-| `AppRail` | The left nav rail. With `mobileNav="tabs"` on the frame it becomes a bottom tab bar once the frame is narrow. |
+| `AppFrame` | The app's whole region. **On 0.11.0+** it is a CSS container, so every breakpoint below answers to the width the app was given rather than to the browser window, and a phone-sized frame renders the phone layout even on a desktop screen. On 0.9.0 it is a plain flexbox built from `md:` media-query utilities, so it answers to the *browser* width. |
+| `AppRail` | The left nav rail. **On 0.11.0+**, with `mobileNav="tabs"` on the frame, it becomes a bottom tab bar once the frame is narrow. On 0.9.0 the narrow rail is a horizontal scrolling strip and there is no `mobileNav` prop. |
 | `AppContent` | The one scrolling column. |
 
 Props are in `node_modules/@rise-x/apps-sdk/build/ui/components/app-frame.d.ts`.
-Before 0.10.0 none of them exist and the template hand-builds an `<aside>` rail
+Before 0.9.0 none of them exist and the template hand-builds an `<aside>` rail
 instead.
 
 Every `build/ui/...` path below is **inside the SDK package**, not your app:
 prefix it with `node_modules/@rise-x/apps-sdk/`, or with `packages/apps-sdk/`
 in the rise-x-app monorepo.
 
-**Version applicability.** `demo.html`, `classes.json`, the Tailwind preflight
-inside `styles.css`, and `AppFrame` all ship from
-**`@rise-x/apps-sdk` 0.10.0**. Check what the project actually has before
-relying on any of them:
+**Version applicability.** Two different floors here. `AppFrame` / `AppRail` /
+`AppContent` ship from **0.9.0**. `demo.html`, `classes.json` and the Tailwind
+preflight inside `styles.css` landed in 0.10.0, which was **never published** —
+the repo went 0.9.0 → 0.10.0 → 0.11.0 in two days and only 0.11.0 was released
+— so **0.11.0** is the first version you can actually install them from. Check
+what the project has before relying on any of them:
 
 ```bash
 node -p "require('./node_modules/@rise-x/apps-sdk/package.json').version"
@@ -128,14 +152,14 @@ node -p "require('./node_modules/@rise-x/apps-sdk/package.json').version"
 
 The relative path is deliberate: the bare specifier
 (`@rise-x/apps-sdk/package.json`) throws `ERR_PACKAGE_PATH_NOT_EXPORTED` on
-every SDK before 0.10.0, because the package's `exports` map has no entry for
+every SDK before 0.11.0, because the package's `exports` map has no entry for
 it. The failure reads like a broken install rather than an old version.
 
 On an older SDK: read markup from
 `node_modules/@rise-x/apps-sdk/build/ui/reference/components/*.tsx` (the
 component sources, shipped through 0.9.0), give the mock its own
 `box-sizing` reset, and hand-build the mobile tab bar. Everything below marked
-**0.10.0+** does not apply. Upgrading the SDK is usually the better move.
+**0.11.0+** does not apply. Upgrading the SDK is usually the better move.
 
 How to build the mock:
 
@@ -150,12 +174,12 @@ How to build the mock:
   `packages/apps-sdk/build/ui/styles.css` in the rise-x-app monorepo (rebuild
   apps-sdk there if the design system changed). Inter is embedded, so this one
   file is the mock's only dependency.
-  **0.10.0+:** it carries Tailwind preflight, which is what gives the mock
+  **0.11.0+:** it carries Tailwind preflight, which is what gives the mock
   `box-sizing: border-box` the way a real host would — don't add a reset of
-  your own. Before 0.10.0 there is no preflight: put
+  your own. Before 0.11.0 there is no preflight: put
   `*,::before,::after{box-sizing:border-box}` in the mock's own `<style>`
   block, or every padded `w-full` control renders wider than its container.
-- **Copy markup from the design-system demo** (**0.10.0+**) —
+- **Copy markup from the design-system demo** (**0.11.0+**) —
   `build/ui/demo.html` in the SDK
   (`node_modules/@rise-x/apps-sdk/build/ui/demo.html`, or
   `packages/apps-sdk/build/ui/demo.html` in the rise-x-app monorepo): every
@@ -166,7 +190,7 @@ How to build the mock:
   whole point: markup copied out of the demo renders in your mock exactly as
   it renders there. It's the ground truth for rendered HTML, so copy from it
   rather than reconstructing by hand.
-- **Navigate demo.html by its TOC, never by scanning** (**0.10.0+**). The file opens with a
+- **Navigate demo.html by its TOC, never by scanning** (**0.11.0+**). The file opens with a
   navigation guide and a JSON table of contents
   (`<script type="application/json" id="demo-toc">`) listing every section,
   every screen, and the `data-slot` components each section demonstrates —
@@ -178,7 +202,7 @@ How to build the mock:
   theme toggle, and the first `data-variant="default"` is a badge, not a
   button. The TOC lists the slots each section demonstrates — that is what it
   is for.
-- **Take variant classes from `classes.json`, never splice them** (**0.10.0+**). For a
+- **Take variant classes from `classes.json`, never splice them** (**0.11.0+**). For a
   combination the demo doesn't happen to render — a `default` button at size
   `sm`, say — read `build/ui/classes.json`
   (`node_modules/@rise-x/apps-sdk/build/ui/classes.json`;
@@ -206,26 +230,26 @@ How to build the mock:
   invent for the mock has no rule — write the layout as small custom CSS
   instead, and keep it to layout. Media-query utilities (`md:`) are worse than
   useless in a mock: they answer to the browser window, so a phone-width frame
-  on a desktop screen still gets desktop styles. `AppFrame` (**0.10.0+**) does not have
+  on a desktop screen still gets desktop styles. `AppFrame` (**0.11.0+**) does not have
   that problem — it is a CSS container and measures itself — so a mock frame
   sized like a phone renders the real mobile layout.
 - **Dark/light**: tokens switch on the `dark` class on `<html>` — review both
   themes (a tiny inline toggle script in the mock is fine).
 - **Show the chosen mobile UX level.** For "distinct experiences" and
   "native-feel adaptation", include a mobile-width frame alongside the desktop
-  one, so the user approves both. **0.10.0+:** the demo's **mobile** screen
+  one, so the user approves both. **0.11.0+:** the demo's **mobile** screen
   (`data-screen-panel="mobile"`) is the ground truth for it — a real
   `AppFrame mobileNav="tabs"` at phone width, with the bottom tab bar, a
   bottom sheet and thumb-sized rows. Copy that markup rather than inventing a
   phone layout.
 
-Component inventory (**0.10.0+** for the rendered specimens in
+Component inventory (**0.11.0+** for the rendered specimens in
 `node_modules/@rise-x/apps-sdk/build/ui/demo.html`, and for `app-frame` itself; for
 props/variants read `node_modules/@rise-x/apps-sdk/build/ui/components/*.d.ts`
 — or the `packages/ui/src/components/` sources in the rise-x-app monorepo):
 button, input (+numeric/field/action/group/affix), textarea, select, checkbox,
 radio, switch, slider, toggle, toggle-group, segmented, label, badge, avatar,
-card, table, data-table, list, nav, app-frame (0.10.0+), page-header,
+card, table, data-table, list, nav, app-frame (exists 0.9.0+, rendered specimen 0.11.0+), page-header,
 empty-state, statistic, chart,
 stepper, timeline, progress, skeleton, spinner, dialog, alert-dialog, sheet,
 popover, dropdown-menu, tooltip, alert, snackbar, sonner (toasts), message, ai,
@@ -241,13 +265,15 @@ Design rules (apply to the mock exactly as they apply to the app):
   chrome). Never a top bar: the host already renders its own top-bar
   navigation above every app. On mobile widths the native pattern is a
   **bottom tab bar**, and the no-top-bar rule holds at every width.
-  **0.10.0+:** the rail renders that bar for you — the app sets
+  **0.11.0+:** the rail renders that bar for you — the app sets
   `mobileNav="tabs"` on `AppFrame`, which the scaffold template does, and it
   folds the overflow behind **More** on its own once there are too many
   destinations. The SDK README's AppFrame section owns that threshold; don't
   restate it. A mock has no props, so copy the rendered bar out of
   `data-screen-panel="mobile"` instead.
-  Before 0.10.0 there is no such rail and the bar has to be built by hand.
+  Before 0.11.0 the rail does not render one: on 0.9.0 `AppRail` exists but goes
+  to a horizontal scrolling strip at narrow widths, so the bottom bar has to be
+  built by hand.
 - **No user/account UI anywhere in the app** — no avatar, no user name, no
   ecosystem label, no sign-out. The host top bar owns identity, in both the
   old and the new host.
@@ -320,11 +346,12 @@ getComputedStyle(copied)?.paddingTop;               // against what the demo sho
 copied?.getBoundingClientRect().height;             // 0 means a size class on it has no rule
 ```
 
-`boxSizing` reads `border-box` on **0.10.0+**, where the stylesheet carries
+`boxSizing` reads `border-box` on **0.11.0+**, where the stylesheet carries
 preflight. On an older SDK it reads `content-box` even when the stylesheet
 inlined perfectly — that is the missing preflight, not a missing stylesheet,
 and the fix is the reset in the mock's own `<style>` block, not re-inlining.
 
 When approved, move to `references/build.md` — carry the approved mock, the
-screen list, the integration origin ids, and the persona/journey material
-(for `APP.md`) into implementation.
+screen list, the integration targets (per-environment origin ids, destined
+for `rise-x-app.json`), and the persona/journey material (for `APP.md`) into
+implementation.

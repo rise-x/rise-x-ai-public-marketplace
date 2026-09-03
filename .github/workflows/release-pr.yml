@@ -1,0 +1,168 @@
+name: release-pr
+
+# Keeps the release PR (release/<name> -> main) current while a release is
+# assembled, so the delta that will ship is always visible and merging that
+# PR is the release.
+#
+# The body is regenerated on every push to the release branch by
+# scripts/release-pr-body.sh: a per-plugin changelog with each plugin's
+# version bump and the PRs merged into the branch, behind stable
+# <!-- notes --> and <!-- changelog --> markers that release-notes tooling
+# parses. Whatever a human writes in the notes block is preserved.
+#
+# The release PR itself is opened BY HAND, once per release. This enterprise
+# forbids GitHub Actions from creating pull requests, so GITHUB_TOKEN cannot
+# open it and this workflow does not try: with no PR open it prints the exact
+# command and stays green. Everything after that is automatic, because
+# editing an existing PR is a plain pull-requests:write call that the policy
+# does not restrict.
+#
+# A PR opened by a human starts validate.yml on its own, and so does every
+# later push to the branch, so the required check is present well before
+# anyone can merge.
+
+on:
+  push:
+    branches:
+      - 'release/**'
+  # Run by hand right after opening the release PR to fill in the body
+  # without waiting for the next push, or to recover from a failed run.
+  # Dispatch it ON the release branch: the branch comes from the ref.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: release-pr-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ensure-pr:
+    name: Refresh the release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the body generator reads each plugin's version from
+          # origin/main and diffs the release delta against it.
+          fetch-depth: 0
+
+      # fetch-depth: 0 already fetches every head, so this is normally a no-op.
+      # It is here because that is a detail of actions/checkout rather than a
+      # promise, the push path cannot be exercised before merge, and the cost
+      # of being wrong is a release workflow that fails the first time it runs.
+      - name: Make sure origin/main is present
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Refresh the release PR body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$BRANCH" != release/* ]]; then
+            echo "::error::this workflow must run on a release/* branch, not '$BRANCH'"
+            exit 1
+          fi
+
+          # Re-running an older run replays that run's commit while BRANCH
+          # still names the branch, so regenerating would overwrite the body
+          # with an older tree. Compare against the branch as it stands now.
+          # This covers the case whichever shape the checkout left behind, a
+          # detached HEAD or a local branch pinned to the stale commit, so it
+          # does not depend on knowing which.
+          if ! tip="$(git ls-remote origin "refs/heads/${BRANCH}" | cut -f1)"; then
+            echo "::error::cannot read the tip of ${BRANCH}"
+            exit 1
+          fi
+          head_sha="$(git rev-parse HEAD)"
+          if [[ -z "$tip" ]]; then
+            echo "${BRANCH} no longer exists on the remote; nothing to refresh." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$tip" != "$head_sha" ]]; then
+            echo "::notice::HEAD ${head_sha} is not the tip of ${BRANCH} (${tip}); skipping so a stale re-run cannot replace a newer body"
+            echo "Skipped: this run's commit is behind ${BRANCH}." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Fail closed: an empty count must not read as "a PR already exists",
+          # which would skip the refresh silently.
+          # --head matches on branch name alone, so a fork carrying the same
+          # branch would qualify. gh has no owner-qualified --head, so filter
+          # on the head repo's owner instead.
+          # Test the call, not just its output: under set -e a failing command
+          # substitution ends the step before any check below could report it,
+          # so the message meant for that case would never be printed.
+          if ! open_raw="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number,headRepositoryOwner)"; then
+            echo "::error::cannot list open PRs for ${BRANCH}"
+            exit 1
+          fi
+          open_json="$(printf '%s' "$open_raw" | jq --arg owner "${GITHUB_REPOSITORY%%/*}" '[.[] | select(.headRepositoryOwner.login == $owner)]')"
+          open_count="$(printf '%s' "$open_json" | jq length)"
+          if ! [[ "$open_count" =~ ^[0-9]+$ ]]; then
+            echo "::error::could not determine whether a release PR is open (got '$open_count')"
+            exit 1
+          fi
+
+          # Two open PRs cannot normally share a head and base, but a
+          # same-named branch on a fork can match --head. Refusing beats
+          # refreshing one at random and leaving the other stale.
+          if (( open_count > 1 )); then
+            echo "::error::${open_count} open PRs match ${BRANCH} -> main: $(printf '%s' "$open_json" | jq -r 'map("#\(.number)")|join(" ")'). Close the ones that are not the release PR."
+            exit 1
+          fi
+
+          if [[ "$open_count" != "0" ]]; then
+            number="$(printf '%s' "$open_json" | jq -r '.[0].number')"
+            gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/current-body.md"
+            bash scripts/release-pr-body.sh "$BRANCH" "$RUNNER_TEMP/current-body.md" > "$RUNNER_TEMP/pr-body.md"
+            gh pr edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/pr-body.md"
+            echo "Refreshed the body of release PR #${number}." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # A branch that only merged main back in has nothing to PR yet.
+          # The ref goes in unencoded on purpose: the compare route takes a
+          # slash in a branch name as part of the ref. Verified both ways
+          # against this repo, so encoding it would be noise, not a fix.
+          if ! ahead="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${BRANCH}" --jq .ahead_by)"; then
+            echo "::error::cannot compare main...${BRANCH}; does the branch still exist?"
+            exit 1
+          fi
+          if ! [[ "$ahead" =~ ^[0-9]+$ ]]; then
+            echo "::error::could not compare main...${BRANCH} (got '$ahead')"
+            exit 1
+          fi
+          if [[ "$ahead" == "0" ]]; then
+            echo "${BRANCH} has no commits ahead of main; nothing to open yet." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          name="${BRANCH#release/}"
+          # This command gets pasted into a shell, and git allows ' $ ; ` & |
+          # ( ) and " in a ref name. release-pr fires on any push to
+          # release/**, including a hand-pushed branch, so quote rather than
+          # assume. sq keeps the ordinary case reading as 'release/2026-09'.
+          sq() { local v=${1//\'/\'\\\'\'}; printf "'%s'" "$v"; }
+          # Backticks are only stripped where the value is displayed, never
+          # where it is part of a command that has to still name the branch.
+          md_branch="${BRANCH//\`/}"
+          cmd="gh pr create --repo $(sq "$GITHUB_REPOSITORY") --base main --head $(sq "$BRANCH") --draft --title $(sq "release: ${name}")"
+          echo "::warning::no release PR is open for ${BRANCH}. Open it with: ${cmd}"
+          {
+            echo "## Open the release PR"
+            echo
+            echo "\`${md_branch}\` is ${ahead} commit(s) ahead of \`main\` and has no open PR."
+            echo "GitHub Actions may not create pull requests in this enterprise, so open it once, by hand:"
+            echo
+            echo '```'
+            echo "${cmd}"
+            echo '```'
+            echo
+            echo "Then re-run this workflow on \`${md_branch}\` to fill in the changelog body, or let the next push do it."
+          } >> "$GITHUB_STEP_SUMMARY"
