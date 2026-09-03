@@ -68,6 +68,11 @@ jobs:
           # never used as a ref.
           safe_ref="${HEAD_REF//\`/}"
 
+          # A release branch name reaches both a code span and a pasteable
+          # command. Strip backticks for the span; quote for the command,
+          # where stripping would name a branch that does not exist.
+          sq() { local v=${1//\'/\'\\\'\'}; printf "'%s'" "$v"; }
+
           # Name the branch that is actually open, so the instructions below
           # can be pasted rather than translated.
           # --paginate, because a single page would quietly omit branches and
@@ -92,8 +97,8 @@ jobs:
               closing="Ask a maintainer to run the **create-release** workflow, or use a \`hotfix/*\` branch if this genuinely cannot wait for the next release."
               ;;
             1)
-              belongs="the open release branch \`${branches[0]}\`"
-              retarget="gh pr edit ${PR} --base ${branches[0]}"
+              belongs="the open release branch \`${branches[0]//\`/}\`"
+              retarget="gh pr edit ${PR} --base $(sq "${branches[0]}")"
               closing="If this genuinely cannot wait for the next release, move it to a \`hotfix/*\` branch and target \`main\` from there instead."
               ;;
             *)
@@ -104,7 +109,7 @@ jobs:
               # because of an unrelated problem with the repo's branches.
               echo "::warning::${#branches[@]} release branches exist (${listing}); only one should be open at a time"
               list=""
-              for b in "${branches[@]}"; do list+="\`${b}\`, "; done
+              for b in "${branches[@]}"; do list+="\`${b//\`/}\`, "; done
               list="${list%, }"
               belongs="a release branch, but ${#branches[@]} are open at once: ${list}"
               retarget="gh pr edit ${PR} --base <the current release branch>"

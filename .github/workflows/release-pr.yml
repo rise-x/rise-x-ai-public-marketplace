@@ -144,17 +144,25 @@ jobs:
           fi
 
           name="${BRANCH#release/}"
-          cmd="gh pr create --repo ${GITHUB_REPOSITORY} --base main --head ${BRANCH} --draft --title 'release: ${name}'"
+          # This command gets pasted into a shell, and git allows ' $ ; ` & |
+          # ( ) and " in a ref name. release-pr fires on any push to
+          # release/**, including a hand-pushed branch, so quote rather than
+          # assume. sq keeps the ordinary case reading as 'release/2026-09'.
+          sq() { local v=${1//\'/\'\\\'\'}; printf "'%s'" "$v"; }
+          # Backticks are only stripped where the value is displayed, never
+          # where it is part of a command that has to still name the branch.
+          md_branch="${BRANCH//\`/}"
+          cmd="gh pr create --repo $(sq "$GITHUB_REPOSITORY") --base main --head $(sq "$BRANCH") --draft --title $(sq "release: ${name}")"
           echo "::warning::no release PR is open for ${BRANCH}. Open it with: ${cmd}"
           {
             echo "## Open the release PR"
             echo
-            echo "\`${BRANCH}\` is ${ahead} commit(s) ahead of \`main\` and has no open PR."
+            echo "\`${md_branch}\` is ${ahead} commit(s) ahead of \`main\` and has no open PR."
             echo "GitHub Actions may not create pull requests in this enterprise, so open it once, by hand:"
             echo
             echo '```'
             echo "${cmd}"
             echo '```'
             echo
-            echo "Then re-run this workflow on \`${BRANCH}\` to fill in the changelog body, or let the next push do it."
+            echo "Then re-run this workflow on \`${md_branch}\` to fill in the changelog body, or let the next push do it."
           } >> "$GITHUB_STEP_SUMMARY"
