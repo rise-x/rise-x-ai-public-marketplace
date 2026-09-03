@@ -68,14 +68,18 @@ Ask whether the app should integrate with existing **flows (workflows), assets,
 or agents**:
 
 - **Yes, existing ones** — discover the exact targets and record their ids
-  (`flowOriginId`, asset-type origin id, agent id). Discover via the Rise-X
-  MCP (`list_flows`, `list_asset_types`, `list_agents`) or ask the user to
-  point at them. All three land in the app's `rise-x-app.json` at scaffold
+  (`flowOriginId` for a flow and for an asset type, `agentId` for an agent).
+  Discover via the Rise-X MCP (`list_flows`, `list_asset_types`,
+  `list_agents`) or ask the user to point at them. All three land in the
+  app's `rise-x-app.json` at scaffold
   time — one alias per target, with a `label` and `description`, and ids
   **per environment**: the same flow has a different origin id on each
-  environment, so run the discovery on every environment the app ships to
-  (per MCP server — `rise-x-test` → test, `rise-x` → production; starting
-  with test only and adding prod later is fine). An agent is declared with
+  environment. Declare only the environments you have real ids for: a new app
+  starts at test only, and every dependency needs an id for every environment
+  listed in `environments`. Collect another environment's ids when the app
+  ships there, per MCP server (`rise-x-test` → test, `rise-x` → production).
+  The plugin ships no staging server, so staging ids come from the user or the
+  staging shell. An agent is declared with
   `kind: "agent"` and its id field is `agentId`, not `flowOriginId`; an agent
   is created per ecosystem with no promotion path, so its id always differs
   between environments and the per-environment block is mandatory. See

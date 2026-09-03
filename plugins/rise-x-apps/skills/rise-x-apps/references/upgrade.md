@@ -20,7 +20,7 @@ Any of these marks the app as old:
   hooks or `/connectors`.
 - Flow / asset-type / agent GUIDs hardcoded in source or a hand-rolled config
   module — no `rise-x-app.json` at the app root. `npx @rise-x/apps-sdk scan`
-  answers this one for you, without reading the app first.
+  answers this one for you, without reading the app first (SDK 0.12.0 or later).
 - No `APP.md` / `AGENTS.md` at the app root.
 - An in-app top-bar navigation (now disallowed — nav belongs on the left).
 
@@ -99,8 +99,8 @@ habit.
 
    Each finding carries the id, the inferred kind, a suggested alias, and every
    file:line it appears at. Work from that list, and treat an unclear kind as a
-   question for the user (or a `list_flows` / `list_asset_types` call), never a
-   guess.
+   question for the user (or a `list_flows` / `list_asset_types` / `list_agents`
+   call), never a guess.
 
    Then run `npx @rise-x/apps-sdk scan --show-ignored` and read what it set
    aside. It skips step ids, row ids, section ids, integration endpoints and
@@ -114,16 +114,17 @@ habit.
    constants with `useAppDependencies()` reads (`references/build.md`
    §App dependencies). Re-run `scan` when you're done: a clean report is the
    evidence the migration is complete, and it is the only check that notices a
-   constant you declared but forgot to stop using.
-   The current template's build config wires the manifest plugin itself
-   (`defineAppConfig` from `@rise-x/apps-sdk/rsbuild`); an app still on a
-   hand-written `webpack.config.js` adds `new RiseAppManifestPlugin()` from
-   `@rise-x/apps-sdk/webpack` to its `plugins` instead. An app being migrated
+   constant you declared but forgot to stop using. For CI,
+   `npx @rise-x/apps-sdk scan --strict` exits non-zero on a finding, a skipped
+   scan, or an unreadable file, so a green report from plain `scan` is not the
+   gate. An app being migrated
    usually has ids for one environment only — the one it was built against — so
    collect the rest before declaring the environment: every dependency needs an
    id for every environment the manifest declares. Finish with
-   `npx @rise-x/apps-sdk validate` (add the template's `validate` and
-   `build:<env>` scripts while you are in `package.json`).
+   `npx @rise-x/apps-sdk validate`, the spelling to use before the template's
+   `validate` script exists in `package.json`; add that script and the
+   `build:<env>` ones while you are in there, and run `pnpm validate` from then
+   on.
 6. **Add the docs.** `AGENTS.md` and the one-line `CLAUDE.md` pointer can be
    copied from the SDK's `template/` directory
    (`node_modules/@rise-x/apps-sdk/template/`; `packages/apps-sdk/template/` in

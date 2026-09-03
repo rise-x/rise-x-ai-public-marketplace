@@ -79,8 +79,8 @@ What the scaffolder creates (**SDK >= 0.11.0** — earlier versions emit webpack
 ├── AGENTS.md              # agent guide: architecture in the Rise host, stack, commands, APP.md discipline
 ├── CLAUDE.md              # one-line @AGENTS.md import so Claude Code loads the same guide — edit AGENTS.md
 ├── README.md              # app readme; points at APP.md and AGENTS.md
-├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod
-├── rise-x-app.json        # app dependency manifest — alias → per-environment ids; the build preset resolves it (no dependencies yet)
+├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod, plus `validate`, `build:staging`, `build:prod` (SDK >= 0.12.0)
+├── rise-x-app.json        # app dependency manifest (SDK >= 0.12.0): alias → per-environment ids; the build preset resolves it (no dependencies yet)
 ├── tsconfig.json          # jsx: "react-jsx", strict
 ├── rsbuild.config.mts     # thin: calls defineAppConfig from @rise-x/apps-sdk/rsbuild
 │                          # (the MF contract lives in the preset, not here)
@@ -213,8 +213,9 @@ That gives you exactly one correct way to handle an id you don't have:
 If you need an id you don't have, **ask the user**, or look it up in that
 ecosystem with the Rise-X MCP (`list_flows`, `list_asset_types`, `list_agents`
 against the server for that environment — `rise-x-test` for test, `rise-x` for
-production). Discovery per environment is the whole reason ids are keyed this
-way.
+production). The plugin ships those two servers only, so staging ids come from
+the user or the staging shell, not from an MCP lookup. Discovery per environment
+is the whole reason ids are keyed this way.
 
 Fill `label` and `description` while you are there. They are optional to the
 parser and not optional in practice: they are what ecosystem management and Ask
@@ -259,7 +260,9 @@ so there is nothing to add (an app still on a hand-written webpack config adds
 `new RiseAppManifestPlugin()` from `@rise-x/apps-sdk/webpack` instead). It
 resolves the manifest for **one** environment — `APP_ENV`, default `test` — and
 emits the flat, single-environment result as `dist/rise-x-app.json`, so it rides
-the bundle zip. Ids for other environments never ship. The build fails, naming
+the bundle zip. That emitted file carries a single `environment` (singular) plus
+the resolved dependencies, while the source manifest is the one that lists
+`environments`. Ids for other environments never ship. The build fails, naming
 the alias and environment, on an unknown environment, a missing id, an
 unsupported `kind`, an id field that doesn't belong to the `kind`, a non-GUID or
 empty-GUID id, an alias or environment name that isn't a 1-64 character
@@ -326,7 +329,7 @@ npx @rise-x/apps-sdk scan --strict        # exit non-zero on any finding (CI)
 ```
   Hardcoded ids — declare these in rise-x-app.json:
 
-  920db6b4-9654-4839-a846-284d51ba1ef9  flow
+  77777777-7777-7777-7777-777777777777  flow
         alias?  riskMgmtFlow
         src/App.tsx:13  (RISK_MGMT_FLOW.id)
         src/App.tsx:14  (flowOriginId)
@@ -427,7 +430,10 @@ more:
 
 On the two bound `search()` methods `filter` is optional: the mandatory
 `flowOriginId` pin **is** the dependency, so the bound call adds it and
-`and`s your filter with it.
+`and`s your filter with it. The pin merges into a filter whose top level is
+already an `and` group; a filter whose top level is an `or` group or a single
+condition gets wrapped in a new `and`, which costs one of the five nesting
+levels.
 
 The agent surface binds only the agent-scoped operations. The chat operations
 keyed by a **chat** id (`getChat`, `renameChat`, `deleteChat`,
@@ -443,8 +449,8 @@ missing dependency surfaces before them: the accessors above throw a
 `getAppDependency` lists the declared aliases when the alias isn't one of them.
 
 **Prefetch (optional, needs a manifest).** It reads the declared dependencies,
-so it throws the same missing-manifest `ConnectorError` when none reached the
-bundle — don't `void` it in an app that may ship without one.
+and it no-ops when no manifest reached the bundle, so `void`ing it in an effect
+is safe even in an app that may ship without one.
 `prefetchAppDependencies(client)` from
 `@rise-x/apps-sdk/query` warms react-query with what each declared dependency
 needs: a flow or asset type gets its flow config and the layouts that config
@@ -828,9 +834,9 @@ zip, validates its **shape**, and stores the declarations. It does **not** look
 the ids up, so **the deploy does not catch a test bundle shipped to prod**: it
 succeeds, the wrong ids are stored, and the app breaks at runtime. The stored
 app exposes `dependencies` plus a `dependencyEnvironment` naming the build
-target the manifest claimed, both readable through the Rise-X MCP's `get_app` —
-`dependencyEnvironment` is advisory, and comparing it against the ecosystem is
-on you.
+target the manifest claimed. Both `deploy_app` and `get_app` return it through
+the Rise-X MCP. `dependencyEnvironment` is advisory, and comparing it against
+the ecosystem is on you.
 
 `pnpm validate` before the build is therefore the only check that sees every
 environment: it catches a missing or malformed id for the environment you are
@@ -845,10 +851,12 @@ Load the `rise-x-mcp` skill first (mandatory before any Rise-X MCP call), then
 pick the server for the target environment: **`rise-x-test` → test,
 `rise-x` → production. If the user doesn't name an environment, deploy to
 test** — most users want to try the app there first. Deploying requires the
-environment-orchestrator role. Build the bundle for the **same environment** you
-deploy to (`APP_ENV` above), and check it yourself: the backend only validates
-the shape of the zip's `rise-x-app.json`, so a bundle carrying another
-environment's ids deploys without complaint and fails in the running app.
+environment-orchestrator role. The plugin ships those two servers only, so there
+is no staging server to look ids up on or deploy through. Build the bundle for
+the **same environment** you deploy to (`APP_ENV` above), and check it yourself:
+the backend only validates the shape of the zip's `rise-x-app.json`, so a bundle
+carrying another environment's ids deploys without complaint and fails in the
+running app.
 
 1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
 2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
@@ -861,7 +869,10 @@ environment's ids deploys without complaint and fails in the running app.
    scaffolder's `--json` output reports it as `scope`.
 
 The result carries the app `id` and the canonical manifest (`remoteUrl`,
-`version`, `scope`, `deployedAt`). Confirm the app loads in the shell after.
+`version`, `scope`, `deployedAt`, `sizeBytes`), plus `dependencyCount`, the
+`dependencies` themselves when that count is non-zero, and
+`dependencyEnvironment` when the stored manifest named one. Confirm the app
+loads in the shell after.
 
 ### Fallback — deploy from the Apps UI (manual)
 
@@ -910,7 +921,8 @@ Whether you scaffolded a new app or modified an existing one, the user can't see
    (`/code-review --fix`) over the new app code and apply the fixes it
    confirms. If the skill isn't available, say so instead of skipping
    silently.
-4. **Validate the manifest, and read the scan warnings.** `pnpm validate` exits
+4. **Validate the manifest, and read the scan warnings.** The manifest,
+   `validate` and `scan` need `@rise-x/apps-sdk` >= 0.12.0. `pnpm validate` exits
    zero, meaning every environment in `rise-x-app.json` resolves — not just the
    one you build. A build checks its own target only, so this is what catches a
    dependency you added for one environment and not the others it declares. Skip
