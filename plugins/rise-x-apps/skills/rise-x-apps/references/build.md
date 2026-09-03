@@ -342,8 +342,9 @@ at every width.
 the frame is narrow — icon over label, safe-area padding, and a **More** sheet
 for the overflow past a handful of destinations. The SDK README's AppFrame
 section is the source of truth for that threshold and for `moreLabel`, which
-localises the label. On earlier SDKs there is no such rail and the bar is
-yours to build.
+localises the label. On earlier SDKs `AppRail` does not render one — on 0.9.0
+it exists but goes to a horizontal scrolling strip at narrow widths — so the
+bar is yours to build.
 
 ### Lifecycle hooks (`src/lifecycle.ts`)
 

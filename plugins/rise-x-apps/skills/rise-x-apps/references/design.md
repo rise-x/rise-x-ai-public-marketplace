@@ -251,7 +251,9 @@ Design rules (apply to the mock exactly as they apply to the app):
   destinations. The SDK README's AppFrame section owns that threshold; don't
   restate it. A mock has no props, so copy the rendered bar out of
   `data-screen-panel="mobile"` instead.
-  Before 0.11.0 there is no such rail and the bar has to be built by hand.
+  Before 0.11.0 the rail does not render one: on 0.9.0 `AppRail` exists but goes
+  to a horizontal scrolling strip at narrow widths, so the bottom bar has to be
+  built by hand.
 - **No user/account UI anywhere in the app** — no avatar, no user name, no
   ecosystem label, no sign-out. The host top bar owns identity, in both the
   old and the new host.
