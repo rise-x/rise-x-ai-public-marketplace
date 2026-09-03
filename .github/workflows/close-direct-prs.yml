@@ -24,8 +24,11 @@ name: close-direct-prs
 
 on:
   pull_request_target:
-    # edited catches a PR retargeted onto main after it was opened elsewhere.
-    types: [opened, reopened, edited]
+    # synchronize matters as much as opened: a PR already open into main when
+    # this landed never fires opened again, and without it a push plus an
+    # approval would merge outside any release. edited catches a retarget
+    # onto main after the fact.
+    types: [opened, reopened, edited, synchronize]
     branches: [main]
 
 permissions:

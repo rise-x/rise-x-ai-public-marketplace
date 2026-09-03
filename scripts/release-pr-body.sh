@@ -45,6 +45,10 @@ die() {
   exit 2
 }
 
+warn() {
+  printf 'release-pr-body.sh: warning: %s\n' "$*" >&2
+}
+
 [[ $# -ge 1 && $# -le 2 ]] || die "usage: $0 <release-branch> [<existing-body-file>]"
 branch="$1"
 existing_body="${2:-}"
@@ -55,20 +59,26 @@ git -C "$repo_root" rev-parse origin/main >/dev/null 2>&1 || die "origin/main do
 
 placeholder='_Replace this line with a short release summary. It is preserved when the changelog regenerates._'
 
-# Carry the hand-written block across. Everything outside the markers is
-# regenerated, so only this is read back from the existing body. awk rather
-# than sed: the block is multi-line and may itself contain markdown.
+# Carry the hand-written block across. Everything outside it is regenerated,
+# so only this is read back from the existing body.
 #
-# The markers are anchored to a whole line, which is how this script emits
-# them. Matching them as substrings let a note that merely mentioned the
-# closing marker end the block early and silently drop everything a person
-# had written after it.
+# The notes are defined as whatever precedes the generated changelog, with the
+# notes markers themselves dropped. Keying on the changelog marker rather than
+# on a matching pair of notes markers is what makes the three real bodies all
+# work: a regenerated one, one whose closing marker someone deleted while
+# editing (pairing would swallow the whole changelog into the notes, and stay
+# that way), and a hand-written one with no markers at all, which the release
+# PR starts life as because a person opens it (pairing would find no block and
+# silently replace their summary with the placeholder).
+#
+# Markers are anchored to a whole line, which is how this script writes them,
+# so a note that merely mentions one is text rather than a delimiter.
 notes="$placeholder"
 if [[ -n "$existing_body" && -f "$existing_body" ]]; then
   carried="$(awk '
-    /^[[:space:]]*<!-- \/notes -->[[:space:]]*$/ { inblock = 0 }
-    inblock                                       { print }
-    /^[[:space:]]*<!-- notes -->[[:space:]]*$/    { inblock = 1 }
+    /^[[:space:]]*<!-- changelog -->[[:space:]]*$/ { exit }
+    /^[[:space:]]*<!-- \/?notes -->[[:space:]]*$/  { next }
+                                                   { print }
   ' "$existing_body")"
   # A block holding only whitespace falls back to the placeholder, so an
   # accidentally emptied block does not silently strip the prompt.
@@ -112,6 +122,19 @@ version_at() { # $1=ref, empty for the working tree; $2=plugin
 # under (new plugin) - two true statements about the release.
 if ! changed_files="$(git -C "$repo_root" diff --name-only --no-renames "origin/main...HEAD")"; then
   die "cannot diff 'origin/main...HEAD'; no merge base? Fetch enough history that origin/main and HEAD share an ancestor"
+fi
+
+# The file list above is a three-dot diff, so its left side is the merge base.
+# Versions have to be read from that same commit. Reading them from main's tip
+# instead described a release against a point its file list never used: once a
+# hotfix moved main, a plugin the release did not touch rendered as a version
+# change, backwards ones included, and a plugin main had deleted rendered as
+# new. Both are headings the release-notes tooling reads literally.
+if ! merge_base="$(git -C "$repo_root" merge-base origin/main HEAD)"; then
+  die "cannot find the merge base of origin/main and HEAD"
+fi
+if [[ "$merge_base" != "$(git -C "$repo_root" rev-parse origin/main)" ]]; then
+  warn "origin/main has moved on since this branch left it, so these notes describe the release against the cut point. Merge main into the release branch before releasing."
 fi
 changed_plugins="$(printf '%s\n' "$changed_files" \
   | sed -n 's|^plugins/\([^/]*\)/.*|\1|p' | sort -u)"
@@ -202,7 +225,7 @@ emit_prs() { # $1=plugin name, empty for the Other section
   fi
   while IFS= read -r name; do
     [[ -z "$name" ]] && continue
-    old="$(version_at origin/main "$name")"
+    old="$(version_at "$merge_base" "$name")"
     new="$(version_at '' "$name")"
     if [[ -z "$new" ]]; then
       printf '## %s (removed)\n\n' "$name"
