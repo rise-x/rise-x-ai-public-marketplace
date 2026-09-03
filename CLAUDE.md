@@ -58,7 +58,8 @@ from it.
 1. **Cut.** Run the `create-release` workflow (Actions, **Run workflow**) with
    a `name` such as `2026-09`. It pushes `release/<name>` from `main`. Only one
    release branch may exist at a time; the workflow refuses otherwise.
-2. **Collect.** Open feature PRs against `release/<name>`, not `main`. Each
+2. **Collect.** Open feature PRs against `release/<name>`, not `main`; one
+   aimed at `main` is closed by `close-direct-prs` with instructions. Each
    still bumps the version of every plugin it changes, as usual. Open the draft
    PR `release/<name>` -> `main` yourself once the branch is ahead of `main`,
    using the command `create-release` printed; every push to the release branch
@@ -76,10 +77,19 @@ behind `<!-- notes -->` and `<!-- changelog -->` markers so release-notes
 tooling can parse it. Text inside the notes block is hand-written and survives
 regeneration; everything else is overwritten on every push.
 
-A fix that must ship on its own can still go straight to `main` as a normal
-PR. Merge `main` into the open release branch afterwards, and re-bump any
-plugin whose version now collides. Until you do, the release PR's version
-check compares against a `main` the branch has not caught up with.
+`main` accepts pull requests from `release/*` and `hotfix/*` only.
+`close-direct-prs` closes anything else and comments with the branch to
+retarget onto, so a feature cannot reach customers without going through a
+release. It is a guardrail rather than a gate, because a ruleset cannot
+restrict which head branch opens a PR; it reacts on open, reopen, and a
+retarget onto `main`.
+
+A fix that cannot wait for the release goes on a `hotfix/*` branch and PRs
+into `main` from there. That is the sanctioned way past the release branch,
+not an exception to the rule. Afterwards merge `main` into the open release
+branch and re-bump any plugin whose version now collides. Until you do, the
+release PR's version check compares against a `main` the branch has not
+caught up with.
 
 Release-blocking dependencies:
 
@@ -153,6 +163,12 @@ Future known-benign hits specific to one plugin belong in that plugin's own
 ## Process
 
 Use conventional commits standard. Never commit directly to `main` — a ruleset requires a PR, code-owner
-review, and a passing `validate` check. While a release branch is open, feature
-PRs target it rather than `main` (see "Release process"). PRs opened from outside the org are
+review, and a passing `validate` check. Only `release/*` and `hotfix/*` may
+open a PR into `main`; feature PRs target the open release branch, and
+anything else aimed at `main` is closed with a comment (see "Release
+process"). PRs opened from outside the org are
 auto-closed by workflow; external input arrives via issues, not PRs.
+
+Two workflows close PRs, for different reasons. `close-outside-prs` handles
+anything from a fork, `close-direct-prs` anything targeting `main` from the
+wrong branch. The second skips fork PRs so nobody gets two closing comments.
