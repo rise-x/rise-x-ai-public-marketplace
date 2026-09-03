@@ -8,7 +8,7 @@
 | "Add a feature to app <x>" / "Use shell user/env in my app" | Skip bootstrap. If the feature adds or changes UI, design phase first (`references/design.md`, mock → approval); then edit files under the app's `src/` using the patterns below. |
 | "Wire installation behaviour" / "Migrate data on update" | Edit the app's `src/lifecycle.ts`. |
 | "Build/deploy the app" | `pnpm build` in the app folder, then deploy via the Rise-X MCP (default: **test**) — see Build and deploy. |
-| "Make the app work offline" | `src/lifecycle.ts`'s `onOfflineDownload`, plus offline-aware reads/writes — see `references/offline.md`. |
+| "Make the app work offline" | `src/lifecycle.ts`'s `onOfflineDownload`, plus offline-aware reads/writes (SDK >= 0.12) — see `references/offline.md`. |
 
 ## Bootstrap a new app
 
@@ -133,6 +133,7 @@ import {
 // Domain connectors — typed wrappers over the raw clients (separate entry):
 import {
   flows, work, assets, agents, ConnectorError,
+  attachments, offline, // SDK >= 0.12 — the offline surface (references/offline.md)
   streamAgentReply, collectAgentReply, // consume agents.run/chat.send streams (accumulated)
 } from '@rise-x/apps-sdk/connectors';
 
@@ -152,8 +153,8 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 | `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `listRelated`, `getAudit` |
 | `assets` | typed records ("entities"/"things") | `types` (**asset-type flows**), `get`, `search`, `quickSearch`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
 | `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
-| `attachments` | work-attachment blobs | `getBlob`, `upload`, `delete` |
-| `offline` | connectivity, the offline queue, and downloads | see `references/offline.md` |
+| `attachments` | work-attachment blobs (SDK >= 0.12) | `getBlob`, `upload`, `delete` |
+| `offline` | connectivity, the offline queue, and downloads (SDK >= 0.12) | see `references/offline.md` |
 
 ```ts
 // Connectors (preferred) — flows discovery, work items, assets, configurable agents.
@@ -343,7 +344,7 @@ yours to build.
 
 ### Lifecycle hooks (`src/lifecycle.ts`)
 
-Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently — except `onOfflineDownload`, which is user-initiated, may run minutes, and where throwing **fails the download** (see `references/offline.md`). They run inside the shell page, so all the SDK accessors work from inside them.
+Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently — except `onOfflineDownload` (SDK >= 0.12), which is user-initiated, may run minutes, and where throwing **fails the download** (see `references/offline.md`). They run inside the shell page, so all the SDK accessors work from inside them.
 
 ```ts
 import type { InstallHook, UpdateHook, UninstallHook, OfflineDownloadHook } from '@rise-x/apps-sdk';
@@ -374,9 +375,9 @@ The scaffolded `src/bootstrap.tsx` already calls `createMockShell` when the stan
 error state locally — the content path (tables, charts, totals) never executes
 until the app is deployed into a host. That is how content-path rendering bugs
 reach production: standalone dev cannot see them, so their first real execution
-is in front of a user. The `offline` connector is the exception: its methods
-throw when the offline bridge isn't available — all but `offline.isOnline()`,
-which answers `true` there instead (`references/offline.md`).
+is in front of a user. The `offline` connector (SDK >= 0.12) is the exception: its methods
+throw `SHELL_TOO_OLD` when the offline bridge isn't available — all but
+`offline.isOnline()`, which answers `true` there instead (`references/offline.md`).
 
 **Seed `fixtures` so the real screens render before you deploy** (SDK >= 0.7.0).
 This matters most when building **outside the `rise-x-app` monorepo** — the
@@ -463,7 +464,9 @@ environment-orchestrator role.
 3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` —
    omit `app_id` for a brand-new app (a GUID is generated and returned); pass
    the existing GUID to release a new version. `version` comes from the app's
-   `package.json` and must be unique per app — bump it every release.
+   `package.json` and must be unique per app — bump it every release (the
+   enforcement is narrower than the practice — the rise-x-mcp plugin's
+   `managing-apps.md` spells it out).
    `app_scope` is snake_case and **must match the `name` set by the app's
    webpack `ModuleFederationPlugin`**.
    `feature_flags` is an optional `dict` of app feature flags, e.g.

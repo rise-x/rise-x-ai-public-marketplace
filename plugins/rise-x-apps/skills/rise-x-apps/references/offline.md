@@ -13,14 +13,16 @@ their argument traps, the `onOfflineDownload` lifecycle hook, and which `@rise-x
 offline behaviour needs.
 
 Verified against `@rise-x/apps-sdk` **0.12.0** (bridge protocol v4) — the release the offline SDK
-surface documented here lands in. Before telling anyone they can install it, confirm that version
-has shipped (`npm view @rise-x/apps-sdk version`); where a claim is version-sensitive, the text
-says so.
+surface documented here lands in, and **not yet published to npm at the time of writing**. Before
+telling anyone they can install it, confirm it has shipped (`npm view @rise-x/apps-sdk version`);
+where a claim is version-sensitive, the text says so.
 
-Not needed for an app that only wants a "you're offline" banner for UX copy — `offline.isOnline()`
-covers that alone (§6). Not needed while merely scaffolding a new app — that's the scaffold
-(`references/build.md`); come back to this reference once the scaffold exists and the plan asks for
-offline support specifically.
+Not needed for an app that only wants a "you're offline" banner for UX copy — the browser's own
+`window` `online`/`offline` events cover that alone (§6; `offline.isOnline()` is the synchronous
+read inside the handler, and on a host with no offline support it answers `true` rather than
+throwing — §5 — so the events, not the method, are the trigger). Not needed while merely
+scaffolding a new app — that's the scaffold (`references/build.md`); come back to this reference
+once the scaffold exists and the plan asks for offline support specifically.
 
 Offline support also requires a platform release that carries it. On an older host, the offline
 connector methods throw `ConnectorError("SHELL_TOO_OLD", …)` and the app card shows no "Make available
@@ -81,9 +83,9 @@ disables offline silently rather than erroring:
   promised offline (drives the "Make available offline" card). Set at deploy time — §2.
 
 An app that both reads and writes offline needs both flags set: the app flag on its own manifest, the
-flow flag on every flow it depends on. Neither bag is `flowFeatures` — that's a separate, often-empty
-bag used for unrelated per-flow toggles (e.g. barcode scanning); patching it instead of `featureFlags`
-silently leaves offline disabled with no error pointing at the mistake.
+flow flag on every flow it depends on. Neither bag is `flowFeatures` — that's a separate bag for
+unrelated per-flow toggles (`createAndDuplicateWork`, `leftPanel`, the calendar board, …); patching
+it instead of `featureFlags` silently leaves offline disabled with no error pointing at the mistake.
 
 Three rules govern everything past this point; each is expanded where it's actually used, not here:
 
@@ -164,12 +166,14 @@ merge per-field, so a non-null `featureFlags` wins wholesale and any seeded key 
 dropped — so read what is already in it and send it complete. One more reach limit: the runtime reads
 the flag from each work's **own pinned flow version**, and publishing a new version does not move
 already-open works by default — a flag change reaches works created after the publish, not the ones
-already open.
+already open. Existing works are not unreachable: `publish_flow` with `publish_mode="UpdateOpenItems"`
+migrates open works to the new version (`managing-flows.md` documents the trade-offs).
 
 **Quick submit is a task-level switch, not a per-action one.** `quickSubmit` lives on the `panelConfig`
 of a step/task in the flow config document, and the shell's toolbar checks it once per task — not per
 action; the clicked action's own config is never consulted by that gate. There is no flow-builder UI
-control for it today, so it is set on the flow document directly. `quickSubmit` is a client-side
+control for it today, and no `rise-x-mcp` tool writes a step's `panelConfig` either — it is set on
+the flow document directly by a platform admin, so ask for it rather than hunting for a tool. `quickSubmit` is a client-side
 contract — the server never reads it (verified against the shell's submit path). The work page
 auto-submits when the task is quick-submit, but routes a non-quick-submit task through a
 recipient-picker drawer, and the only guard against an empty recipient list lives in that drawer's
@@ -289,7 +293,7 @@ What your app experiences, function by function:
 `work.get()` also maps the work's attachments — `attachments: { id, fileName, title, path,
 mimeType }[]` — which is what the attachments part of §5 reads from.
 
-**Every other read is network-only and throws offline** — `work.list`, `work.search`, `work.iterate`, `work.listRelated`, `work.getAudit`, `flows.list`, `flows.get`, and `flows.findTask` (which calls `flows.list`). Only the six rows above have a cache branch, and there is no `source` option to force one either way.
+**Every other read is network-only and throws offline** — `work.list`, `work.search`, `work.iterate`, `work.listRelated`, `work.getAudit`, `flows.list`, `flows.get`, and `flows.findTask` (which calls `flows.list`). Only the six rows above have a cache branch, and there is no `source` option to force one either way. (The exported helpers `findTaskIn` / `flattenLayoutFields` are pure functions over data you already hold — connectivity-free, so they belong to neither list.)
 
 **The `@rise-x/apps-sdk/query` hooks follow this same ladder — from 0.12.** `useWork`, `useWorkData`,
 `useFlowConfig`, `useFlowLayout` and the rest run these same connector reads as react-query
@@ -334,7 +338,8 @@ downloaded**, with nothing your app has since queued folded in. `listQueuedWorkO
 carries each queued operation's `payload` as the app queued it (its shape varies by `kind` — a
 `dataUpdate` carries `{ id, originId, path, operation, sectionId, value }`, where the payload's `id`
 is the update's own id — distinct from the operation row's `id` — and `operation` is the same name
-vocabulary `queueWorkDataUpdate` accepts). So an app can derive what is pending from the queue itself
+vocabulary `queueWorkDataUpdate` accepts; `originId`/`sectionId` are as **stored** — the shell fills
+them in when the recommended call omitted them, §5). So an app can derive what is pending from the queue itself
 — no separate state, and nothing to reconcile: the shell hands out only still-queued items (a synced
 item stops appearing; the `isSynced` field on the row is the raw outbox flag and reads `false` here),
 so the derivation falls back to the server's value on its own. Note the payload stores the write's
@@ -376,7 +381,9 @@ export function QtyField({ workId, dataPath }: { workId: string; dataPath: strin
   const [draft, setDraft] = useState<string | null>(null); // null = not editing
 
   // The server value is an ASYNC read, so it belongs in an effect — work.getData() inside a render
-  // expression is the async-state bug the example above exists to prevent. The overlay on top of it
+  // expression is the async-state bug the example above exists to prevent. (useWorkData from
+  // @rise-x/apps-sdk/query is this effect, prebuilt, and behaves the same offline from 0.12 —
+  // build.md's default; the hand-rolled shape here is for non-hook contexts.) The overlay on top
   // is synchronous, which is why only one of the two needs state at all.
   useEffect(() => {
     let alive = true;
@@ -395,8 +402,9 @@ export function QtyField({ workId, dataPath }: { workId: string; dataPath: strin
     if (writeMode === "queued") {
       offline.queueWorkDataUpdate({ workId, dataPath, value });
     } else {
-      // originId from app config, never from a work read: that read is a network call (§4's
-      // ladder) and must not sit between the writeMode read and the write it routes (§5).
+      // originId from app config here; a work-read fallback is allowed (§5) but must complete
+      // BEFORE the writeMode read above — it is a network call (§4's ladder) and must not sit
+      // between that read and the write it routes.
       await work.patchData(workId, { originId: FLOW_ORIGIN_ID, path: dataPath, value });
     }
     setTick((t) => t + 1);
@@ -412,7 +420,18 @@ export function QtyField({ workId, dataPath }: { workId: string; dataPath: strin
       <input
         value={draft ?? String(shown ?? "")} // the draft wins, so a re-read can't clobber typing (§6)
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => { if (draft === null) return; void commit(draft); setDraft(null); }}
+        onBlur={async () => {
+          if (draft === null) return;
+          try {
+            await commit(draft);
+            setDraft(null); // only a settled write releases the draft
+          } catch (e) {
+            // The direct branch throws on failure (§5) — keep the draft so the input is not
+            // snapped back to the stale value, and surface it: swallowing here is the silent
+            // success §3 warns against (§11 wraps the identical call the same way).
+            console.error("write failed", e);
+          }
+        }}
       />
       {pending.hasPending && <span> pending sync</span>}
     </label>
@@ -427,6 +446,12 @@ attachment uploads/deletions are their own kinds (§7), not writes to `$.attachm
 as the pending state holds for plain value writes — `queueWorkDataUpdate`'s default; a queued
 `push`/`addToSet` payload carries the added item, not the resulting array, so if your app passes
 `operation` (§5), branch on `payload.operation` in the derivation too.
+
+One precondition the constant hides: `FLOW_ORIGIN_ID` stands in for the work's own `flowOriginId`,
+which holds exactly when the app patches works of its own downloaded flow. A work that came from
+anywhere else — an asset draft from `assets.startEdit`, a work opened cross-flow — carries a
+different `flowOriginId`, and the write needs that one (off the `WorkDetail` you already hold, e.g.
+`created.flowOriginId` right after a create — no extra read).
 
 An app that prefers a hand-kept overlay (its own state written at queue time) is free to keep one —
 that variant needs reconciliation: clear a work's entries when `getWorkSyncStatus(workId).allSynced`
@@ -448,6 +473,8 @@ connector does this feature-detection for you, so don't probe the host for offli
 ### Route every write by `writeMode`, read fresh at the moment of the write
 
 ```ts
+// Fragments from inside your write path — FLOW_ORIGIN_ID is app config (§3); workId, dataPath and
+// value are whatever is in scope at the call site.
 // FLOW_ORIGIN_ID is app config (§3). patchData needs an originId and the queued call defaults it,
 // so taking it from config keeps the queued branch network-free — resolving it from the work is a
 // network read that throws offline with nothing cached (§4's ladder), which would gate a queued
@@ -514,7 +541,9 @@ back out, so §4's overlay derivation *should* branch on it — the helper shipp
 `payload.value` and leaves that branch to you. Most apps never pass it — set is the write layout
 components make.
 
-**The task-node argument.** Every queue method takes the same optional `sectionId`, authorized against a
+**The task-node argument.** The four work-scoped queue methods take the same optional `sectionId`
+(`queueWorkCreation` is the exception — no work exists yet, its args are just `{ flowId,
+targetTaskName, workCode? }`), authorized against a
 node of the work's step tree: `work.steps` (steps) → `step.steps` (tasks) → `task.steps` (action
 sets). The id it wants is the **task** node's; the plausible-but-wrong value is that task's parent
 **step** id, which produces writes the server rejects or misattributes. (`activeStepId` — the step, not
@@ -583,7 +612,8 @@ id may already be gone. Guard that read with this file's own idiom rather than d
 `const snapshot = await work.get(workId)`, then `if (!snapshot) throw`, and only then
 `snapshot.actions`. Collapsing it to `?? []` turns §4's only meaning for `null` here — the work does
 not exist — into "this work has no actions", and the reader meets that as the `actionId` throw above
-instead of as a missing work.
+instead of as a missing work. (The one shape that legitimately skips the guard is a read chained off
+your own just-completed create, where the id cannot be stale.)
 
 - `recipients?` overrides only `to`/`cc` per destination. Supply it **only** when the flow config
   resolves nobody and the action still needs a recipient — the case the work page shows a picker
@@ -822,7 +852,9 @@ Full deploy mechanics — zipping the bundle, the exact MCP calls — are in
 - Zip the **contents** of `dist/`, not the folder — `remoteEntry.js` must sit at the archive root.
 - Confirm the offline flags actually shipped: pass `feature_flags` on `deploy_app` and read the
   manifest back (`get_app` — the flags echo as `featureFlags`), and on every flow the app depends on,
-  the flow-level flag plus quick submit (§2). A deploy that misses one ships an app that looks normal
+  the flow-level flag plus quick submit (§2). Later releases inherit the stored flags when
+  `feature_flags` is omitted (§2 — only a passed dict replaces them); it is the FIRST deploy that
+  must carry the app flag. A deploy that misses one ships an app that looks normal
   and silently is not offline-capable.
 - On an offline-enabled app, a version bump makes every offline user's downloaded copy `stale`; the
   card's update path (download the new version, then prefix-delete the old one) is one click, but a

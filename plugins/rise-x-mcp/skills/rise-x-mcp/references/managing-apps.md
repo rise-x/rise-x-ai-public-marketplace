@@ -77,10 +77,7 @@ cleaned, but redeploying with the same `app_id` restores the app.
 
 ## Validation rules (checked client-side before anything is consumed)
 
-- `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app — bump every release. The platform
-  enforces this narrowly: the 409 fires only when the string exactly equals the app's currently
-  live version, with no semver ordering or history check. Don't lean on that; reusing an older
-  version string is accepted and leaves a confusing registry.
+- `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app — bump every release.
 - `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `todo_app`). Must equal the
   `ModuleFederationPlugin` `name` the app was built with, or the shell can't mount it.
 - `name` — non-empty.
@@ -95,8 +92,10 @@ cleaned, but redeploying with the same `app_id` restores the app.
    (`app_<slug_with_underscores>` for scaffolded apps). Wrong scope = manifest loads, app never
    mounts.
 3. **Version reuse** — the platform rejects a duplicate version per app; `list_apps` shows the
-   current one to bump from — strictly, the 409 fires on an exact match with the currently live
-   version.
+   current one to bump from. The platform enforces this narrowly: the 409 fires only when the
+   string exactly equals the app's currently live version, with no semver ordering or history
+   check. Don't lean on that; reusing an older version string is accepted and leaves a confusing
+   registry.
 4. **Deploy failed? The staged bundle survives.** Neither client-side validation errors nor
    platform failures (409 duplicate version, 403 missing role, 404 unknown app id) consume the
    upload — fix the manifest field (e.g. bump `version` after a 409) and call `deploy_app` again
