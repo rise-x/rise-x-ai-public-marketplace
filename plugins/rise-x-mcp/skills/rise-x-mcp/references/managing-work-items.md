@@ -43,7 +43,6 @@ Get a work item by its GUID.
 
 - `format="summary"` (default) — `id`, `workCode`, `name`, `displayName`, `flowId`, `flowOriginId`, `flowDisplayName`, `activeStepId`, `activeStepName`, `status`, `statusLabel`, `statusColor`, `flowState`, `workState`, `workStateName`, `currentState`, `flowType`, `roleName`, `canEdit`, `canDelete`, `canDelegate`, `attachments`, `createdDate`, `lastModified`, `createdBy`, `lastModifiedBy`, `data`, `assignedUsers`, `roles`, `relationships`, `tasks`, `globalActions`, `submitErrorRequestIds`, and `actions` (each `{stepName, stepId, stepDisplayName, canExecute, invitation, events: [{id, eventName, name, displayName}]}`). Adds an `omitted` note listing the dropped top-level keys that carried a value — typically `steps`, `users`, `chains`, `cardLayout`, `companies`, `company`, `lastModifiedTicks`, `schemaVersion`, `workStateColor` — and ends with "pass format='full' to include".
 - `format="full"` — the raw v3 document, `steps` and all, returned directly rather than wrapped in a mutation envelope. Pass this when you need something the `omitted` note flagged.
-- `format="standard"` and `format="compact"` still work as deprecated aliases for `full` and `summary` and log a warning.
 
 Key fields in the summary response:
 - `id` — work item GUID
