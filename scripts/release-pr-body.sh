@@ -58,6 +58,16 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gh >/dev/null 2>&1 || die "gh is required"
 git -C "$repo_root" rev-parse origin/main >/dev/null 2>&1 || die "origin/main does not resolve; fetch it first"
 
+# The git half of this script reads the checked-out tree; the PR half reads
+# $branch. Disagreeing produces a changelog with one branch's plugin sections
+# and another's PR list, which looks entirely plausible, so refuse instead.
+# A detached HEAD reports no branch and is not a mismatch: it is one of the
+# shapes a CI checkout leaves behind.
+current_branch="$(git -C "$repo_root" symbolic-ref --quiet --short HEAD || printf '')"
+if [[ -n "$current_branch" && "$current_branch" != "$branch" ]]; then
+  die "checked out '${current_branch}' but asked about '${branch}'; check out '${branch}' first, or the plugin sections and the PR list would describe different branches"
+fi
+
 placeholder='_Replace this line with a short release summary. It is preserved when the changelog regenerates._'
 
 # Carry the hand-written block across. Everything outside it is regenerated,
