@@ -63,11 +63,23 @@ git -C "$repo_root" rev-parse origin/main >/dev/null 2>&1 || die "origin/main do
 # The git half of this script reads the checked-out tree; the PR half reads
 # $branch. Disagreeing produces a changelog with one branch's plugin sections
 # and another's PR list, which looks entirely plausible, so refuse instead.
-# A detached HEAD reports no branch and is not a mismatch: it is one of the
-# shapes a CI checkout leaves behind.
+#
+# Something has to vouch for the tree: either the branch name, or, when HEAD
+# is detached, the commit. Detachment is one of the shapes a checkout leaves
+# and so is not itself wrong, but a detached HEAD still has to be the tip of
+# the branch being described, or it is the same mismatch with no name on it.
 current_branch="$(git -C "$repo_root" symbolic-ref --quiet --short HEAD || printf '')"
-if [[ -n "$current_branch" && "$current_branch" != "$branch" ]]; then
-  die "checked out '${current_branch}' but asked about '${branch}'; check out '${branch}' first, or the plugin sections and the PR list would describe different branches"
+if [[ -n "$current_branch" ]]; then
+  [[ "$current_branch" == "$branch" ]] || die \
+    "checked out '${current_branch}' but asked about '${branch}'; check out '${branch}' first, or the plugin sections and the PR list would describe different branches"
+else
+  branch_sha="$(git -C "$repo_root" rev-parse --verify --quiet "refs/heads/${branch}" \
+    || git -C "$repo_root" rev-parse --verify --quiet "refs/remotes/origin/${branch}" \
+    || printf '')"
+  [[ -n "$branch_sha" ]] || die \
+    "HEAD is detached and '${branch}' resolves to nothing here, so the tree cannot be checked against it; check out '${branch}'"
+  [[ "$branch_sha" == "$(git -C "$repo_root" rev-parse HEAD)" ]] || die \
+    "HEAD is detached at a commit that is not the tip of '${branch}'; the plugin sections would come from this tree and the PR list from the branch"
 fi
 
 placeholder='_Replace this line with a short release summary. It is preserved when the changelog regenerates._'
