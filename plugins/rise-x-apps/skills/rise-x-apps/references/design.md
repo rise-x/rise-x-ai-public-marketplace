@@ -19,8 +19,9 @@ Which sections apply:
 is never skipped, on any of those paths.
 
 For a new app the output is: a problem statement the user confirmed, a list
-of integration targets (origin ids), an **explicitly approved** HTML design
-mock, and the material for the app's `APP.md` (personas + user journeys).
+of integration targets (per-environment origin ids, ready for
+`rise-x-app.json`), an **explicitly approved** HTML design mock, and the
+material for the app's `APP.md` (personas + user journeys).
 For changes to an existing app, the output is the approved mock plus the
 `APP.md` updates the change implies.
 
@@ -66,18 +67,37 @@ they land in `APP.md` and shape the mock below.
 Ask whether the app should integrate with existing **flows (workflows), assets,
 or agents**:
 
-- **Yes, existing ones** — discover the exact targets and record their
-  **origin ids** (`flowOriginId`, asset-type origin id, agent id); those go
-  into the app config at implementation time. Discover via the Rise-X MCP
-  (`list_flows`, `list_asset_types`, `list_agents`) or ask the user to point
-  at them.
+- **Yes, existing ones** — discover the exact targets and record their ids
+  (`flowOriginId` for a flow and for an asset type, `agentId` for an agent).
+  Discover via the Rise-X MCP (`list_flows`, `list_asset_types`,
+  `list_agents`) or ask the user to point at them. All three land in the
+  app's `rise-x-app.json` at scaffold
+  time — one alias per target, with a `label` and `description`, and ids
+  **per environment**: the same flow has a different origin id on each
+  environment. Declare only the environments you have real ids for: a new app
+  starts at test only, and every dependency needs an id for every environment
+  listed in `environments`. Collect another environment's ids when the app
+  ships there, per MCP server (`rise-x-test` → test, `rise-x` → production).
+  The plugin ships no staging server, so staging ids come from the user or the
+  staging shell. An agent is declared with
+  `kind: "agent"` and its id field is `agentId`, not `flowOriginId`; an agent
+  is created per ecosystem with no promotion path, so its id always differs
+  between environments and the per-environment block is mandatory. See
+  `references/build.md` §App dependencies.
 - **Nothing suitable exists yet** — ask whether to **build the flow / assets /
   agent first using the Rise-X MCP**, so the app has something real to
   integrate with, then come back here. For an agent, create the configuration
   with the agent-management tools (`create_agent` — the `rise-x-mcp` skill's
   managing-agents reference covers it): the returned `id` **is** the agent id
-  the app integrates against — record it.
+  the app integrates against — record it, per environment.
 - **No integration** — fine; note it and move on.
+
+**What an agent dependency does and doesn't buy.** Declaring it records the
+agent for ecosystem management and Ask Diana, and gives app code a bound
+surface (`deps.<alias>.agent.run()` and friends). It does **not** let Diana
+invoke the agent: there is no MCP tool that runs or spawns an agent, so the
+agent only runs when the app's own code calls it. Don't promise the user
+Diana-driven agent runs.
 
 If the Rise-X MCP isn't available (the `rise-x-mcp` plugin isn't installed or
 its servers aren't connected), don't invent ids: either ask the user to
@@ -332,5 +352,6 @@ inlined perfectly — that is the missing preflight, not a missing stylesheet,
 and the fix is the reset in the mock's own `<style>` block, not re-inlining.
 
 When approved, move to `references/build.md` — carry the approved mock, the
-screen list, the integration origin ids, and the persona/journey material
-(for `APP.md`) into implementation.
+screen list, the integration targets (per-environment origin ids, destined
+for `rise-x-app.json`), and the persona/journey material (for `APP.md`) into
+implementation.
