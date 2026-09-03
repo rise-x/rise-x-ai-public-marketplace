@@ -126,9 +126,11 @@ states the gate; everything else about the manifest points here.
 app depends on is declared in `rise-x-app.json` at the app project root — one
 stable **alias** per target, and one id **per environment**, so the same source
 builds for every environment the app ships to. App code consumes them through
-`deps.<alias>`. Only flows the *user* picks at runtime (a search box, a flow
-selector) keep going through the generic connectors with a ref — those stay
-fully supported; nothing is deprecated.
+`deps.<alias>`, which is the recommended way to reach any Rise-X object the app
+knows at authoring time. The generic connectors with a ref cover what a
+dependency can't express: flows the *user* picks at runtime (a search box, a
+flow selector), discovery (`flows.list`, `assets.types`), and the operations no
+bound surface carries. Those stay fully supported; nothing is deprecated.
 
 Below is a *mature* manifest, from an app that ships to all three environments —
 it shows the full shape, not the starting point. A new app declares only `test`
@@ -377,7 +379,7 @@ import {
   type BoundFlowDependency,
   type BoundAssetTypeDependency,
   type BoundAgentDependency,
-} from '@rise-x/apps-sdk';
+} from '@rise-x/apps-sdk/dependencies';
 
 // Declare the app's aliases once for typed access without narrowing:
 interface AppDeps {
@@ -394,6 +396,10 @@ const open = await deps.riskFlow.work.search({    // pre-bound connector call
 });
 const vessels = await deps.vesselType.assets.list({ pageSize: 50 });
 ```
+
+These names live on `@rise-x/apps-sdk/dependencies`, not the root, for the
+same reason `/query` does: the subpath binds the connector layer, so an app
+that never declares a dependency doesn't bundle it.
 
 The resolved entries are a union over `kind`, so an unnarrowed `deps.<alias>`
 carries only the fields its kind has — `flowOriginId` on a flow or asset type,
@@ -465,13 +471,12 @@ import {
   getShellApi,           // legacy Diana axios instance
   getShellApiV4,         // typed: 'apps' | 'work' | 'config' | 'attachment' | 'asset'
   getShellAi,            // rise-x-ai gateway handle (bridge v3+), or null
-  // Declared app dependencies (rise-x-app.json) — see App dependencies above for the SDK gate
-  useAppDependencies,
-  getAppDependency,
-  getAppDependencies,
   // Standalone dev
   createMockShell,
 } from '@rise-x/apps-sdk';
+
+// Declared app dependencies (rise-x-app.json): see App dependencies above for the SDK gate (separate entry):
+import { useAppDependencies, getAppDependency, getAppDependencies } from '@rise-x/apps-sdk/dependencies';
 
 // Domain connectors — typed wrappers over the raw clients (separate entry):
 import {
@@ -487,7 +492,12 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 - Hooks (`useShell*`) subscribe to changes — use inside components when you want re-renders on user/env switch.
 - Accessors (`getShell*`) snapshot — use in event handlers, effects, non-React code (data stores, etc.).
 
-**API calls** — prefer the typed connectors from `@rise-x/apps-sdk/connectors`; fall back to `getShellApiV4(name)` for endpoints they don't cover. Never instantiate your own axios.
+**API calls** — work down this order and stop at the first rung that fits:
+
+1. **A declared dependency** — `deps.<alias>` (from `@rise-x/apps-sdk/dependencies`) for every flow, asset type, and agent the app knows at authoring time. Its bound surface carries the connector operations that take that ref, pre-filled, so the id never appears in a call site.
+2. **A query hook** — `@rise-x/apps-sdk/query` for data a component renders, passing `dep.flowOriginId` or `dep.agentId` as the ref. The bound surfaces return promises, so component fetches still go through the query layer.
+3. **A generic connector** — `@rise-x/apps-sdk/connectors` for what a dependency can't express: a ref the *user* picks at runtime, discovery (`flows.list`, `assets.types`), and the operations no bound surface carries (the chat-id ones: `getChat`, `renameChat`, `deleteChat`, `getChatMessages`).
+4. **`getShellApiV4(name)`** for endpoints no connector covers. Never instantiate your own axios.
 
 | Connector | Domain | Key methods |
 | --- | --- | --- |
@@ -868,8 +878,8 @@ manifest with the live `remoteUrl` and `module` (defaults to `./App`).
 
 - **Don't** bundle your own React. The scaffolder's `import: false` on react/react-dom/jsx-runtime is intentional. If you remove it, you'll get cross-React-instance hook crashes when the app mounts inside the shell.
 - **Don't** import shell internals. The contract is `@rise-x/apps-sdk` — full stop. If you need something the SDK doesn't expose, propose it as an SDK addition in a separate PR (or request it from the Rise-X team) — don't reach into the host.
-- **Don't** wire your own auth or call backend services directly. Go through the connectors (`@rise-x/apps-sdk/connectors`) or `getShellApiV4`.
-- **Don't** put a flow, asset-type, or agent GUID literal in app source. Declare it in `rise-x-app.json` and read it through `useAppDependencies()` (§App dependencies); the generic connectors with a ref are for flows the user picks at runtime.
+- **Don't** wire your own auth or call backend services directly. Go through a declared dependency first (`deps.<alias>`), then the query hooks, then the connectors (`@rise-x/apps-sdk/connectors`), and only then `getShellApiV4` (§Runtime APIs).
+- **Don't** put a flow, asset-type, or agent GUID literal in app source. Declare it in `rise-x-app.json` and read it through `useAppDependencies()` (§App dependencies); the generic connectors with a ref are for what a dependency can't express, starting with flows the user picks at runtime.
 - **Don't** hand-roll UI or pull in another component library — the app UI is built exclusively from `@rise-x/apps-sdk/ui` (see UI components).
 - **Don't** put navigation in a top bar. The host already renders top-bar nav above the app; app navigation belongs in a left sidebar/rail.
 - **Don't** assume the user or environment is non-null inside lifecycle hooks — accept the typed `ctx` and check.
