@@ -38,11 +38,12 @@ This is **Step 1** of the work creation pattern:
 2. `update_work_data(workId, ...)` → set field values (repeat as needed)
 3. `submit_work(workId, eventName, stepName)` → advance to the next step
 
-### `get_work(id: str, response_format: str = "slim")`
+### `get_work(id: str, format: str = "slim")`
 Get a work item by its GUID.
 
-- `response_format="slim"` (default) — identity, flow ids, status/state (`statusLabel`, `statusColor`, `flowState`, `workStateName`, `currentState`), assigned users, roles, attachments, `data`, `relationships`, `tasks`, `globalActions`, `createdBy`/`lastModifiedBy` stubs, and `actions` (each `{stepName, stepId, stepDisplayName, canExecute, invitation, events: [{id, eventName, name, displayName}]}`). Adds an `omitted` note listing the dropped top-level keys (`steps`, `users`, `chains`, `cardLayout`, `companies`, `company`, …) so you know what's missing.
-- `response_format="full"` — the raw v3 document, `steps` and all. Pass this when you need something the `omitted` note flagged.
+- `format="slim"` (default) — `id`, `workCode`, `name`, `displayName`, `flowId`, `flowOriginId`, `flowDisplayName`, `activeStepId`, `activeStepName`, `status`, `statusLabel`, `statusColor`, `flowState`, `workState`, `workStateName`, `currentState`, `flowType`, `roleName`, `canEdit`, `canDelete`, `canDelegate`, `attachments`, `createdDate`, `lastModified`, `createdBy`, `lastModifiedBy`, `data`, `assignedUsers`, `roles`, `relationships`, `tasks`, `globalActions`, `submitErrorRequestIds`, and `actions` (each `{stepName, stepId, stepDisplayName, canExecute, invitation, events: [{id, eventName, name, displayName}]}`). Adds an `omitted` note listing the dropped top-level keys that carried a value — typically `steps`, `users`, `chains`, `cardLayout`, `companies`, `company`, `lastModifiedTicks`, `schemaVersion`, `workStateColor` — and ends with "pass format='full' to include".
+- `format="full"` — the raw v3 document, `steps` and all, returned directly rather than wrapped in a mutation envelope. Pass this when you need something the `omitted` note flagged.
+- `format="standard"` and `format="compact"` still work as deprecated aliases for `full` and `slim` and log a warning.
 
 Key fields in the slim response:
 - `id` — work item GUID
@@ -79,7 +80,7 @@ Response rows are **projected** to the useful fields only (cardLayout, per-role 
 - Permissions: `canEdit`, `canDelete`, `canDelegate`, `roleName`
 - Audit: `createdBy` / `lastModifiedBy` (each `{id, email, displayName}`), `createdDate`, `lastModifiedDate`
 
-For the full record (form data, status, actions, etc.), call `get_work(id)`; for `cardLayout`, per-role user lists, `chains`, or `steps`, call `get_work(id, response_format="full")`.
+For form data, status and actions, call `get_work(id)` (slim); for `cardLayout`, per-role user lists, `chains`, or `steps`, call `get_work(id, format="full")`.
 
 ### `search_works(filter, sort, fields, page, page_size, enforce_fields, include_total_count)`
 **Advanced Work search with filter tree, sort, projection, and paging — including dynamic `data.*` fields.** This is the right tool whenever the user describes a filter, a sort, or wants specific fields. Full reference in `references/advanced-search.md`. Quick template:

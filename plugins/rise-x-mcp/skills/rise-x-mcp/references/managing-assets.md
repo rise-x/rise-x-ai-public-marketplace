@@ -67,9 +67,9 @@ Step 2: Set field values (repeat per field)
   )
 
 Step 3: Finalize
-  # Before submitting, call get_work(workId, response_format="full") to find the
+  # Before submitting, call get_work(workId, format="full") to find the
   # actual submit step & event — slim's actions[] already covers most flows (see
-  # Common Mistakes #7), but this fallback still needs steps[], which is dropped
+  # Common Mistakes #8), but this fallback still needs steps[], which is dropped
   # by the default slim view.
   # Look inside steps[] for a nested step with displayName: "Submitted" and
   # name: "SubmitUntitledStep/Generated-..." — this full name is what you need
@@ -203,7 +203,7 @@ update_work_data("work-789", "$.vesselDetails.imoNumber", "set", "9876543", sect
 update_work_data("work-789", "$.vesselDetails.flagState", "set", "Panama", section_name="UntitledTask/Generated-xxx")
 
 # 6. Find the real submit step + event name, and the invitation payload
-get_work("work-789", response_format="full")
+get_work("work-789", format="full")
 # Inside steps[] find the nested step with displayName: "Submitted" and
 # name: "SubmitUntitledStep/Generated-yyy" — that is BOTH step_name and event_name.
 # Also grab actions[0].invitation to route to End.
