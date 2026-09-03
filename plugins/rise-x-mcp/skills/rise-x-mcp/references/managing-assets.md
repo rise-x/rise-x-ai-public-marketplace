@@ -22,7 +22,7 @@ Prefer `search_flows` (above), which returns the same fields (including `entityT
 Response: `[{"thingType": "vessel", "displayName": "Vessel", "assetId": "flow-guid", "flowOriginId": "origin-guid"}]`
 
 ### `get_asset_type_properties(flow_id: str)`
-Get field labels and dataPaths for an asset type. Takes the asset type's flow id (the `assetId` from `search_flows`/`list_asset_types`, not flowOriginId). `asset_id` still works as a deprecated alias — it logs a warning and is not an asset instance id.
+Get field labels and dataPaths for an asset type. Takes the asset type's flow id (the `assetId` from `search_flows`/`list_asset_types`, not flowOriginId). Do not pass an asset instance id.
 
 Response: `[{"Vessel Name": {"id": "comp-guid", "dataPath": "$.vesselDetails.vesselName"}}]`
 
