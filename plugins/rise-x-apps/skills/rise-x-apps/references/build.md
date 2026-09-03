@@ -453,9 +453,7 @@ manifest because a read that returns nothing would hide a bug,
 `prefetchAppDependencies` returns without doing anything when no manifest
 reached the bundle: it is a cache warm, so there is nothing to fail loudly
 about, and an app that ships without a manifest can keep the call. That is
-what makes `void`ing it in an effect safe (the SDK pins it in
-`query/__tests__/dependencies.test.ts`, "no-ops when the app declares no
-manifest").
+what makes `void`ing it in an effect safe, and an SDK unit test pins it.
 `prefetchAppDependencies(client)` from
 `@rise-x/apps-sdk/query` warms react-query with what each declared dependency
 needs: a flow or asset type gets its flow config and the layouts that config
