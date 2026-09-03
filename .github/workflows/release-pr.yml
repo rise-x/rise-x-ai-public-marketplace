@@ -69,6 +69,27 @@ jobs:
             exit 1
           fi
 
+          # Re-running an older run replays that run's commit while BRANCH
+          # still names the branch, so regenerating would overwrite the body
+          # with an older tree. Compare against the branch as it stands now.
+          # This covers the case whichever shape the checkout left behind, a
+          # detached HEAD or a local branch pinned to the stale commit, so it
+          # does not depend on knowing which.
+          if ! tip="$(git ls-remote origin "refs/heads/${BRANCH}" | cut -f1)"; then
+            echo "::error::cannot read the tip of ${BRANCH}"
+            exit 1
+          fi
+          head_sha="$(git rev-parse HEAD)"
+          if [[ -z "$tip" ]]; then
+            echo "${BRANCH} no longer exists on the remote; nothing to refresh." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$tip" != "$head_sha" ]]; then
+            echo "::notice::HEAD ${head_sha} is not the tip of ${BRANCH} (${tip}); skipping so a stale re-run cannot replace a newer body"
+            echo "Skipped: this run's commit is behind ${BRANCH}." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           # Fail closed: an empty count must not read as "a PR already exists",
           # which would skip the refresh silently.
           # --head matches on branch name alone, so a fork carrying the same

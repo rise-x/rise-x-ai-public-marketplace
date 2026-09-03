@@ -63,12 +63,20 @@ jobs:
 
           # Name the branch that is actually open, so the instructions below
           # can be pasted rather than translated.
-          if ! refs="$(gh api "repos/${REPO}/git/matching-refs/heads/release/" \
-                        --jq '[.[].ref | sub("^refs/heads/";"")] | join(" ")')"; then
+          # --paginate, because a single page would quietly omit branches and
+          # the count below is what decides whether the advice is trustworthy.
+          # One ref per line so pages flatten; a per-page join would leave one
+          # line each and only the first would be read.
+          if ! refs="$(gh api --paginate "repos/${REPO}/git/matching-refs/heads/release/" \
+                        --jq '.[].ref | sub("^refs/heads/";"")')"; then
             echo "::error::cannot list release branches"
             exit 1
           fi
-          read -ra branches <<< "$refs"
+          branches=()
+          while IFS= read -r line; do
+            [[ -n "$line" ]] && branches+=("$line")
+          done <<< "$refs"
+          listing="${branches[*]:-}"
 
           case "${#branches[@]}" in
             0)
@@ -87,7 +95,7 @@ jobs:
               # PR is still closed: the guard's job does not depend on the
               # count, and failing here would let a wrongly targeted PR stand
               # because of an unrelated problem with the repo's branches.
-              echo "::warning::${#branches[@]} release branches exist (${refs}); only one should be open at a time"
+              echo "::warning::${#branches[@]} release branches exist (${listing}); only one should be open at a time"
               list=""
               for b in "${branches[@]}"; do list+="\`${b}\`, "; done
               list="${list%, }"
