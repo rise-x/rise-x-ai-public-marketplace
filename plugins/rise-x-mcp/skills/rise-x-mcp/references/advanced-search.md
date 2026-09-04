@@ -147,7 +147,7 @@ await search_flows(filter={"field": "state", "operator": "equals", "values": ["D
 
 The simple-search query-string equivalent works the same way: `?status=Deleted` or `?state=Archived` opts out of the default exclusion.
 
-**Implementation detail (you don't need this to use the tools, but it explains some quirks).** Legacy MongoDB documents in this codebase store enum fields in two forms — sometimes as the BSON string (`"Deleted"`), sometimes as the underlying int (`2`). The server's default-exclusion filter matches BOTH forms, and so do caller-side `equals`/`notEquals`/`in`/`notIn` on the coerced enum fields (`status`, `flowState`, Flow `state`, `publishStatus`), so `status = "Deleted"` isolates int-form records as reliably as string-form ones. The other operators (`startsWith`, ranges) skip the enum parse.
+**Implementation detail (you don't need this to use the tools, but it explains some quirks).** Legacy MongoDB documents in this codebase store enum fields in two forms — sometimes as the BSON string (`"Deleted"`), sometimes as the underlying int (`2`). The server's default-exclusion filter matches BOTH forms, and so do caller-side `equals`/`notEquals`/`in`/`notIn` on the five coerced enum fields (named in the ⚠️ enum note under the Work table), so `status = "Deleted"` isolates int-form records as reliably as string-form ones. `startsWith` skips the enum parse; range operators are number/date only, so on an enum field they are a 400 rather than an unparsed match.
 
 ## Work Search and `data.*` Fields
 
@@ -356,10 +356,10 @@ The static whitelist for `search_flows`. Five string fields have closed value se
 |---|---|---|
 | `id`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy`, `flowId` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only. `flowId` is a domain alias for `id` (the source POCO declares `FlowId { get => Id; set { } }`) — the search layer exposes both as separate whitelist keys for symmetry with `IDianaFlowResource`-based filters, and both project to the same value. |
 | `name`, `normalisedName`, `displayName`, `description`, `uniqueName` | string | free-form. `normalisedName` is pre-uppercased for fast case-insensitive search. |
-| `state` | string (enum, PascalCase) | one of: `"Open"`, `"Active"`, `"Archived"`, `"Deleted"` (from `DianaFlowStatus`). Note: distinct from Work `status`. `"Deleted"` and `"Archived"` are **hidden by default** — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). |
+| `state` | string (enum, PascalCase) | one of: `"Open"`, `"Active"`, `"Archived"`, `"Deleted"` (from `DianaFlowStatus`). Note: distinct from Work `status`. `"Deleted"` and `"Archived"` are **hidden by default** — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). Matching rules: ⚠️ enum note under the Work table. |
 | `flowResourceType` | string (closed set, PascalCase) | one of: `"Work"`, `"Entity"`, `"User"`, `"Company"`. `"Entity"` = asset type; `"Work"` = workflow. `"User"` / `"Company"` are rare system flows. |
 | `entityType` | string | free-form — tag value from the flow's `Tags["EntityType"]` dictionary; the asset type's ThingType (e.g. `"vessel"`), the same value the MCP surfaces as `thingType`. Set only on `"Entity"` flows. |
-| `publishStatus` | string (enum, PascalCase) | one of: `"Draft"`, `"Published"`, `"Revised"`, `"Deleted"` (from `DianaPublishStatus`). A fifth value `"Publishing"` exists but is a transient/internal state — callers see one of the four listed values once the publish completes. |
+| `publishStatus` | string (enum, PascalCase) | one of: `"Draft"`, `"Published"`, `"Revised"`, `"Deleted"` (from `DianaPublishStatus`). A fifth value `"Publishing"` exists but is a transient/internal state — callers see one of the four listed values once the publish completes. Matching rules: ⚠️ enum note under the Work table. |
 | `group` | string | free-form — tag value from the flow's `Tags["Group"]` dictionary. |
 | `lastModified`, `created` | date | range / comparison ops supported |
 | `copiedFromId` | guid | the source flow this one was duplicated from (lineage tracking). |
