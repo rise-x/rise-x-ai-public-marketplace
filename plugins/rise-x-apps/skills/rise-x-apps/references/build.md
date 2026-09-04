@@ -871,21 +871,21 @@ running app.
 
 1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
 2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
-3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` —
+3. `deploy_app(upload_id, name, version, app_id?, description?, icon?, feature_flags?)` —
    omit `app_id` for a brand-new app (a GUID is generated and returned); pass
    the existing GUID to release a new version. `version` comes from the app's
    `package.json` and must be unique per app — bump it every release (the
    enforcement is narrower than the practice — the rise-x-mcp plugin's
-   `managing-apps.md` spells it out).
-   `app_scope` is snake_case and **must match the MF scope the preset derives
-   from the package name** (`@rise-x-apps/my-app` → `app_my_app`); the
-   scaffolder's `--json` output reports it as `scope`.
+   `managing-apps.md` spells it out). The server derives the Module
+   Federation scope from the `var <name>;` declaration in the zip's
+   `remoteEntry.js`.
    `feature_flags` is an optional `dict` of app feature flags, e.g.
    `{"isOfflineModeEnabled": true}` — what makes the shell offer "Make
    available offline" (see `references/offline.md`).
 
 The result carries the app `id` and the canonical manifest (`remoteUrl`,
-`version`, `scope`, `deployedAt`, `sizeBytes`), plus `dependencyCount`, the
+`version`, `scope`, `deployedAt`, `sizeBytes`) — `scope` is always the
+derived value, and that's what the shell uses — plus `dependencyCount`, the
 `dependencies` themselves when that count is non-zero, and
 `dependencyEnvironment` when the stored manifest named one. Confirm the app
 loads in the shell after.
@@ -903,7 +903,6 @@ Provide these values for the user to copy/paste into the dialog:
 | --- | --- | --- |
 | `name` * | human-readable name |  |
 | `version` * | from the app's `package.json` |  |
-| `app_scope` * | `app_<slug_with_underscores>` | Must match the MF scope the preset derives from the package name. Regex: `^[a-z][a-z0-9_]*$`. |
 | `bundle` * | the `.zip` you produced |  |
 | `description` | short description of the app |  |
 | `icon` | optional |  |
@@ -971,7 +970,6 @@ Whether you scaffolded a new app or modified an existing one, the user can't see
 
      name:       <human name>
      version:    <from package.json>
-     app_scope:  app_<slug_with_underscores>
      bundle:     <name>/<name>-bundle.zip
      description: <short app description>
      icon:       (optional)
