@@ -15,7 +15,7 @@ release an app end-to-end from a Claude session, no manual zip upload through th
 | Tool | What it does |
 |---|---|
 | `request_bundle_upload()` | Step 1 of a deploy: returns a one-time `uploadUrl` + `uploadId` for staging the bundle zip |
-| `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id` |
+| `deploy_app(upload_id, name, version, app_id?, description?, icon?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id` |
 | `list_apps()` | Registry listing — `id`, `name`, `version`, `scope`, `remoteUrl`, `lastModified` per app |
 | `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`) |
 | `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Does NOT touch the bundle |
@@ -37,10 +37,11 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
      upload_id = <uploadId>,
      name      = "My App",            # human-readable display name
      version   = "1.0.0",             # semver; must be unique per app — bump every release
-     app_scope = "app_my_app",        # MF scope: app_<slug_with_underscores>, from --json
      app_id    = <GUID>,              # ONLY when releasing a new version of an existing app
    )
      → app id + canonical manifest (remoteUrl, version, scope, deployedAt, sizeBytes)
+     # scope is derived server-side from the `var <name>;` declaration in remoteEntry.js —
+     # that returned `scope` is what the shell uses to mount the app
 ```
 
 ### Bundle requirements
@@ -78,30 +79,36 @@ cleaned, but redeploying with the same `app_id` restores the app.
 ## Validation rules (checked client-side before anything is consumed)
 
 - `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app.
-- `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `app_todo_app`). Must equal the
-  Module Federation scope the app was built with, or the shell can't mount it. For an app on
-  `@rise-x/apps-sdk` that scope is derived from the package name by stripping the npm scope and
-  replacing hyphens: `@rise-x-apps/todo-app` → **`app_todo_app`** — note the `app_` prefix. The
-  scaffolder reports it as `scope` in its `--json` output, which is the value to use rather than
-  deriving it by hand. (The preset honours an `APP_SCOPE` env override, for registering two builds
-  of one app side by side.)
 - `name` — non-empty.
 - Failing validation never consumes the staged upload — fix the field and call `deploy_app` again
   with the same `upload_id`.
+
+## Deploy-time bundle checks (server-side, on `deploy_app`)
+
+The platform inspects the uploaded zip itself before accepting the deploy:
+
+- **No scope declaration** — if `remoteEntry.js` has no leading `var <name>;` declaration to
+  derive the scope from, the deploy is rejected: `400 Invalid bundle: ...`. Fix: build with the
+  SDK preset / webpack `ModuleFederationPlugin` rather than hand-editing the entry file.
+- **Declared name not a usable scope** — if the declared name doesn't match `[a-z][a-z0-9_]*`,
+  the deploy is rejected: `400 Invalid bundle: ...`. Fix: the package name must be lowercase
+  kebab-case so it produces a valid `app_<slug_with_underscores>`.
+- **Missing chunk** — if `remoteEntry.js`'s chunk map references a file that isn't in the zip, the
+  deploy is rejected: `400 Invalid bundle: referenced chunk '<file>' is missing from the bundle`.
+  This means the build or the zip is truncated/partial. Fix: rebuild and re-zip the `dist/`
+  contents in full, then `request_bundle_upload` again (the old upload is stale by then anyway).
 
 ## Pitfalls
 
 1. **Zip the `dist/` contents, not the folder** — a zip with a top-level `dist/` directory
    deploys "successfully" but the shell 404s on `remoteEntry.js`.
-2. **`app_scope` mismatch** — deploy-time `app_scope` must match the app's MF scope
-   (`app_<slug_with_underscores>` for scaffolded apps). Wrong scope = manifest loads, app never
-   mounts.
-3. **Version reuse** — the platform rejects a duplicate version per app; `list_apps` shows the
+2. **Version reuse** — the platform rejects a duplicate version per app; `list_apps` shows the
    current one to bump from.
-4. **Deploy failed? The staged bundle survives.** Neither client-side validation errors nor
+3. **Deploy failed? The staged bundle survives.** Neither client-side validation errors nor
    platform failures (409 duplicate version, 403 missing role, 404 unknown app id) consume the
    upload — fix the manifest field (e.g. bump `version` after a 409) and call `deploy_app` again
-   with the **same `upload_id`**. Only a successful deploy consumes it (and the TTL still
-   applies).
-5. **These tools don't build anything** — produce the bundle with the `rise-x-apps` skill (its build phase
+   with the **same `upload_id`**. Only a successful deploy consumes it (and the TTL still applies).
+   A 400 invalid bundle is different: the staged zip itself is the problem, so rebuild and call
+   `request_bundle_upload` again for a fresh `upload_id`.
+4. **These tools don't build anything** — produce the bundle with the `rise-x-apps` skill (its build phase
    covers the production build + zipping) and hand the zip to this flow.
