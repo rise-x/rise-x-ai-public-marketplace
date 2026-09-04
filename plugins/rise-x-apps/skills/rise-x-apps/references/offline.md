@@ -166,8 +166,11 @@ merge per-field, so a non-null `featureFlags` wins wholesale and any seeded key 
 dropped — so read what is already in it and send it complete. One more reach limit: the runtime reads
 the flag from each work's **own pinned flow version**, and publishing a new version does not move
 already-open works by default — a flag change reaches works created after the publish, not the ones
-already open. Existing works are not unreachable: `publish_flow` with `publish_mode="UpdateOpenItems"`
-migrates open works to the new version (`managing-flows.md` documents the trade-offs).
+already open. Existing works are not unreachable, but the fix is a flow property rather than a publish
+argument: work flows default to `publishMode: "DoNotUpdateOpenItems"`, so set
+`update_flow_properties(draftId, {"publishMode": "UpdateOpenItems"})` on the same draft (expect
+`changed: [publishMode]`) before `publish_flow(draftId)`. The rise-x-mcp plugin's
+`references/managing-flows.md` § Flow Properties documents the trade-offs.
 
 **Quick submit is a task-level switch, not a per-action one.** `quickSubmit` lives on the `panelConfig`
 of a step/task in the flow config document, and the shell's toolbar checks it once per task — not per
@@ -213,8 +216,8 @@ import type { OfflineDownloadHook } from "@rise-x/apps-sdk";
 
 const FLOW_ORIGIN_ID = "…"; // flowOriginId — app config, recorded at integration time
 
-export const onOfflineDownload: OfflineDownloadHook = async (_ctx, { offline, reportProgress }) => {
-  const result = await offline.downloadFlowWorks({ flowOriginId: FLOW_ORIGIN_ID });
+export const onOfflineDownload: OfflineDownloadHook = async (_ctx, { offline: shellOffline, reportProgress }) => {
+  const result = await shellOffline.downloadFlowWorks({ flowOriginId: FLOW_ORIGIN_ID });
   reportProgress({ processed: result.total, total: result.total });
 };
 ```
@@ -300,7 +303,10 @@ mimeType }[]` — which is what the attachments part of §5 reads from.
 `queryFn`s, and from that version `createAppQueryClient` sets `networkMode: 'offlineFirst'` with an
 offline-aware retry: mounted offline, a hook answers from the offline cache when the data is
 downloaded, and settles into its **error** state (recovering on reconnect) when it is not — the same
-two outcomes as a direct connector call. The hooks are a provided tool, not an obligation — an app
+two outcomes as a direct connector call. **Below 0.12 the hooks pause offline rather than erroring** —
+`networkMode` defaults to `'online'`, so the query never runs its `queryFn` and stays pending with no
+error state to render. Use the direct connector calls in this section on those versions. The hooks are
+a provided tool, not an obligation — an app
 that manages its own caching is free to use that instead. One direct-connector shape is ordinary
 async state —
 `WorkDetail` and `ConnectorError` are both importable from `@rise-x/apps-sdk/connectors` — with all
@@ -722,8 +728,10 @@ revalidate a single entry, and nothing repopulates a removed one. Practically: o
 flips for that work — not when `requestSync()` resolves, which only means "asked" (§7) — don't trust a
 cache-only read of it; call `work.get(workId)` (or `work.getData`), which is network-first while online
 by design and will hit the server rather than hand back a stale local copy. If the app also uses the
-`@rise-x/apps-sdk/query` hooks (§4), call `invalidateAppSdkQueries(useAppQueryClient())` at the same
-moment — otherwise those hooks keep serving react-query's pre-sync cache.
+`@rise-x/apps-sdk/query` hooks (§4), invalidate them at the same moment — otherwise those hooks keep
+serving react-query's pre-sync cache. Capture the client once at the top of the component
+(`const qc = useAppQueryClient()`) and call `invalidateAppSdkQueries(qc)` there: this fires from a
+callback or effect, so calling the hook at that point would break the rules of hooks.
 
 ## 7. Sync + queue visibility
 
@@ -835,8 +843,9 @@ the sixth back on the deployed environment.
 4. **Reconnect and drain.** After sync, `allSynced` flips, a network re-read shows server truth, and an
    offline-created work still resolves by the same `id` with its code swapped off `OFFLINE-…` (or kept,
    if you passed a custom `workCode`).
-5. **Degraded host.** Standalone against the mock shell, every offline-dependent surface shows its
-   error/empty state via `SHELL_TOO_OLD` — no crashed screen, no raw `TypeError`.
+5. **Degraded host.** Standalone against the mock shell, every offline-dependent surface except those
+   gated on `isOnline()`, which the mock answers `true`, shows its error/empty state via
+   `SHELL_TOO_OLD` — no crashed screen, no raw `TypeError`.
 6. **Flag misconfiguration probe.** On a flow WITH the offline flag,
    `offline.getWorkSyncStatus(workId).writeMode` reads `'queued'` while offline; on a flow without it,
    it reads `'direct'` (and the write would go to the network and fail) — the §2 misconfiguration that
@@ -853,7 +862,8 @@ Full deploy mechanics — zipping the bundle, the exact MCP calls — are in
 - Confirm the offline flags actually shipped: pass `feature_flags` on `deploy_app` and read the
   manifest back (`get_app` — the flags echo as `featureFlags`), and on every flow the app depends on,
   the flow-level flag plus quick submit (§2). Later releases inherit the stored flags when
-  `feature_flags` is omitted (§2 — only a passed dict replaces them); it is the FIRST deploy that
+  `feature_flags` is omitted (the rise-x-mcp plugin's `references/managing-apps.md` documents it at the
+  `deploy_app` signature — only a passed dict replaces them); it is the FIRST deploy that
   must carry the app flag. A deploy that misses one ships an app that looks normal
   and silently is not offline-capable.
 - On an offline-enabled app, a version bump makes every offline user's downloaded copy `stale`; the
