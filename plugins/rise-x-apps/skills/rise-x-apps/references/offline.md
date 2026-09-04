@@ -854,11 +854,11 @@ the sixth back on the deployed environment.
 ## 10. Deploy checklist
 
 Full deploy mechanics — zipping the bundle, the exact MCP calls — are in
-`references/build.md` §Build and deploy; this list is what's specific to an offline-enabled app.
+`references/build.md` §Build and deploy; this list is what's specific to an offline-enabled app. Of
+those mechanics, the one that bites most often is the `dist/` zip — see `references/build.md`.
 
 - Deploys go through the Rise-X MCP (`request_bundle_upload` → `deploy_app`) or the shell's New App /
   New release form.
-- Zip the **contents** of `dist/`, not the folder — `remoteEntry.js` must sit at the archive root.
 - Confirm the offline flags actually shipped: pass `feature_flags` on `deploy_app` and read the
   manifest back (`get_app` — the flags echo as `featureFlags`), and on every flow the app depends on,
   the flow-level flag plus quick submit (§2). Later releases inherit the stored flags when
