@@ -15,10 +15,10 @@ release an app end-to-end from a Claude session, no manual zip upload through th
 | Tool | What it does |
 |---|---|
 | `request_bundle_upload()` | Step 1 of a deploy: returns a one-time `uploadUrl` + `uploadId` for staging the bundle zip |
-| `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id`. Checks the shape of the bundle's dependency manifest — see § Dependency manifest |
+| `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` | Step 3: deploys the staged bundle; new app (GUID generated) or new version of an existing `app_id`. Checks the shape of the bundle's dependency manifest — see § Dependency manifest. `feature_flags` is a `string → bool` dict gating app behaviours (e.g. `{"isOfflineModeEnabled": true}`), stored on the manifest as `featureFlags`. **Omitted, the stored flags carry through unchanged; `{}` clears them** — so it is the FIRST deploy that must carry a flag, and a later release does not silently drop it |
 | `list_apps()` | Registry listing — `id`, `name`, `version`, `scope`, `remoteUrl`, `lastModified` per app. No dependency fields |
-| `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`, declared `dependencies`) |
-| `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Does NOT touch the bundle |
+| `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`, `featureFlags`, declared `dependencies`) |
+| `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Accepts `feature_flags` — **a passed dict replaces the stored flags wholesale** (one field, no per-key merge), so send it complete or keys you omit are silently dropped. Does NOT touch the bundle |
 | `delete_app(app_id)` | Soft-delete from the registry (bundle blobs cleaned). Redeploying under the same id restores it |
 
 ## Deploying a bundle (the three-step flow)
@@ -36,7 +36,7 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
 3. deploy_app(
      upload_id = <uploadId>,
      name      = "My App",            # human-readable display name
-     version   = "1.0.0",             # semver; must be unique per app — bump every release
+     version   = "1.0.0",             # semver; bump every release (409 only on the currently live version — see Common Failures #3)
      app_scope = "app_my_app",        # MF scope: app_<slug_with_underscores>, from --json
      app_id    = <GUID>,              # ONLY when releasing a new version of an existing app
    )
@@ -144,8 +144,8 @@ the declaration records it for the ecosystem and lets the app's own code call it
 generated and returned. Record it; it's the handle for every later operation.
 
 **New version of an existing app:** `list_apps` first — find the app's `id` and *current*
-`version`, pick a strictly newer semver (a duplicate version is rejected) → three-step flow with
-`app_id` set.
+`version`, pick a strictly newer semver (a duplicate of the currently live version is rejected
+— see Common Failures #3) → three-step flow with `app_id` set.
 
 **Rename / re-describe / change icon (no new bundle):** `update_app(app_id, name=…)` — it reads
 the current manifest, merges only what you pass, writes it back. Never use it to fake a release:
@@ -156,7 +156,7 @@ cleaned, but redeploying with the same `app_id` restores the app.
 
 ## Validation rules (checked client-side before anything is consumed)
 
-- `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app.
+- `version` — semver (`1.2.3`, `1.0.0-rc.1`). Unique per app — bump every release.
 - `app_scope` / `scope` — snake_case, `[a-z][a-z0-9_]*` (e.g. `app_todo_app`). Must equal the
   Module Federation scope the app was built with, or the shell can't mount it. For an app on
   `@rise-x/apps-sdk` that scope is derived from the package name by stripping the npm scope and
@@ -176,7 +176,10 @@ cleaned, but redeploying with the same `app_id` restores the app.
    (`app_<slug_with_underscores>` for scaffolded apps). Wrong scope = manifest loads, app never
    mounts.
 3. **Version reuse** — the platform rejects a duplicate version per app; `list_apps` shows the
-   current one to bump from.
+   current one to bump from. The platform enforces this narrowly: the 409 fires only when the
+   string exactly equals the app's currently live version, with no semver ordering or history
+   check. Don't lean on that; reusing an older version string is accepted and leaves a confusing
+   registry.
 4. **Deploy failed? The staged bundle survives.** Neither client-side validation errors nor
    platform failures (409 duplicate version, 403 missing role, 404 unknown app id) consume the
    upload. Fix the failing `deploy_app` field (`name`, `version`, or `app_scope`; for example,

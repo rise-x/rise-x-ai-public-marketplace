@@ -115,7 +115,9 @@ Update a field value on a work item.
 Can be called multiple times for different fields before submitting. Must run **sequentially** — parallel calls cause connection errors.
 
 ### `submit_work(id, event_name, step_name, invitation=None)`
-Submit work to advance it to the next step in its workflow.
+Submit work to advance it to the next step in its workflow. Leave `invitation`
+as `None` unless you are deliberately supplying recipients — a non-null
+invitation stops the server deriving recipients from the flow config.
 
 **Parameters:**
 - `id` — work item GUID
