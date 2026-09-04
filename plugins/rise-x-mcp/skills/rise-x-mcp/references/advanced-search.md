@@ -147,7 +147,7 @@ await search_flows(filter={"field": "state", "operator": "equals", "values": ["D
 
 The simple-search query-string equivalent works the same way: `?status=Deleted` or `?state=Archived` opts out of the default exclusion.
 
-**Implementation detail (you don't need this to use the tools, but it explains some quirks).** Legacy MongoDB documents in this codebase store enum fields in two forms — sometimes as the BSON string (`"Deleted"`), sometimes as the underlying int (`2`). The server's default-exclusion filter matches BOTH forms, so a doc with `status: 2` is excluded just as reliably as `status: "Deleted"`. Caller-side filters do NOT yet dual-form-coerce, so `status = "Deleted"` matches only the string-form records — int-form deleted records are returned for filtering purposes but not isolated by an explicit caller request. Treat this as "the default exclusion is bulletproof; explicit `status = "Deleted"` filtering may miss some legacy records".
+**Implementation detail (you don't need this to use the tools, but it explains some quirks).** Legacy MongoDB documents in this codebase store enum fields in two forms — sometimes as the BSON string (`"Deleted"`), sometimes as the underlying int (`2`). The server's default-exclusion filter matches BOTH forms, and so do caller-side `equals`/`notEquals`/`in`/`notIn` on the five coerced enum fields (named in the ⚠️ enum note under the Work table), so `status = "Deleted"` isolates int-form records as reliably as string-form ones. `startsWith` skips the enum parse; range operators are number/date only, so on an enum field they are a 400 rather than an unparsed match.
 
 ## Work Search and `data.*` Fields
 
@@ -188,8 +188,8 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 | `id` | guid | Work item GUID — direct lookup |
 | `name`, `displayName`, `workCode` | string | |
 | `normalisedName` | string | Pre-uppercased copy of `name`; faster case-insensitive search |
-| `status` | string (enum, PascalCase) | one of: `"Open"`, `"Closed"`, `"Completed"`, `"Deleted"`, `"Ok"` (from `DianaWorkState`). `"Deleted"` is **hidden by default** — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). |
-| `flowState` | string (enum, **PascalCase**) | one of: `"NotStarted"`, `"Created"`, `"InProgress"`, `"InReview"`, `"Complete"`, `"Skipped"`, `"Cancelled"`, `"Declined"`, `"Deleted"`. ⚠️ Matched **verbatim** — unlike `status`/`state` it has no int/string dual-form coercion, so a wrong-cased value (e.g. `"inProgress"`) silently returns **empty**, not 400. |
+| `status` | string (enum, PascalCase) | one of: `"Open"`, `"Closed"`, `"Completed"`, `"Deleted"`, `"Ok"` (from `DianaWorkState`). `"Deleted"` is **hidden by default** — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). Matching rules: ⚠️ enum note below the table. |
+| `flowState` | string (enum, PascalCase) | one of: `"NotStarted"`, `"Created"`, `"New"`, `"InProgress"`, `"Rework"`, `"Complete"`, `"Skipped"`, `"Cancelled"`, `"Declined"`, `"Deleted"` (from `DianaStepState`). Matching rules: ⚠️ enum note below the table; a value that is not a member (e.g. `"InReview"`) matches nothing. |
 | `flowDisplayName` | string | free-form — the flow's human display name. |
 | `flowType` | string | free-form — flow-defined identifier (e.g. `"vessel-inspection"`). |
 | `flowId`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only |
@@ -204,7 +204,7 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 | `statusDisplay.displayName`, `statusDisplay.color`, `statusDisplay.bgColor`, `statusDisplay.workType`, `statusDisplay.icon`, `statusDisplay.stateName`, `statusDisplay.roleName`, `statusDisplay.value` | string | UI-rendered status snapshot — same fields `list_work` surfaces as `statusLabel` / `roleName` / `color`. |
 | `statusDisplay` | object — projection-only | whole-sub-doc escape hatch; rejects filter / sort with 400 |
 
-> ⚠️ **Casing matters on enum values.** The filter validator compares strings verbatim, and **all** Work / Flow enum values are **PascalCase** — `status` (`"Open"`, `"Completed"`), `state` (`"Active"`, `"Deleted"`), `flowState` (`"InProgress"`, `"Complete"`), `flowResourceType` (`"Entity"`). Passing the wrong case (`"inprogress"`, `"open"`, `"ACTIVE"`) returns 400 or an empty result. `status` and `state` get int/string dual-form coercion, but `flowState` is matched verbatim — a wrong-cased `flowState` silently returns **empty**. Also `"Open"` appears in BOTH Work `status` AND Flow `state` with different semantics — independent enums, don't assume cross-resource equivalence.
+> ⚠️ **Enum values must be members of the enum.** Stored values are PascalCase (`"Open"`, `"Active"`, `"InProgress"`, `"Entity"`); use that spelling. The Type column says how a field compares: `(enum)` is coerced, `(closed set)` compares the exact string. The five coerced enum fields — Work `status` and `flowState`, asset `status`, Flow `state` and `publishStatus`: on them `equals`/`notEquals`/`in`/`notIn` parse the value case-insensitively and match both stored forms (name and int), so `"open"` finds `"Open"`; every other operator on those fields skips the enum parse. The closed sets (`flowResourceType`, `publishMode`, `resourceType`) have no enum parse: `equals`/`notEquals`/`in`/`notIn` compare the exact string, so on them a wrong-cased value (`"entity"` for `flowResourceType`) is a non-member. A non-member value on either kind (`"entity"` on `flowResourceType`, `"InReview"` on `flowState`, `"Suspended"` on Work `status`) matches nothing: `equals`/`in` return an **empty** page and `notEquals`/`notIn` return **everything**, never a 400. `startsWith`/`endsWith`/`contains` are case-insensitive wherever the operator is allowed (see the operator table). Also `"Open"` appears in BOTH Work `status` AND Flow `state` with different semantics — independent enums, don't assume cross-resource equivalence.
 
 > ⚠️ **Object-typed fields can't be filter or sort leaves.** Any whitelist entry whose type is `object` is a projection root — it exists to opt the whole sub-doc into the response, not to be compared. Using one as a filter / sort leaf returns `400 — Cannot filter on '<field>': this path resolves to an object`. On Work this affects `assignedUsers`, `statusDisplay`, and `data`. **Drop to a typed sub-path instead.** Example — the formerly-supported `assignedUsers` equality is now a `.id` filter:
 >
@@ -318,7 +318,7 @@ Searchable without a `get_flow_data_schema` call — but still inside the mandat
 | `id` | guid | Asset (entity) GUID — direct lookup |
 | `displayName` | string | the asset's display name (the UI list/grid label) |
 | `normalisedName` | string | pre-uppercased copy for fast case-insensitive search |
-| `status` | string (enum, PascalCase) | `DianaEntityStatus`: `"Open"` (in edit), `"Closed"` (reserved — not currently used), `"Deleted"`. `"Deleted"` is **hidden by default** unless the filter references `status` — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). ⚠️ **Distinct enum from Work** — do NOT reuse Work's `DianaWorkState` values (`"Completed"`, `"Ok"`); assets only have Open/Closed/Deleted. |
+| `status` | string (enum, PascalCase) | `DianaEntityStatus`: `"Open"` (in edit), `"Closed"` (reserved — not currently used), `"Deleted"`. `"Deleted"` is **hidden by default** unless the filter references `status` — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). ⚠️ **Distinct enum from Work** — do NOT reuse Work's `DianaWorkState` values (`"Completed"`, `"Ok"`); assets only have Open/Closed/Deleted. Matching rules: ⚠️ enum note under the Work table. |
 | `entityType` | string | the asset type's ThingType identifier (e.g. `"vessel"`, `"nmrk-one-car"`) |
 | `code` | string | asset code |
 | `flowId` | guid | the asset type's current published flow id |
@@ -332,7 +332,7 @@ Searchable without a `get_flow_data_schema` call — but still inside the mandat
 | `statusDisplay` | object — projection-only | whole-sub-doc escape hatch; rejects filter / sort with 400 |
 | `data` | object — projection-only | whole-data escape hatch; rejects filter / sort with 400 (see below) |
 
-Operators, casing, the Object-root-can't-be-a-filter/sort-leaf rule, and the empty-`startsWith` guard are all **identical to Work**. `contains` / `endsWith` are **Flow- and Company-only** — `search_assets` rejects them with 400 (use `startsWith`). Mixed-type tolerance and the date/number quirks are identical too (see the Work [§ Date and number quirks](#date-and-number-quirks-on-data)).
+Operators, enum matching, the Object-root-can't-be-a-filter/sort-leaf rule, and the empty-`startsWith` guard are all **identical to Work**. `contains` / `endsWith` are **Flow- and Company-only** — `search_assets` rejects them with 400 (use `startsWith`). Mixed-type tolerance and the date/number quirks are identical too (see the Work [§ Date and number quirks](#date-and-number-quirks-on-data)).
 
 ### Asset `data.*` projection trims like Work — with one shape caveat
 
@@ -350,16 +350,16 @@ Identical to Work: add the bare `"data"` key to `fields` (with `enforce_fields=T
 
 ## Flow Search filterable fields
 
-The static whitelist for `search_flows`. Five string fields are enum-backed (`state`, `flowResourceType`, `publishStatus`, `publishMode`, `resourceType`) — listing the closed value set on each so callers don't have to guess.
+The static whitelist for `search_flows`. Five string fields have closed value sets (`state`, `flowResourceType`, `publishStatus`, `publishMode`, `resourceType`) — listing the value set on each so callers don't have to guess. `state` and `publishStatus` are coerced enum fields (case-insensitive `equals`/`in`, both stored forms); the other three compare the exact string — see the ⚠️ enum note under the Work table.
 
 | Field key | Type | Notes |
 |---|---|---|
 | `id`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy`, `flowId` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only. `flowId` is a domain alias for `id` (the source POCO declares `FlowId { get => Id; set { } }`) — the search layer exposes both as separate whitelist keys for symmetry with `IDianaFlowResource`-based filters, and both project to the same value. |
 | `name`, `normalisedName`, `displayName`, `description`, `uniqueName` | string | free-form. `normalisedName` is pre-uppercased for fast case-insensitive search. |
-| `state` | string (enum, PascalCase) | one of: `"Open"`, `"Active"`, `"Archived"`, `"Deleted"` (from `DianaFlowStatus`). Note: distinct from Work `status`. `"Deleted"` and `"Archived"` are **hidden by default** — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). |
-| `flowResourceType` | string (enum, PascalCase) | one of: `"Work"`, `"Entity"`, `"User"`, `"Company"`. `"Entity"` = asset type; `"Work"` = workflow. `"User"` / `"Company"` are rare system flows. |
+| `state` | string (enum, PascalCase) | one of: `"Open"`, `"Active"`, `"Archived"`, `"Deleted"` (from `DianaFlowStatus`). Note: distinct from Work `status`. `"Deleted"` and `"Archived"` are **hidden by default** — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). Matching rules: ⚠️ enum note under the Work table. |
+| `flowResourceType` | string (closed set, PascalCase) | one of: `"Work"`, `"Entity"`, `"User"`, `"Company"`. `"Entity"` = asset type; `"Work"` = workflow. `"User"` / `"Company"` are rare system flows. |
 | `entityType` | string | free-form — tag value from the flow's `Tags["EntityType"]` dictionary; the asset type's ThingType (e.g. `"vessel"`), the same value the MCP surfaces as `thingType`. Set only on `"Entity"` flows. |
-| `publishStatus` | string (enum, PascalCase) | one of: `"Draft"`, `"Published"`, `"Revised"`, `"Deleted"` (from `DianaPublishStatus`). A fifth value `"Publishing"` exists but is a transient/internal state — callers see either `"Draft"` or `"Deleted"` once the publish completes. |
+| `publishStatus` | string (enum, PascalCase) | one of: `"Draft"`, `"Published"`, `"Revised"`, `"Deleted"` (from `DianaPublishStatus`). A fifth value `"Publishing"` exists but is a transient/internal state — callers see one of the four listed values once the publish completes. Matching rules: ⚠️ enum note under the Work table. |
 | `group` | string | free-form — tag value from the flow's `Tags["Group"]` dictionary. |
 | `lastModified`, `created` | date | range / comparison ops supported |
 | `copiedFromId` | guid | the source flow this one was duplicated from (lineage tracking). |
@@ -369,8 +369,8 @@ The static whitelist for `search_flows`. Five string fields are enum-backed (`st
 | `hasRepeaterSection` | boolean | `true` for flows whose layout contains a repeater section (relevant for data-grid rendering). |
 | `blockChainEnabled` | boolean | `true` for flows that publish to a chain. |
 | `sequence` | number | flow-defined ordering within an ecosystem (lower number = earlier). |
-| `publishMode` | string (enum, PascalCase) | one of: `"Default"`, `"UpdateOpenItems"`, `"DoNotUpdateOpenItems"`. Controls how a new version propagates to open work items / assets when a flow is published. |
-| `resourceType` | string (enum, PascalCase) | typically `"Workflow"` or `"Flow"` on flow records. Distinct from `flowResourceType` above (the narrower work / entity / user / company set). |
+| `publishMode` | string (closed set, PascalCase) | one of: `"Default"`, `"UpdateOpenItems"`, `"DoNotUpdateOpenItems"`. Controls how a new version propagates to open work items / assets when a flow is published. |
+| `resourceType` | string (closed set, PascalCase) | typically `"Workflow"` or `"Flow"` on flow records. Distinct from `flowResourceType` above (the narrower work / entity / user / company set). |
 | `versionNumber` | number | numeric version (1, 2, 3, …) extracted from the current `dianaVersion`. |
 | `versionName` | string | display label for the current version (`"v2.3"`, `"Q1 release"`, etc.). |
 | `fromDate`, `toDate` | date | nested from `dianaVersion.fromDate` / `dianaVersion.toDate` — the active window of the current version. |
@@ -557,4 +557,5 @@ await search_assets(
 8. **Mixed-shape filter node** (leaf + `and`/`or` children, or both `and` + `or` on the same node) → 400. A node is exactly one of leaf, And-group, Or-group. Wrap the leaf in an explicit `and` instead.
 9. **Assuming `search_assets` treats `data.*` projection differently from Work** → it doesn't: granular `data.*` paths trim on both, and present values are identical. The only asset difference is shape-only — a requested-but-**absent** `data.*` path is **omitted** on asset, whereas Work materializes it as `null`.
 10. **Using `list_assets` to filter or sort** → `list_assets` lists a single asset type via the data grid with no filter engine. Use `search_assets` for any condition, sort, or projection.
-11. **Reusing Work `status` values on `search_assets`** → asset `status` is `DianaEntityStatus` (`"Open"` / `"Closed"` / `"Deleted"` only). Work's `"Completed"` / `"Ok"` are not asset states and return an empty result.
+11. **Reusing Work `status` values on `search_assets`** → asset `status` is `DianaEntityStatus` (`"Open"` / `"Closed"` / `"Deleted"` only). Work's `"Completed"` / `"Ok"` are not asset states; see #12 for what a non-member value does.
+12. **A coerced-enum value that is not a member** (`"InReview"` on `flowState`, `"Suspended"` on Work `status`) → matches nothing: `equals`/`in` return an **empty** page, `notEquals`/`notIn` return **everything**, never a 400. Check the value against the enum lists in the field tables before trusting the result.
