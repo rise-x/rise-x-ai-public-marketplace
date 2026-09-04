@@ -11,6 +11,7 @@
 - [`relatedFlows` Schema Reference](#relatedflows-schema-reference)
   - [`publishDataDirection` Values](#publishdatadirection-values)
   - [`stepStatuses` Values](#stepstatuses-values)
+  - [`stepNames` Matching](#stepnames-matching)
   - [`workFilters` — Finding Target Work](#workfilters--finding-target-work)
   - [`options` Object](#options-object)
 - [Data Operations (PublishDataOperation)](#data-operations-publishdataoperation)
@@ -188,8 +189,8 @@ Each entry in the `relatedFlows` array has these properties:
 | `publishDataDirection` | enum | Direction data flows (see below) |
 | `workFilters` | array | Matching rules to find target work items |
 | `stepStatuses` | array | Step states the target work must be in (see below) |
-| `stepNames` | array | Internal `stepName` values of the target steps (not display labels), e.g. `["supplierOffer"]`; a name matches as a case-insensitive suffix of the full step name unless `exactStepNameMatch` is `true` |
-| `exactStepNameMatch` | bool | Match `stepNames` as the full step name instead of a suffix (default `false`) |
+| `stepNames` | array | Internal `stepName` values of the target steps, not display labels (see below) |
+| `exactStepNameMatch` | bool | Compare the whole step name instead of a suffix (default `false`; see below) |
 | `createWorkIfNotFound` | bool | Create a new work item if no match found |
 | `operations` | array | Data mapping operations (see Data Operations) |
 | `attachmentOperations` | array | Attachment sync rules (`sourceFolder` → `destinationFolder`) |
@@ -206,7 +207,13 @@ Each entry in the `relatedFlows` array has these properties:
 
 ### `stepStatuses` Values
 
-Step states of the target work item that count as a match, from `DianaStepState`: `NotStarted`, `Created`, `New`, `InProgress`, `Rework`, `Complete`, `Skipped`, `Cancelled`, `Declined`, `Deleted`. When the property is omitted, the server uses `["InProgress"]`; the examples in this file pass it explicitly.
+Step states of the target work item that count as a match, from `DianaStepState`: `NotStarted`, `Created`, `New`, `InProgress`, `Rework`, `Complete`, `Skipped`, `Cancelled`, `Declined`, `Deleted`. Omitting the property is not the same as listing every state: the config initialiser (`RelatedWorkConfig`) supplies `["InProgress"]`. Pass it explicitly, as the examples in this file do.
+
+### `stepNames` Matching
+
+Entries are internal `stepName` values (see `managing-flows.md`), not display labels: `["supplierOffer"]`, never `["Supplier Offer"]`. The related-work lookup uses the **first** entry only; further entries only widen the access the target flow is granted on this flow's steps, where `"*"` means every step.
+
+The first entry matches the target work's step names as a case-insensitive **suffix** (Mongo regex `.*<name>$`, flag `i`). For a slash-form name pass the trailing segment: `"Generated-<guid>"` matches `"UntitledStep/Generated-<guid>"`, while a leading segment alone (`"UntitledStep"`) does not. Set `exactStepNameMatch: true` to compare the whole name instead. This rule is separate from `ByStepName` action routing (`actions-and-statuses.md`, Common Mistakes #2), which needs the exact name.
 
 ### `workFilters` — Finding Target Work
 
