@@ -186,7 +186,7 @@ Each entry in the `relatedFlows` array has these properties:
 | `targetName` | string | Relationship name stored on the **target** flow's work items |
 | `publishDataDirection` | enum | Direction data flows (see below) |
 | `workFilters` | array | Matching rules to find target work items |
-| `stepStatuses` | array | Only match target work in these states (e.g. `["InProgress"]`) |
+| `stepStatuses` | array | Only match target work whose step state is in the list. `DianaStepState` names: `NotStarted`, `Created`, `New`, `InProgress`, `Rework`, `Complete`, `Skipped`, `Cancelled`, `Declined`, `Deleted`. Default `["InProgress"]` |
 | `stepNames` | array | Only match target work in these steps |
 | `createWorkIfNotFound` | bool | Create a new work item if no match found |
 | `operations` | array | Data mapping operations (see Data Operations) |
