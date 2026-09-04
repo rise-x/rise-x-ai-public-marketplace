@@ -2,7 +2,7 @@
 
 ## What is a Work Item?
 
-A **work item** is a running instance of a flow. It progresses through steps via submit actions, contains data fields, and tracks a status (`Open`, `Closed`, `Completed`, `Deleted`; `Ok` is set only by the sync process).
+A **work item** is a running instance of a flow. It progresses through steps via submit actions, contains data fields, and tracks a status (`Open`, `Closed`, `Completed`, `Deleted`; `Ok` is a sync-process flag, not a state a user drives).
 
 Work tools are also used as part of the **asset workflow pattern** — see `references/managing-assets.md`.
 
@@ -49,7 +49,7 @@ Key fields in the summary response:
 - `activeStepName` — current step the work is on
 - `actions` — available actions, with `events[].eventName` for `submit_work`
 - `data` — form field values
-- `status` — `Open`, `Closed`, `Completed`, `Deleted`, or `Ok` (`DianaWorkState`; `Ok` is set only by the sync process)
+- `status` — `Open`, `Closed`, `Completed`, `Deleted`, or `Ok` (`DianaWorkState`; `Ok` is a sync-process flag, not a state a user drives)
 
 ### `duplicate_work(id: str, response_format="summary")`
 Duplicate a work item into a **brand-new work** on the same flow — the DIANA-native "Duplicate" button.
