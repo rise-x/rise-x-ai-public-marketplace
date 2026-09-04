@@ -2,7 +2,7 @@
 
 ## What is a Work Item?
 
-A **work item** is a running instance of a flow. It progresses through steps via submit actions, contains data fields, and tracks status (Open/Closed).
+A **work item** is a running instance of a flow. It progresses through steps via submit actions, contains data fields, and tracks a status (`Open`, `Closed`, `Completed`, `Deleted`; `Ok` is a sync-process flag).
 
 Work tools are also used as part of the **asset workflow pattern** — see `references/managing-assets.md`.
 
@@ -49,7 +49,7 @@ Key fields in the summary response:
 - `activeStepName` — current step the work is on
 - `actions` — available actions, with `events[].eventName` for `submit_work`
 - `data` — form field values
-- `status` — `Open`, `Closed`, `Completed`, or `Deleted` (`DianaWorkState`)
+- `status` — `Open`, `Closed`, `Completed`, `Deleted`, or `Ok` (`DianaWorkState`; `Ok` is a sync-process flag, almost never seen)
 
 ### `duplicate_work(id: str, response_format="summary")`
 Duplicate a work item into a **brand-new work** on the same flow — the DIANA-native "Duplicate" button.
@@ -79,7 +79,7 @@ Response rows are **projected** to the useful fields only (cardLayout, per-role 
 - Permissions: `canEdit`, `canDelete`, `canDelegate`, `roleName`
 - Audit: `createdBy` / `lastModifiedBy` (each `{id, email, displayName}`), `createdDate`, `lastModifiedDate`
 
-Date names differ by source: the `get_work` document carries `createdDate` and `lastModified`; `list_work` rows flatten the search index's `created.date` / `lastModified.date` objects into `createdDate` / `lastModifiedDate`; asset documents (`get_asset`) carry `created` and `lastModified`.
+Date field names differ by tool — see `references/common-pitfalls.md` pitfall #65.
 
 For form data, status and actions, call `get_work(id)` (summary); for `cardLayout`, per-role user lists, `chains`, or `steps`, call `get_work(id, format="full")`.
 

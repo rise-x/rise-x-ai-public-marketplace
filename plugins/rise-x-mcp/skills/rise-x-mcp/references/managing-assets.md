@@ -162,6 +162,8 @@ Initiates an edit workflow for an existing asset. Same response structure as `cr
 - `format="summary"` (default) — identity (`id`, `entityId`, `displayName`, `name`, `code`, `workCode`, `entityType`), state (`currentState`, `previousState`, `workState`, `status`), the active step and flow ids (`activeStepId`, `activeStepName`, `flowId`, `flowOriginId`, `flowDisplayName`), the `canEdit` / `canDelete` / `canClone` / `canDelegate` flags, `revision`, `draftWorkId`, `created`, `lastModified`, `relationships`, and the asset's `data`. Heavy keys that carried a value (`workDraft`, `steps`, `flowProperties`, `users`, `companies`, `cardLayout`, `dataMap`, `actions`, `chains`, `attachments`, `layoutProperties`) are listed in an `omitted` note, the same mechanism as `get_work`, though this view drops `actions` and `attachments` where `get_work`'s keeps them.
 - `format="full"` — the raw document, returned directly rather than wrapped in a mutation envelope. Pass this when you need something the `omitted` note flagged.
 
+Date fields here are `created` and `lastModified`; other tools spell them differently — see `references/common-pitfalls.md` pitfall #65.
+
 The create/edit flow does not need `full`: `create_asset` / `edit_asset` return the resolved `stepName`, `eventName`, and `invitation` (Common Mistakes #7 and #8).
 
 ### `list_assets(flow_origin_id: str, skip: int = 0, limit: int = 50)`
