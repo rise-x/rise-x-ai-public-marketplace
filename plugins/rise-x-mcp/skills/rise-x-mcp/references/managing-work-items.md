@@ -101,6 +101,95 @@ await search_works(
 
 For dynamic `data.*` paths in the filter, call `get_flow_data_schema(flow_origin_id)` first to discover the valid paths for that flow.
 
+### `update_work_data_bulk(id, fields, section_name, response_format="summary")`
+Set **many** work-data fields in ONE request. Prefer this over repeated `update_work_data`
+calls whenever writing more than one field — it wraps the v4 batch endpoint
+(`PATCH /api/v4/work/{id}/data/batch`), where every entry of `fields` is its own `set` op and
+all of them are applied together.
+
+**Not every server has this release.** The tool arrives with the v4 batch endpoint, and
+environments upgrade independently of marketplace releases. If the server reports no such
+tool, read that as *not supported here* — not as a bad id or a permissions problem — and fall
+back to per-field `update_work_data` calls, run sequentially.
+
+**Parameters:**
+- `id` — work item GUID
+- `fields` — `{json_path: value}`, one `set` op per entry, e.g.
+  `{"$.displayName": "MV Aurora", "$.capacityMt": 74000}`. Pass **leaf** paths:
+  `{"$.vessel.name": "Aurora", "$.vessel.imo": "9321483"}` sets two fields, whereas
+  `{"$.vessel": {"name": "Aurora"}}` is a full-value `set` of the whole `vessel` object and
+  **drops every sibling it omits**. For the same reason, never pass a parent path and one of
+  its own descendants in one call (`{"$.vessel": {…}, "$.vessel.name": "x"}`): the two ops
+  overlap, and which one wins depends on the order the backend applies them, which nothing
+  guarantees. One op per leaf path, always. An empty or non-dict `fields` fails with code
+  `validation`.
+- `section_name` — **required** — the task name the data belongs to, the same value
+  `update_work_data` takes — obtain it via `get_flow_step` (`get_flow_steps` projects
+  `taskName` out). It is resolved client-side to the
+  task id the v4 endpoint authorises against, so a name matching no task fails with code
+  `section_not_found` and the real task names listed under `tasks`, rather than as an opaque
+  backend 403. It is a **required** parameter on both writers — it cannot be omitted, only
+  got wrong.
+- `response_format` — `"summary"` (default), or `"full"` to add the raw API response under
+  `result`.
+
+Other error codes it can return before writing anything: `origin_unresolved` (the work
+carries no `flowOriginId` — the usual cause is passing an **entity** id where a work id
+belongs, cf. pitfall #7) and `unexpected_response` (the pre-write read of the work came back
+as a non-object; retry). Because the batch is one request, a failure at the write itself
+normally means **no** field was written — the error hint says so, and `get_work(id)` confirms
+it before you retry. An all-`set` batch is idempotent, so re-sending the identical call after
+a `transient` error is safe.
+
+`set` is the only operation the batch endpoint offers. For `push` / `pull` / `rename`, use
+`update_work_data`. That is why both tools exist — this one is not a replacement.
+
+**It reads the values back**, which `update_work_data` does not. When `changed` is present no
+follow-up `get_work` is needed to find out what persisted — when it is absent, one is the only
+way to know (see below):
+- `changed` — the paths confirmed stored with the requested value.
+- `counts` — `{requested, persisted}`.
+- `warnings[]` — `dropped_value` for each path the API accepted but did not store (check the
+  flow's data schema with `get_flow_data_schema` for the real path);
+  `unverified_writes` as a rollup whenever `persisted < requested`; `no_verification` when the
+  read-back itself failed. A path can also come back with the general echo-diff codes
+  `value_differs`, `dropped_property` or `dropped_item` when the stored value only partly
+  matches the request.
+- The envelope also carries `workId`, `sectionId` and `originId`.
+
+**A `value_differs` path counts as unpersisted here.** The verifier treats *any* diff as
+"did not land": the path is left out of `changed`, `counts.persisted` drops, and the
+`unverified_writes` rollup fires. That is deliberately stricter than the `SKILL.md` rule that
+`value_differs` is informational — a batch op is a full-value `Set`, so a stored value that
+differs is indistinguishable from one that was never applied. The comparison is already
+tolerant of harmless normalisation (`4` vs `4.0`, surrounding whitespace, GUID case), so a
+`value_differs` here means the server stored something genuinely different — a reformatted
+date, a rewritten list. The practical consequence: such a path lowers `counts.persisted` even
+though the write was not lost. Read the warning to tell the two apart — `value_differs` carries
+`requested` and `actual`, so you can see what the server chose, whereas `dropped_value` means
+the old value is still sitting there.
+
+**What to do with each**, since `SKILL.md` rule 1 otherwise reads as "any warning means
+failure":
+
+| Warning | What it means | What to do |
+|---|---|---|
+| `value_differs` | The write landed; the server stored its own form of the value | Accept it. Do **not** retry — a second write normalises identically, so retrying never converges |
+| `dropped_value` | The value is not there; the old one still is | Fix the **path**, not the call. Retrying the same path is equally futile |
+| `unverified_writes` | Rollup: `persisted < requested` | Read the per-path warnings above it; it adds no information of its own |
+| `no_verification` | The read-back failed; nothing is known | Call `get_work(id)` |
+
+Neither `value_differs` nor a `persisted` below `requested` is, on its own, grounds for
+reporting failure to the user.
+
+**`changed` absent is not `changed: []`.** When the read-back fails, `changed` is **omitted**
+and `counts` carries `requested` only — verification did not run, so nothing is known about
+what landed. An empty `changed` is the opposite claim: verification ran and confirmed nothing
+persisted. Never read an absent `changed` as "nothing persisted".
+
+Verification is `set`-strict: clearing a field with `""` / `[]` / `{}` is confirmed only if the
+stored value really is empty, and a list must read back with the requested number of entries.
+
 ### `update_work_data(id, json_path, operation, value, section_name)`
 Update a field value on a work item.
 
@@ -120,70 +209,6 @@ One field per call. Writing several fields this way costs one PATCH each, they m
 leaves the work half-populated with no signal about which fields landed — so prefer
 `update_work_data_bulk` for more than one field. This tool remains the only way to `push`,
 `pull` or `rename`: the batch endpoint offers `set` alone.
-
-### `update_work_data_bulk(id, fields, section_name, response_format="summary")`
-Set **many** work-data fields in ONE request. Prefer this over repeated `update_work_data`
-calls whenever writing more than one field — it wraps the v4 batch endpoint
-(`PATCH /api/v4/work/{id}/data/batch`), where every entry of `fields` is its own `set` op and
-all of them are applied together.
-
-**Parameters:**
-- `id` — work item GUID
-- `fields` — `{json_path: value}`, one `set` op per entry, e.g.
-  `{"$.displayName": "MV Aurora", "$.capacityMt": 74000}`. Pass **leaf** paths:
-  `{"$.vessel.name": "Aurora", "$.vessel.imo": "9321483"}` sets two fields, whereas
-  `{"$.vessel": {"name": "Aurora"}}` is a full-value `set` of the whole `vessel` object and
-  **drops every sibling it omits**. An empty or non-dict `fields` fails with code `validation`.
-- `section_name` — **required** — the task name the data belongs to, the same value
-  `update_work_data` takes (see below for how to obtain it). It is resolved client-side to the
-  task id the v4 endpoint authorises against, so a name matching no task fails with code
-  `section_not_found` and the real task names listed under `tasks`, rather than as an opaque
-  backend 403. It is a **required** parameter on both writers — it cannot be omitted, only
-  got wrong.
-- `response_format` — `"summary"` (default), or `"full"` to add the raw API response under
-  `result`.
-
-Other error codes it can return before writing anything: `origin_unresolved` (the work
-carries no `flowOriginId` — the usual cause is passing an **entity** id where a work id
-belongs, cf. pitfall #7) and `unexpected_response` (the pre-write read of the work came back
-as a non-object; retry). Because the batch is one request, a failure at the write itself
-normally means **no** field was written — the error hint says so, and `get_work(id)` confirms
-it before you retry.
-
-`set` is the only operation the batch endpoint offers. For `push` / `pull` / `rename`, use
-`update_work_data`. That is why both tools exist — this one is not a replacement.
-
-**It reads the values back**, which `update_work_data` does not. No follow-up `get_work` is
-needed to find out what persisted:
-- `changed` — the paths confirmed stored with the requested value.
-- `counts` — `{requested, persisted}`.
-- `warnings[]` — `dropped_value` for each path the API accepted but did not store (the usual
-  cause is an unmodeled `dataPath` — check `get_flow_data_schema` for the real one);
-  `unverified_writes` as a rollup whenever `persisted < requested`; `no_verification` when the
-  read-back itself failed. A path can also come back with the general echo-diff codes
-  `value_differs`, `dropped_property` or `dropped_item` when the stored value only partly
-  matches the request.
-- The envelope also carries `workId`, `sectionId` and `originId`.
-
-**A `value_differs` path counts as unpersisted here.** The verifier treats *any* diff as
-"did not land": the path is left out of `changed`, `counts.persisted` drops, and the
-`unverified_writes` rollup fires. That is deliberately stricter than the `SKILL.md` rule that
-`value_differs` is informational — a batch op is a full-value `Set`, so a stored value that
-differs is indistinguishable from one that was never applied. The comparison is already
-tolerant of harmless normalisation (`4` vs `4.0`, surrounding whitespace, GUID case), so a
-`value_differs` here means the server stored something genuinely different — a reformatted
-date, a rewritten list. The practical consequence: such a path lowers `counts.persisted` even
-though the write was not lost. Read the warning to tell the two apart — `value_differs` carries
-`requested` and `actual`, so you can see what the server chose, whereas `dropped_value` means
-the old value is still sitting there.
-
-**`changed` absent is not `changed: []`.** When the read-back fails, `changed` is **omitted**
-and `counts` carries `requested` only — verification did not run, so nothing is known about
-what landed. An empty `changed` is the opposite claim: verification ran and confirmed nothing
-persisted. Never read an absent `changed` as "nothing persisted".
-
-Verification is `set`-strict: clearing a field with `""` / `[]` / `{}` is confirmed only if the
-stored value really is empty, and a list must read back with the requested number of entries.
 
 ### `submit_work(id, event_name, step_name, invitation=None)`
 Submit work to advance it to the next step in its workflow. Leave `invitation`
@@ -220,8 +245,11 @@ The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the
 
 ## Important Notes
 
-- `json_path` must start with `$` — e.g. `"$.reviewTask.approved"`, `"$.details.description"`
-- The path follows the pattern `$.{taskCamelCase}.{fieldCamelCase}`
+- Every path must start with `$` — `json_path` on `update_work_data`, and every key of
+  `fields` on `update_work_data_bulk`
+- Task-scoped fields follow `$.{taskCamelCase}.{fieldCamelCase}` — e.g.
+  `"$.reviewTask.approved"`, `"$.details.description"`. Root-level fields are one segment
+  (`"$.displayName"`), so the two-segment pattern is the common case, not the rule
 - `event_name` and `step_name` must match exactly what the flow expects — get them from `get_work` response
 - Submitting with wrong event/step names will fail
 

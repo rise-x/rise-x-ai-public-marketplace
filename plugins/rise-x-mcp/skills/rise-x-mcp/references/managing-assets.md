@@ -61,9 +61,13 @@ Step 2: Set every field value in ONE call
                            # so it comes from get_flow_step
   )
   # Read `changed` and `counts` on the response — they say which paths actually
-  # persisted, so no follow-up get_work is needed. A `dropped_value` warning
-  # means that path did not land (usually an unmodeled dataPath).
+  # persisted, so no follow-up get_work is needed WHEN `changed` is present.
+  # If it is absent the read-back failed and nothing is known: call get_work.
+  # A `dropped_value` warning means that path did not land — fix the path.
+  # Note: storing a value is not proof the path is one the flow reads
+  # (pitfall #66), so get the paths from get_asset_type_properties first.
   # For push / pull / rename, use update_work_data instead, one field per call.
+  # Which writer to use when: § Writing Asset Data below.
 
 Step 3: Finalize
   # create_asset already returned the resolved stepName, eventName and
@@ -253,5 +257,5 @@ submit_work(
 7. **Re-deriving the submit `event_name` by hand** — `create_asset`/`edit_asset` now return the **resolved** `stepName` and `eventName` (the nested submit step's full name, e.g. `SubmitUntitledStep/Generated-...`). Pass those straight to `submit_work` for both `event_name` and `step_name`. The `eventName: "Submit"` display label is only a fallback — you no longer need a `get_work()` round-trip to discover the real name.
 8. **Dropping the returned `invitation`** — `create_asset`/`edit_asset` also return the `invitation` payload (when the step requires one). Pass it verbatim to `submit_work`; without it the submit may not finalize and the asset stays in Draft. Only fall back to `get_work(workId).actions[0].invitation` if the create/edit response didn't include one.
 9. **Passing a `section_name` that matches no task** — asset type flows typically have a single task (e.g. `UntitledTask/Generated-...`), and `section_name` is a **required** parameter on both writers, so it cannot be left out. Getting it *wrong* is the real failure: `update_work_data_bulk` reports code `section_not_found` with the real task names under `tasks`, while `update_work_data` surfaces it as a backend error. Get the name from `get_flow_step` (`get_flow_steps` projects `taskName` out), using the flow's `id`, not its `flowOriginId`.
-10. **Writing fields one at a time when `update_work_data_bulk` would do** — a 20-field asset costs 20 sequential PATCHes, and they cannot be parallelised (concurrent writes answer `Cannot connect to host`). Send one `update_work_data_bulk` call instead; fall back to sequential `update_work_data` only for `push` / `pull` / `rename`.
+10. **Writing fields one at a time when `update_work_data_bulk` would do** — a 20-field asset costs 20 sequential PATCHes, and they cannot be parallelised (concurrent writes answer `Cannot connect to host`). Send one `update_work_data_bulk` call instead; fall back to `update_work_data` for a single field, and as the only route to `push` / `pull` / `rename`.
 11. **Reading a `create_asset` 403 as a permissions problem** — it almost always means a flow id (or a stale id) was passed instead of a `flowOriginId`. Get the `flowOriginId` from `search_flows` (flowResourceType=Entity) or `list_asset_types`. The server error hint says this too (since 1.2.0).

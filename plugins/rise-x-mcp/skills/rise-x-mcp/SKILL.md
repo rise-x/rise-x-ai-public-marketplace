@@ -68,16 +68,24 @@ error: {code, message, hint}      # failures (code like http_403, validation)
    request against the saved entity and reports drops as
    `dropped_property` / `dropped_item` / `component_missing`. A warning means
    that part of your request did NOT land — do not report success to the user.
+   Codes also include `unverified_writes` and `no_verification`, from
+   `update_work_data_bulk`'s read-back.
    Work **data** is the one place this rule does not hold uniformly: a write to
    an unmodeled `dataPath` may drop or may persist, depending on the
-   deployment. Do not assume either — `update_work_data_bulk` re-reads the work
-   and reports `changed` / `counts` / `dropped_value`, so you learn what landed
-   without a follow-up read (pitfall #66). With `update_work_data` the only way
-   to know is `get_work(id)`, which is what its own hint tells you to call.
+   deployment. `update_work_data_bulk` re-reads the work and reports `changed` /
+   `counts` / `dropped_value`, so you learn what **stored** without a follow-up
+   read — but storage is not correctness: where the path persists, verification
+   passes and only `get_flow_data_schema` tells you the path was wrong at all.
+   Pitfall #66 has both halves. With `update_work_data` even storage is unknown
+   until you call `get_work(id)`, which is what its own hint instructs.
 2. `value_differs` warnings are informational (server-side normalisation) —
    **except in `update_work_data_bulk`**, whose verifier treats any diff as
-   not-persisted, so a merely normalised value is left out of `changed` and
-   lowers `counts.persisted`. See `references/managing-work-items.md`.
+   not-persisted, so a normalised value is left out of `changed` and lowers
+   `counts.persisted`. What to DO with each: `value_differs` → the write landed,
+   accept it and do **not** retry (a second write normalises identically, so
+   retrying never converges); `dropped_value` → the value did not land, and the
+   path is the thing to fix, not the call. Neither is a reason to report failure
+   to the user on its own. See `references/managing-work-items.md`.
 3. Need the raw payload? Pass `response_format="full"` — it arrives under
    `result:` with the warnings still attached. This is the mutation envelope
    only: the read tools' `format="full"` (`get_work`, `get_asset`) is a
@@ -181,7 +189,7 @@ warning. Canonical names you'll use most: `input-text`, `input-select`,
 
 ## Common Pitfalls
 
-57 traps with the fix for each, in 64 numbered slots (7 are retired stubs kept so
+60 traps with the fix for each, in 67 numbered slots (7 are retired stubs kept so
 the numbering stays stable — other references cite these entries by number) —
 draft/publish lifecycle, ID confusion, component and dashboard authoring,
 search/filter semantics, exports, card layouts:
@@ -202,7 +210,7 @@ doesn't show up in the UI.
 
 ## Tool Inventory
 
-All 90 tools grouped by category (Session, Flow, Flow Structure, Flow Config,
+All 91 tools grouped by category (Session, Flow, Flow Structure, Flow Config,
 Columns, Layout, Component, Schema, Compare, Work, Search, Asset, Apps,
 Dashboard, Integration, Agent), with signatures and per-tool caveats:
 `references/tool-inventory.md`. Load it when you need an exact tool name or

@@ -200,9 +200,17 @@ publish_flow("abc-123")
 
 # Now create a customer instance:
 # find the "customer" asset type's flowOriginId via search_flows (filter: flowResourceType == Entity)
-# create_asset(flow_origin_id)  -> get workId
-# update_work_data_bulk(workId, {"$.customerDetails.companyName": "Acme Corp"}, section_name="<taskName>")
-# submit_work(workId, "Submit", "customerDetails")
+# response = create_asset(flow_origin_id)   -> workId, and the RESOLVED stepName /
+#                                              eventName / invitation — use those verbatim
+# taskName = get_flow_step("abc-123", <step id from get_flow_steps>)["taskName"]
+#   get_flow_steps projects taskName OUT, so it has to come from get_flow_step
+# update_work_data_bulk(workId, {
+#     "$.displayName": "Acme Corp",          # ALWAYS set this — the list/grid
+#                                            # shows the asset by it (pitfall #20)
+#     "$.customerDetails.companyName": "Acme Corp",
+# }, section_name=taskName)
+# submit_work(workId, event_name=response["eventName"], step_name=response["stepName"])
+#   never guess "Submit" — it is a display label (pitfall #21)
 ```
 
 ## Common Mistakes
