@@ -188,7 +188,8 @@ Each entry in the `relatedFlows` array has these properties:
 | `publishDataDirection` | enum | Direction data flows (see below) |
 | `workFilters` | array | Matching rules to find target work items |
 | `stepStatuses` | array | Step states the target work must be in (see below) |
-| `stepNames` | array | Internal `stepName`s of the target steps (camelCase names, not display labels), e.g. `["supplierOffer"]`; a name matches as a case-insensitive suffix of the full step name |
+| `stepNames` | array | Internal `stepName` values of the target steps (not display labels), e.g. `["supplierOffer"]`; a name matches as a case-insensitive suffix of the full step name unless `exactStepNameMatch` is `true` |
+| `exactStepNameMatch` | bool | Match `stepNames` as the full step name instead of a suffix (default `false`) |
 | `createWorkIfNotFound` | bool | Create a new work item if no match found |
 | `operations` | array | Data mapping operations (see Data Operations) |
 | `attachmentOperations` | array | Attachment sync rules (`sourceFolder` → `destinationFolder`) |
@@ -205,7 +206,7 @@ Each entry in the `relatedFlows` array has these properties:
 
 ### `stepStatuses` Values
 
-Step states of the target work item that count as a match, from `DianaStepState`: `NotStarted`, `Created`, `New`, `InProgress`, `Rework`, `Complete`, `Skipped`, `Cancelled`, `Declined`, `Deleted`. The examples in this file use `["InProgress"]`.
+Step states of the target work item that count as a match, from `DianaStepState`: `NotStarted`, `Created`, `New`, `InProgress`, `Rework`, `Complete`, `Skipped`, `Cancelled`, `Declined`, `Deleted`. When the property is omitted, the server uses `["InProgress"]`; the examples in this file pass it explicitly.
 
 ### `workFilters` — Finding Target Work
 
