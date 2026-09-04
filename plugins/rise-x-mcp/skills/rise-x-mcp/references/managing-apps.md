@@ -36,7 +36,7 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
 3. deploy_app(
      upload_id = <uploadId>,
      name      = "My App",            # human-readable display name
-     version   = "1.0.0",             # semver; must be unique per app — bump every release
+     version   = "1.0.0",             # semver; bump every release (409 only on the currently live version — see Common Failures #3)
      app_scope = "app_my_app",        # MF scope: app_<slug_with_underscores>, from --json
      app_id    = <GUID>,              # ONLY when releasing a new version of an existing app
    )
@@ -144,8 +144,8 @@ the declaration records it for the ecosystem and lets the app's own code call it
 generated and returned. Record it; it's the handle for every later operation.
 
 **New version of an existing app:** `list_apps` first — find the app's `id` and *current*
-`version`, pick a strictly newer semver (a duplicate version is rejected) → three-step flow with
-`app_id` set.
+`version`, pick a strictly newer semver (a duplicate of the currently live version is rejected
+— see Common Failures #3) → three-step flow with `app_id` set.
 
 **Rename / re-describe / change icon (no new bundle):** `update_app(app_id, name=…)` — it reads
 the current manifest, merges only what you pass, writes it back. Never use it to fake a release:
