@@ -113,7 +113,7 @@ Update a field value on a work item.
   - `"pull"` — remove the field
   - `"rename"` — rename the field (value = new name)
 - `value` — the value to set/push, or new name for rename
-- `section_name` — **required** — the task name scoping the data location (e.g. `"UntitledTask/Generated-..."` or the camelCase task name from `get_flow_steps`). Omitting it causes 500 errors.
+- `section_name` — **required** — the task name scoping the data location: the task's `taskName`, slash form like `"UntitledTask/Generated-<guid>"` or bare like `"Task_1"`. `get_flow_steps` projects `taskName` **out**, so fetch it with `get_flow_step` (see below). A name matching no task fails as a backend error here; `update_work_data_bulk` catches the same mistake client-side.
 
 One field per call. Writing several fields this way costs one PATCH each, they must run
 **sequentially** (parallel calls answer with `Cannot connect to host`), and a drop mid-sequence
@@ -138,9 +138,17 @@ all of them are applied together.
   `update_work_data` takes (see below for how to obtain it). It is resolved client-side to the
   task id the v4 endpoint authorises against, so a name matching no task fails with code
   `section_not_found` and the real task names listed under `tasks`, rather than as an opaque
-  backend 403.
+  backend 403. It is a **required** parameter on both writers — it cannot be omitted, only
+  got wrong.
 - `response_format` — `"summary"` (default), or `"full"` to add the raw API response under
   `result`.
+
+Other error codes it can return before writing anything: `origin_unresolved` (the work
+carries no `flowOriginId` — the usual cause is passing an **entity** id where a work id
+belongs, cf. pitfall #7) and `unexpected_response` (the pre-write read of the work came back
+as a non-object; retry). Because the batch is one request, a failure at the write itself
+normally means **no** field was written — the error hint says so, and `get_work(id)` confirms
+it before you retry.
 
 `set` is the only operation the batch endpoint offers. For `push` / `pull` / `rename`, use
 `update_work_data`. That is why both tools exist — this one is not a replacement.
@@ -152,8 +160,22 @@ needed to find out what persisted:
 - `warnings[]` — `dropped_value` for each path the API accepted but did not store (the usual
   cause is an unmodeled `dataPath` — check `get_flow_data_schema` for the real one);
   `unverified_writes` as a rollup whenever `persisted < requested`; `no_verification` when the
-  read-back itself failed.
+  read-back itself failed. A path can also come back with the general echo-diff codes
+  `value_differs`, `dropped_property` or `dropped_item` when the stored value only partly
+  matches the request.
 - The envelope also carries `workId`, `sectionId` and `originId`.
+
+**A `value_differs` path counts as unpersisted here.** The verifier treats *any* diff as
+"did not land": the path is left out of `changed`, `counts.persisted` drops, and the
+`unverified_writes` rollup fires. That is deliberately stricter than the `SKILL.md` rule that
+`value_differs` is informational — a batch op is a full-value `Set`, so a stored value that
+differs is indistinguishable from one that was never applied. The comparison is already
+tolerant of harmless normalisation (`4` vs `4.0`, surrounding whitespace, GUID case), so a
+`value_differs` here means the server stored something genuinely different — a reformatted
+date, a rewritten list. The practical consequence: such a path lowers `counts.persisted` even
+though the write was not lost. Read the warning to tell the two apart — `value_differs` carries
+`requested` and `actual`, so you can see what the server chose, whereas `dropped_value` means
+the old value is still sitting there.
 
 **`changed` absent is not `changed: []`.** When the read-back fails, `changed` is **omitted**
 and `counts` carries `requested` only — verification did not run, so nothing is known about

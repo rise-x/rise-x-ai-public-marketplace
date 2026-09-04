@@ -71,9 +71,13 @@ error: {code, message, hint}      # failures (code like http_403, validation)
    Work **data** is the one place this rule does not hold uniformly: a write to
    an unmodeled `dataPath` may drop or may persist, depending on the
    deployment. Do not assume either — `update_work_data_bulk` re-reads the work
-   and reports `changed` / `counts` / `dropped_value`, which is the only way to
-   know (pitfall #66).
-2. `value_differs` warnings are informational (server-side normalisation).
+   and reports `changed` / `counts` / `dropped_value`, so you learn what landed
+   without a follow-up read (pitfall #66). With `update_work_data` the only way
+   to know is `get_work(id)`, which is what its own hint tells you to call.
+2. `value_differs` warnings are informational (server-side normalisation) —
+   **except in `update_work_data_bulk`**, whose verifier treats any diff as
+   not-persisted, so a merely normalised value is left out of `changed` and
+   lowers `counts.persisted`. See `references/managing-work-items.md`.
 3. Need the raw payload? Pass `response_format="full"` — it arrives under
    `result:` with the warnings still attached. This is the mutation envelope
    only: the read tools' `format="full"` (`get_work`, `get_asset`) is a
