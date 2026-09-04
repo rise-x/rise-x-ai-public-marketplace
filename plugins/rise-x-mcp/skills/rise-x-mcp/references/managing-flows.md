@@ -68,7 +68,7 @@ Returns: `[{id, stepName, stepDisplayName, taskDisplayName, stepId, taskId, layo
 - `stepDisplayName` / `taskDisplayName` — human-readable labels.
 - `stepId` / `taskId` / `actionSetId` / `layoutId` — internal GUIDs.
 
-**Not projected:** `taskName` is omitted from this response. To get it (needed as `section_name` for `update_work_data`), call `get_flow_step(flow_id, step_id)` with the `id` field from this list — see `references/managing-work-items.md`.
+**Not projected:** `taskName` is omitted from this response. To get it (needed as `section_name` for `update_work_data_bulk` / `update_work_data`), call `get_flow_step(flow_id, step_id)` with the `id` field from this list — see `references/managing-work-items.md`.
 
 ### `get_flow_step(flow_id: str, step_id: str)`
 Full details of a single step/task.

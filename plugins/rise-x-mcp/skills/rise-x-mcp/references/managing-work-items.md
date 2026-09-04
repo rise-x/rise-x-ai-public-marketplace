@@ -35,7 +35,8 @@ Create a new work item by starting a published workflow.
 
 This is **Step 1** of the work creation pattern:
 1. `create_work(flow_id)` → get `workId`, `stepName`, `eventName`
-2. `update_work_data(workId, ...)` → set field values (repeat as needed)
+2. `update_work_data_bulk(workId, fields, section_name)` → set every field value in ONE call
+   (use `update_work_data` for a single field, or for `push` / `pull` / `rename`)
 3. `submit_work(workId, eventName, stepName)` → advance to the next step
 
 ### `get_work(id: str, format: str = "summary")`
@@ -114,7 +115,53 @@ Update a field value on a work item.
 - `value` — the value to set/push, or new name for rename
 - `section_name` — **required** — the task name scoping the data location (e.g. `"UntitledTask/Generated-..."` or the camelCase task name from `get_flow_steps`). Omitting it causes 500 errors.
 
-Can be called multiple times for different fields before submitting. Must run **sequentially** — parallel calls cause connection errors.
+One field per call. Writing several fields this way costs one PATCH each, they must run
+**sequentially** (parallel calls answer with `Cannot connect to host`), and a drop mid-sequence
+leaves the work half-populated with no signal about which fields landed — so prefer
+`update_work_data_bulk` for more than one field. This tool remains the only way to `push`,
+`pull` or `rename`: the batch endpoint offers `set` alone.
+
+### `update_work_data_bulk(id, fields, section_name, response_format="summary")`
+Set **many** work-data fields in ONE request. Prefer this over repeated `update_work_data`
+calls whenever writing more than one field — it wraps the v4 batch endpoint
+(`PATCH /api/v4/work/{id}/data/batch`), where every entry of `fields` is its own `set` op and
+all of them are applied together.
+
+**Parameters:**
+- `id` — work item GUID
+- `fields` — `{json_path: value}`, one `set` op per entry, e.g.
+  `{"$.displayName": "MV Aurora", "$.capacityMt": 74000}`. Pass **leaf** paths:
+  `{"$.vessel.name": "Aurora", "$.vessel.imo": "9321483"}` sets two fields, whereas
+  `{"$.vessel": {"name": "Aurora"}}` is a full-value `set` of the whole `vessel` object and
+  **drops every sibling it omits**. An empty or non-dict `fields` fails with code `validation`.
+- `section_name` — **required** — the task name the data belongs to, the same value
+  `update_work_data` takes (see below for how to obtain it). It is resolved client-side to the
+  task id the v4 endpoint authorises against, so a name matching no task fails with code
+  `section_not_found` and the real task names listed under `tasks`, rather than as an opaque
+  backend 403.
+- `response_format` — `"summary"` (default), or `"full"` to add the raw API response under
+  `result`.
+
+`set` is the only operation the batch endpoint offers. For `push` / `pull` / `rename`, use
+`update_work_data`. That is why both tools exist — this one is not a replacement.
+
+**It reads the values back**, which `update_work_data` does not. No follow-up `get_work` is
+needed to find out what persisted:
+- `changed` — the paths confirmed stored with the requested value.
+- `counts` — `{requested, persisted}`.
+- `warnings[]` — `dropped_value` for each path the API accepted but did not store (the usual
+  cause is an unmodeled `dataPath` — check `get_flow_data_schema` for the real one);
+  `unverified_writes` as a rollup whenever `persisted < requested`; `no_verification` when the
+  read-back itself failed.
+- The envelope also carries `workId`, `sectionId` and `originId`.
+
+**`changed` absent is not `changed: []`.** When the read-back fails, `changed` is **omitted**
+and `counts` carries `requested` only — verification did not run, so nothing is known about
+what landed. An empty `changed` is the opposite claim: verification ran and confirmed nothing
+persisted. Never read an absent `changed` as "nothing persisted".
+
+Verification is `set`-strict: clearing a field with `""` / `[]` / `{}` is confirmed only if the
+stored value really is empty, and a list must read back with the requested number of entries.
 
 ### `submit_work(id, event_name, step_name, invitation=None)`
 Submit work to advance it to the next step in its workflow. Leave `invitation`
@@ -131,20 +178,21 @@ invitation stops the server deriving recipients from the flow config.
 
 ```
 1. create_work(flow_id)                      # start workflow → get workId, stepName, eventName
-2. update_work_data(workId, "$.task.field",  # fill in fields (repeat as needed, sequentially)
-     "set", "value", section_name)
+2. update_work_data_bulk(workId,             # fill in every field in ONE request
+     {"$.task.field": "value",
+      "$.task.other": 42}, section_name)
 3. submit_work(workId, eventName, stepName)  # advance to next step
 ```
 
-The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the flow creation step. The `section_name` for `update_work_data` is the task's `taskName` (slash form like `UntitledTask/Generated-<guid>` on v3-style flows, or bare like `Task_1` on v4 native flows). `get_flow_steps` projects `taskName` **out** of its response — fetch it via `get_flow_step(flow_id, step_id)` (pass the `id` field from `get_flow_steps` as `step_id`) and read `taskName` from the full step.
+The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the flow creation step. The `section_name` — taken by `update_work_data_bulk` and `update_work_data` alike — is the task's `taskName` (slash form like `UntitledTask/Generated-<guid>` on v3-style flows, or bare like `Task_1` on v4 native flows). `get_flow_steps` projects `taskName` **out** of its response — fetch it via `get_flow_step(flow_id, step_id)` (pass the `id` field from `get_flow_steps` as `step_id`) and read `taskName` from the full step.
 
 ## Progressing an Existing Work Item
 
 ```
 1. list_work(flow_origin_id)                 # find items in a workflow (pass the ORIGIN id, not the published flow id)
 2. get_work(id)                              # inspect details, find stepName and actions
-3. update_work_data(id, "$.task.field",      # fill in fields (repeat as needed)
-     "set", "value", section_name)
+3. update_work_data_bulk(id,                 # fill in every field in ONE request
+     {"$.task.field": "value"}, section_name)
 4. submit_work(id, event_name, step_name)    # advance to next step
 ```
 

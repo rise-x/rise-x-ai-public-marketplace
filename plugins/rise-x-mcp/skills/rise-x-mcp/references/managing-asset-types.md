@@ -201,7 +201,7 @@ publish_flow("abc-123")
 # Now create a customer instance:
 # find the "customer" asset type's flowOriginId via search_flows (filter: flowResourceType == Entity)
 # create_asset(flow_origin_id)  -> get workId
-# update_work_data(workId, "$.customerDetails.companyName", "set", "Acme Corp")
+# update_work_data_bulk(workId, {"$.customerDetails.companyName": "Acme Corp"}, section_name="<taskName>")
 # submit_work(workId, "Submit", "customerDetails")
 ```
 
