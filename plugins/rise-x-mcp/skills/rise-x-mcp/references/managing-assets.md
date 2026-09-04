@@ -33,7 +33,7 @@ Response: `[{"Vessel Name": {"id": "comp-guid", "dataPath": "$.vesselDetails.ves
 | `flowOriginId` | Identifies the asset type | `search_flows` / `list_asset_types()` | `create_asset`, `list_assets` |
 | `assetId` | Internal flow ID | `search_flows` (as `id`) / `list_asset_types()` | `get_asset_type_properties` (as `flow_id`) |
 | `entityId` | Specific asset instance | `create_asset` response, `list_assets`, `get_asset` | `get_asset`, `edit_asset`, `delete_asset` |
-| `workId` | Draft work item for in-progress create/edit | `create_asset`/`edit_asset` response | `update_work_data`, `submit_work` |
+| `workId` | Draft work item for in-progress create/edit | `create_asset`/`edit_asset` response | `update_work_data_bulk`, `update_work_data`, `submit_work` |
 
 ## The 3-Step Pattern
 
@@ -46,25 +46,28 @@ Step 1: Initiate
   # NOTE: the eventName returned by create_asset ("Submit") is the DISPLAY name,
   # NOT the actual event_name to pass to submit_work. See Step 3.
 
-Step 2: Set field values (repeat per field)
-  # CRITICAL: ALWAYS set $.displayName first — this is the label shown in the UI
+Step 2: Set every field value in ONE call
+  # CRITICAL: ALWAYS include $.displayName — it is the label shown in the UI
   # list/grid. Without it the asset appears with an empty name.
-  update_work_data(
+  update_work_data_bulk(
     id=workId,
-    json_path="$.displayName",
-    operation="set",
-    value="Pacific Explorer",
-    section_name=taskName  # e.g. "UntitledTask/Generated-..." from get_flow_steps
+    fields={
+      "$.displayName": "Pacific Explorer",
+      "$.vesselDetails.vesselName": "Pacific Explorer",  # paths from get_asset_type_properties
+      "$.vesselDetails.imoNumber": "9876543",
+    },
+    section_name=taskName  # the task's taskName — see step 3 of the worked
+                           # example below; get_flow_steps projects it OUT,
+                           # so it comes from get_flow_step
   )
-
-  # Then set all other fields
-  update_work_data(
-    id=workId,
-    json_path="$.vesselDetails.vesselName",   # from get_asset_type_properties
-    operation="set",
-    value="Pacific Explorer",
-    section_name=taskName
-  )
+  # Read `changed` and `counts` on the response — they say which paths actually
+  # persisted, so no follow-up get_work is needed WHEN `changed` is present.
+  # If it is absent the read-back failed and nothing is known: call get_work.
+  # A `dropped_value` warning means that path did not land — fix the path.
+  # Note: storing a value is not proof the path is one the flow reads
+  # (pitfall #66), so get the paths from get_asset_type_properties first.
+  # For push / pull / rename, use update_work_data instead, one field per call.
+  # Which writer to use when: § Writing Asset Data below.
 
 Step 3: Finalize
   # create_asset already returned the resolved stepName, eventName and
@@ -112,8 +115,10 @@ Step 1: Initiate edit
   # Extract: workId, stepName, eventName from response
 
 Step 2: Modify fields
-  update_work_data(id=workId, json_path="$.vesselDetails.vesselName",
-    operation="set", value="New Name")
+  # section_name is the task's taskName — same lookup as the create flow
+  # (get_flow_steps → get_flow_step → taskName); it is required here too.
+  update_work_data_bulk(id=workId, section_name=taskName,
+    fields={"$.vesselDetails.vesselName": "New Name"})
 
 Step 3: Finalize
   submit_work(id=workId, event_name=eventName, step_name=stepName)
@@ -128,7 +133,7 @@ Initiates a draft workflow for a new asset. Returns:
   "workId": "draft-work-guid",
   "stepName": "vesselDetails",
   "eventName": "Submit",
-  "nextSteps": "Use update_work_data with id='...' to set field values, then call submit_work..."
+  "nextSteps": "Use update_work_data_bulk with id='<workId>' to set the field values in one call (include $.displayName so the asset list shows a name; update_work_data for one field, or push/pull/rename), then call submit_work with id='<workId>', step_name='<step>', event_name='<event>'[, invitation=<the returned invitation>] to finalize."
 }
 ```
 
@@ -137,14 +142,24 @@ Initiates an edit workflow for an existing asset. Same response structure as `cr
 
 - `asset_id` — the entity ID of the asset to edit (from `get_asset` or `list_assets`)
 
-## update_work_data Operations
+## Writing Asset Data
+
+Both writers take `section_name` (the task's `taskName`) and are documented in full in
+`references/managing-work-items.md`.
+
+| Tool | Use it for |
+|---|---|
+| `update_work_data_bulk(id, fields, section_name)` | **The default.** Any number of fields, all `set`, applied in ONE request; reads the values back and reports `changed` / `counts` |
+| `update_work_data(id, json_path, operation, value, section_name)` | A single field, or any operation other than `set` |
+
+`update_work_data` operations:
 
 | Operation | Description |
 |---|---|
-| `"set"` | Create or overwrite a value at the path |
-| `"push"` | Append to an array at the path |
-| `"pull"` | Remove the field at the path |
-| `"rename"` | Rename the field (value = new name) |
+| `"set"` | Create or overwrite a value at the path (also available in bulk) |
+| `"push"` | Append to an array at the path (bulk cannot express this) |
+| `"pull"` | Remove the field at the path (bulk cannot express this) |
+| `"rename"` | Rename the field (value = new name; bulk cannot express this) |
 
 ## Reading and Listing Assets
 
@@ -194,18 +209,26 @@ steps = get_flow_steps("def-456")  # use assetId (the flow's id), NOT flowOrigin
 step = get_flow_step("def-456", steps[0]["id"])
 # Returns the full FlowPocoStep_v4, including taskName.
 # For v3-style asset flows, taskName is slash form like "UntitledTask/Generated-<guid>".
-# Use step["taskName"] as section_name in every update_work_data call below.
+# Use step["taskName"] as section_name in the data write below.
 
 # 4. Create the asset
 create_asset("abc-123")
 # Returns: {workId: "work-789", stepName: "vesselDetails/...", eventName: "Submit"}
 # NOTE: eventName "Submit" is a DISPLAY label — don't use it for submit_work.
 
-# 5. Set field values — ALWAYS set $.displayName first, and pass section_name
-update_work_data("work-789", "$.displayName", "set", "Pacific Explorer", section_name="UntitledTask/Generated-xxx")
-update_work_data("work-789", "$.vesselDetails.vesselName", "set", "Pacific Explorer", section_name="UntitledTask/Generated-xxx")
-update_work_data("work-789", "$.vesselDetails.imoNumber", "set", "9876543", section_name="UntitledTask/Generated-xxx")
-update_work_data("work-789", "$.vesselDetails.flagState", "set", "Panama", section_name="UntitledTask/Generated-xxx")
+# 5. Set every field value in one request — ALWAYS include $.displayName
+update_work_data_bulk(
+    "work-789",
+    fields={
+        "$.displayName": "Pacific Explorer",
+        "$.vesselDetails.vesselName": "Pacific Explorer",
+        "$.vesselDetails.imoNumber": "9876543",
+        "$.vesselDetails.flagState": "Panama",
+    },
+    section_name="UntitledTask/Generated-xxx",
+)
+# Response carries changed: [...all four paths...] and counts: {requested: 4,
+# persisted: 4}. Anything less, and the warnings name the paths that did not land.
 
 # 6. Fallback only — step 4's response normally carries the resolved stepName,
 #    eventName and invitation (Common Mistakes #7 and #8); use those. If it did not:
@@ -233,6 +256,6 @@ submit_work(
 6. **Missing `$.displayName`** — UI shows assets by `$.displayName`. If you only set domain fields (like `legalEntityName`), the list view will show a blank name. Always set `$.displayName` explicitly.
 7. **Re-deriving the submit `event_name` by hand** — `create_asset`/`edit_asset` now return the **resolved** `stepName` and `eventName` (the nested submit step's full name, e.g. `SubmitUntitledStep/Generated-...`). Pass those straight to `submit_work` for both `event_name` and `step_name`. The `eventName: "Submit"` display label is only a fallback — you no longer need a `get_work()` round-trip to discover the real name.
 8. **Dropping the returned `invitation`** — `create_asset`/`edit_asset` also return the `invitation` payload (when the step requires one). Pass it verbatim to `submit_work`; without it the submit may not finalize and the asset stays in Draft. Only fall back to `get_work(workId).actions[0].invitation` if the create/edit response didn't include one.
-9. **Not passing `section_name` to `update_work_data` for asset fields** — asset type flows typically have a single task (e.g. `UntitledTask/Generated-...`). Without `section_name`, updates may return 500 errors. Get the task name from `get_flow_steps(assetId)` (the flow's `id`, not its `flowOriginId`).
-10. **Running update_work_data calls in parallel** — causes concurrency/connection errors. Always call sequentially.
+9. **Passing a `section_name` that matches no task** — asset type flows typically have a single task (e.g. `UntitledTask/Generated-...`), and `section_name` is a **required** parameter on both writers, so it cannot be left out. Getting it *wrong* is the real failure: `update_work_data_bulk` reports code `section_not_found` with the real task names under `tasks`, while `update_work_data` surfaces it as a backend error. Get the name from `get_flow_step` (`get_flow_steps` projects `taskName` out), using the flow's `id`, not its `flowOriginId`.
+10. **Writing fields one at a time when `update_work_data_bulk` would do** — a 20-field asset costs 20 sequential PATCHes, and they cannot be parallelised (concurrent writes answer `Cannot connect to host`). Send one `update_work_data_bulk` call instead; fall back to `update_work_data` for a single field, and as the only route to `push` / `pull` / `rename`.
 11. **Reading a `create_asset` 403 as a permissions problem** — it almost always means a flow id (or a stale id) was passed instead of a `flowOriginId`. Get the `flowOriginId` from `search_flows` (flowResourceType=Entity) or `list_asset_types`. The server error hint says this too (since 1.2.0).

@@ -90,7 +90,7 @@ Fetch the exact payload before authoring: `get_schema("pipelines", "pipeline/if/
 3. manage_pipeline(draft_flow_id, "list")      # confirm it persisted
 4. publish_flow(draft_flow_id)                 # rules only run on a PUBLISHED flow
 5. create_work(flow_origin_id)                 → workId
-6. update_work_data(workId, "$.priority", "set", "Critical", section_name="<task>")
+6. update_work_data_bulk(workId, {"$.priority": "Critical"}, section_name="<task>")
 7. get_work(workId)                            # the pipeline has set $.slaFlag
 ```
 
