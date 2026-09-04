@@ -67,10 +67,10 @@ Step 2: Set field values (repeat per field)
   )
 
 Step 3: Finalize
-  # Before submitting, call get_work(workId, format="full") to find the
-  # actual submit step & event — summary's actions[] already covers most flows (see
-  # Common Mistakes #7 and #8), but this fallback still needs steps[], which is dropped
-  # by the default summary view.
+  # create_asset already returned the resolved stepName, eventName and
+  # invitation (Common Mistakes #7 and #8) — pass those straight to submit_work.
+  # Only if that response lacked them, call get_work(workId, format="full"):
+  # this fallback reads steps[], which the default summary view drops.
   # Look inside steps[] for a nested step with displayName: "Submitted" and
   # name: "SubmitUntitledStep/Generated-..." — this full name is what you need
   # for BOTH step_name AND event_name (they are identical).
@@ -159,7 +159,7 @@ Initiates an edit workflow for an existing asset. Same response structure as `cr
 **Do not** call `list_assets` and then filter or sort the result client-side — `search_assets` is a real filter / sort / projection engine, including dynamic `data.*` fields. Every `search_assets` query needs a `flowOriginId` pin on the AND-spine (the asset type's `flowOriginId` from `search_flows` or `list_asset_types`), not just `data.*` ones; for a `data.*` query, discover the valid paths first with `get_flow_data_schema`. `contains` / `endsWith` are Flow- and Company-only — use `startsWith`. Asset `status` is `DianaEntityStatus` (`Open` / `Closed` / `Deleted`), not Work's states.
 
 ### `get_asset(entity_id: str, format: str = "summary")`
-- `format="summary"` (default) — identity (`id`, `entityId`, `resourceId`, `displayName`, `name`, `code`, `workCode`, `entityType`), state (`currentState`, `previousState`, `workState`, `status`), the active step and flow ids (`activeStepId`, `activeStepName`, `flowId`, `flowOriginId`, `flowDisplayName`), the `canEdit` / `canDelete` / `canClone` / `canDelegate` flags, `revision`, `draftWorkId`, `created`, `lastModified`, `createdBy` / `lastModifiedBy`, `publishStatus`, `relationships`, and the asset's `data`. An `omitted` note lists which of the heavy keys (`workDraft`, `steps`, `flowProperties`, `users`, `companies`, `cardLayout`, `dataMap`, `actions`, `chains`, `attachments`, `layoutProperties`) carried a value; unlike `get_work`'s note it covers only those keys, and this view drops `actions` and `attachments` where `get_work`'s keeps them.
+- `format="summary"` (default) — identity (`id`, `entityId`, `resourceId` — the id of the resource this entity record was created from, from which its `id` is derived; not the app-manifest `resourceId` in `managing-apps.md` — `displayName`, `name`, `code`, `workCode`, `entityType`), state (`currentState`, `previousState`, `workState`, `status`), the active step and flow ids (`activeStepId`, `activeStepName`, `flowId`, `flowOriginId`, `flowDisplayName`), the `canEdit` / `canDelete` / `canClone` / `canDelegate` flags, `revision`, `draftWorkId`, `created`, `lastModified`, `createdBy` / `lastModifiedBy`, `publishStatus` (lifted from the document's `dianaVersion`: the publish state of this asset record, `Draft` / `Published` / `Revised`, not the asset type's), `relationships`, and the asset's `data`. An `omitted` note lists which of the heavy keys (`workDraft`, `steps`, `flowProperties`, `users`, `companies`, `cardLayout`, `dataMap`, `actions`, `chains`, `attachments`, `layoutProperties`) carried a value; unlike `get_work`'s note it covers only those keys, and this view drops `actions` and `attachments` where `get_work`'s keeps them.
 - `format="full"` — the raw document. Pass this when you need something the `omitted` note flagged.
 
 Date fields here are `created` and `lastModified`; other tools spell them differently — see `references/common-pitfalls.md` pitfall #65.
@@ -207,7 +207,8 @@ update_work_data("work-789", "$.vesselDetails.vesselName", "set", "Pacific Explo
 update_work_data("work-789", "$.vesselDetails.imoNumber", "set", "9876543", section_name="UntitledTask/Generated-xxx")
 update_work_data("work-789", "$.vesselDetails.flagState", "set", "Panama", section_name="UntitledTask/Generated-xxx")
 
-# 6. Find the real submit step + event name, and the invitation payload
+# 6. Fallback only — step 4's response normally carries the resolved stepName,
+#    eventName and invitation (Common Mistakes #7 and #8); use those. If it did not:
 get_work("work-789", format="full")
 # Inside steps[] find the nested step with displayName: "Submitted" and
 # name: "SubmitUntitledStep/Generated-yyy" — that is BOTH step_name and event_name.

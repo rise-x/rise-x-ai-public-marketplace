@@ -70,7 +70,10 @@ error: {code, message, hint}      # failures (code like http_403, validation)
    that part of your request did NOT land — do not report success to the user.
 2. `value_differs` warnings are informational (server-side normalisation).
 3. Need the raw payload? Pass `response_format="full"` — it arrives under
-   `result:` with the warnings still attached.
+   `result:` with the warnings still attached. This is the mutation envelope
+   only: the read tools' `format="full"` (`get_work`, `get_asset`) is a
+   different parameter and returns the document directly, with no `result:`
+   wrapper and no `warnings[]`.
 4. Error envelopes carry a `code` (`http_403`, `validation`, `transient`, …)
    and usually a `hint` with the fix. A **request-side** `validation` error
    (caught before sending) means nothing was sent — fix and retry. An
