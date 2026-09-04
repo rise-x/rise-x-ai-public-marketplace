@@ -8,6 +8,7 @@
 | "Add a feature to app <x>" / "Use shell user/env in my app" | Skip bootstrap. If the feature adds or changes UI, design phase first (`references/design.md`, mock → approval); then edit files under the app's `src/` using the patterns below. |
 | "Wire installation behaviour" / "Migrate data on update" | Edit the app's `src/lifecycle.ts`. |
 | "Build/deploy the app" | `pnpm build` in the app folder, then deploy via the Rise-X MCP (default: **test**) — see Build and deploy. |
+| "Make the app work offline" | `src/lifecycle.ts`'s `onOfflineDownload`, plus offline-aware reads/writes (SDK >= 0.12) — see `references/offline.md`. |
 
 ## Bootstrap a new app
 
@@ -499,6 +500,7 @@ import { useAppDependencies, getAppDependency, getAppDependencies } from '@rise-
 // Domain connectors — typed wrappers over the raw clients (separate entry):
 import {
   flows, work, assets, agents, ConnectorError,
+  attachments, offline, // SDK >= 0.12 — the offline surface (references/offline.md)
   streamAgentReply, collectAgentReply, // consume agents.run/chat.send streams (accumulated)
 } from '@rise-x/apps-sdk/connectors';
 
@@ -520,9 +522,11 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 | Connector | Domain | Key methods |
 | --- | --- | --- |
 | `flows` | flow discovery (read-only) | `list` (**work flows only**), `get`, `findTask`/`findTaskIn`, `getConfig`, `getLayout`, `flattenLayoutFields` |
-| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `listRelated`, `getAudit` |
+| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `listRelated`, `getAudit`, `getMyAccess` |
 | `assets` | typed records ("entities"/"things") | `types` (**asset-type flows**), `get`, `search`, `quickSearch`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
 | `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
+| `attachments` | work-attachment blobs (SDK >= 0.12) | `getBlob`, `upload`, `delete` |
+| `offline` | connectivity, the offline queue, and downloads (SDK >= 0.12) | see `references/offline.md` |
 
 ```ts
 // Connectors (generic) — flows discovery, work items, assets, configurable agents.
@@ -657,6 +661,8 @@ All connector failures normalize to `ConnectorError` (`code: 'SHELL_UNAVAILABLE'
 
 For component data, **default to `@rise-x/apps-sdk/query`** (react-query v5 over the connectors) instead of hand-rolling `useState`/`useEffect` fetches — caching, dedupe, refetch, and abort come free. The raw connectors remain the tool for event handlers, lifecycle hooks, and non-React code.
 
+Offline, the hooks answer from the platform's offline cache when the flow's data is downloaded, and settle into their **error** state (recovering on reconnect) when it is not (SDK >= 0.12 — see `references/offline.md`). Render both states: a work that was never downloaded errors rather than resolving, so a screen that only handles the happy path sits on a spinner that never settles.
+
 ```tsx
 import { useFlows, useWorkRows, useSubmitWork, dedupeRows } from '@rise-x/apps-sdk/query';
 
@@ -715,10 +721,10 @@ bar is yours to build.
 
 ### Lifecycle hooks (`src/lifecycle.ts`)
 
-Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently. They run inside the shell page, so all the SDK accessors work from inside them.
+Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently — except `onOfflineDownload` (SDK >= 0.12), which is user-initiated, may run minutes, and where throwing **fails the download** (see `references/offline.md`). They run inside the shell page, so all the SDK accessors work from inside them.
 
 ```ts
-import type { InstallHook, UpdateHook, UninstallHook } from '@rise-x/apps-sdk';
+import type { InstallHook, UpdateHook, UninstallHook, OfflineDownloadHook } from '@rise-x/apps-sdk';
 import localforage from 'localforage';   // or whatever you persist with
 
 export const onInstall: InstallHook = async ({ manifest, user, environment }) => {
@@ -746,7 +752,9 @@ The scaffolded `src/bootstrap.tsx` already calls `createMockShell` when the stan
 error state locally — the content path (tables, charts, totals) never executes
 until the app is deployed into a host. That is how content-path rendering bugs
 reach production: standalone dev cannot see them, so their first real execution
-is in front of a user.
+is in front of a user. The `offline` connector (SDK >= 0.12) is the exception: its methods
+throw `SHELL_TOO_OLD` when the offline bridge isn't available — all but
+`offline.isOnline()`, which answers `true` there instead (`references/offline.md`).
 
 **Seed `fixtures` so the real screens render before you deploy** (SDK >= 0.7.0).
 This matters most when building **outside the `rise-x-app` monorepo** — the
@@ -863,13 +871,18 @@ running app.
 
 1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
 2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
-3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?)` —
+3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` —
    omit `app_id` for a brand-new app (a GUID is generated and returned); pass
    the existing GUID to release a new version. `version` comes from the app's
-   `package.json` and must be unique per app — bump it every release.
+   `package.json` and must be unique per app — bump it every release (the
+   enforcement is narrower than the practice — the rise-x-mcp plugin's
+   `managing-apps.md` spells it out).
    `app_scope` is snake_case and **must match the MF scope the preset derives
    from the package name** (`@rise-x-apps/my-app` → `app_my_app`); the
    scaffolder's `--json` output reports it as `scope`.
+   `feature_flags` is an optional `dict` of app feature flags, e.g.
+   `{"isOfflineModeEnabled": true}` — what makes the shell offer "Make
+   available offline" (see `references/offline.md`).
 
 The result carries the app `id` and the canonical manifest (`remoteUrl`,
 `version`, `scope`, `deployedAt`, `sizeBytes`), plus `dependencyCount`, the

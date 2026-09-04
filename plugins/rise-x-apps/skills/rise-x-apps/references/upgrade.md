@@ -87,7 +87,12 @@ habit.
    system and get explicit approval before rebuilding. A component-library
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
-   in components; `/connectors` in event handlers and lifecycle hooks.
+   in components; `/connectors` in event handlers and lifecycle hooks. In an
+   offline-capable app, bump `@rise-x/apps-sdk` to >= 0.12 before this step —
+   that is where the hooks' offline-cache behaviour lives
+   (`references/offline.md` §4). Check that version is available first
+   (`npm view @rise-x/apps-sdk version`) — on an older SDK this step lands
+   without the offline behaviour.
 5. **Move ids into `rise-x-app.json`** (needs the SDK version named in
    `references/build.md` §App dependencies). **Start by finding them — don't
    read the code hunting for GUIDs by hand:**
