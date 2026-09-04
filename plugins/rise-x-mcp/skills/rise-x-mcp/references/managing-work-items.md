@@ -2,7 +2,7 @@
 
 ## What is a Work Item?
 
-A **work item** is a running instance of a flow. It progresses through steps via submit actions, contains data fields, and tracks a status (`Open`, `Closed`, `Completed`, `Deleted`; `Ok` is a sync-process flag).
+A **work item** is a running instance of a flow. It progresses through steps via submit actions, contains data fields, and tracks a status (`Open`, `Closed`, `Completed`, `Deleted`; `Ok` is set only by the sync process).
 
 Work tools are also used as part of the **asset workflow pattern** — see `references/managing-assets.md`.
 
@@ -42,14 +42,14 @@ This is **Step 1** of the work creation pattern:
 Get a work item by its GUID.
 
 - `format="summary"` (default) — `id`, `workCode`, `name`, `displayName`, `flowId`, `flowOriginId`, `flowDisplayName`, `activeStepId`, `activeStepName`, `status`, `statusLabel`, `statusColor`, `flowState`, `workState`, `workStateName`, `currentState`, `flowType`, `roleName`, `canEdit`, `canDelete`, `canDelegate`, `attachments`, `createdDate`, `lastModified`, `createdBy`, `lastModifiedBy`, `data`, `assignedUsers`, `roles`, `relationships`, `tasks`, `globalActions`, `submitErrorRequestIds`, and `actions` (each `{stepName, stepId, stepDisplayName, canExecute, invitation, events: [{id, eventName, name, displayName}]}`). Adds an `omitted` note listing the dropped top-level keys that carried a value — typically `steps`, `users`, `chains`, `cardLayout`, `companies`, `company`, `lastModifiedTicks`, `schemaVersion`, `workStateColor` — and ends with "pass format='full' to include".
-- `format="full"` — the raw v3 document, `steps` and all, returned directly rather than wrapped in a mutation envelope. Pass this when you need something the `omitted` note flagged.
+- `format="full"` — the raw v3 document, `steps` and all. Pass this when you need something the `omitted` note flagged.
 
 Key fields in the summary response:
 - `id` — work item GUID
 - `activeStepName` — current step the work is on
 - `actions` — available actions, with `events[].eventName` for `submit_work`
 - `data` — form field values
-- `status` — `Open`, `Closed`, `Completed`, `Deleted`, or `Ok` (`DianaWorkState`; `Ok` is a sync-process flag, almost never seen)
+- `status` — `Open`, `Closed`, `Completed`, `Deleted`, or `Ok` (`DianaWorkState`; `Ok` is set only by the sync process)
 
 ### `duplicate_work(id: str, response_format="summary")`
 Duplicate a work item into a **brand-new work** on the same flow — the DIANA-native "Duplicate" button.
@@ -161,5 +161,5 @@ The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the
 `status="all"|"inProgress"|"completed"|"deleted"`, `active_step_ids`,
 `sort_field`/`sort_direction`, `date_from`/`date_to`. The response is an
 envelope `{items, returned, skip, limit, hasMore, nextSkip}` — loop on
-`nextSkip` until `hasMore` is false. Rows are projected; `get_work(id)` for
-the full record.
+`nextSkip` until `hasMore` is false. Rows are projected; `get_work(id)` for the summary,
+`get_work(id, format="full")` for the full record.

@@ -22,7 +22,7 @@ Prefer `search_flows` (above), which returns the same fields (including `entityT
 Response: `[{"thingType": "vessel", "displayName": "Vessel", "assetId": "flow-guid", "flowOriginId": "origin-guid"}]`
 
 ### `get_asset_type_properties(flow_id: str)`
-Get field labels and dataPaths for an asset type. Takes the asset type's flow id (the `assetId` from `search_flows`/`list_asset_types`, not flowOriginId). Do not pass an asset instance id.
+Get field labels and dataPaths for an asset type. Takes the asset type's flow id (the `id` of a `search_flows` row or the `assetId` from `list_asset_types`, not `flowOriginId`). Do not pass an asset instance id.
 
 Response: `[{"Vessel Name": {"id": "comp-guid", "dataPath": "$.vesselDetails.vesselName"}}]`
 
@@ -69,7 +69,7 @@ Step 2: Set field values (repeat per field)
 Step 3: Finalize
   # Before submitting, call get_work(workId, format="full") to find the
   # actual submit step & event — summary's actions[] already covers most flows (see
-  # Common Mistakes #8), but this fallback still needs steps[], which is dropped
+  # Common Mistakes #7 and #8), but this fallback still needs steps[], which is dropped
   # by the default summary view.
   # Look inside steps[] for a nested step with displayName: "Submitted" and
   # name: "SubmitUntitledStep/Generated-..." — this full name is what you need
@@ -159,8 +159,8 @@ Initiates an edit workflow for an existing asset. Same response structure as `cr
 **Do not** call `list_assets` and then filter or sort the result client-side — `search_assets` is a real filter / sort / projection engine, including dynamic `data.*` fields. Every `search_assets` query needs a `flowOriginId` pin on the AND-spine (the asset type's `flowOriginId` from `search_flows` or `list_asset_types`), not just `data.*` ones; for a `data.*` query, discover the valid paths first with `get_flow_data_schema`. `contains` / `endsWith` are Flow- and Company-only — use `startsWith`. Asset `status` is `DianaEntityStatus` (`Open` / `Closed` / `Deleted`), not Work's states.
 
 ### `get_asset(entity_id: str, format: str = "summary")`
-- `format="summary"` (default) — identity (`id`, `entityId`, `displayName`, `name`, `code`, `workCode`, `entityType`), state (`currentState`, `previousState`, `workState`, `status`), the active step and flow ids (`activeStepId`, `activeStepName`, `flowId`, `flowOriginId`, `flowDisplayName`), the `canEdit` / `canDelete` / `canClone` / `canDelegate` flags, `revision`, `draftWorkId`, `created`, `lastModified`, `relationships`, and the asset's `data`. Heavy keys that carried a value (`workDraft`, `steps`, `flowProperties`, `users`, `companies`, `cardLayout`, `dataMap`, `actions`, `chains`, `attachments`, `layoutProperties`) are listed in an `omitted` note, the same mechanism as `get_work`, though this view drops `actions` and `attachments` where `get_work`'s keeps them.
-- `format="full"` — the raw document, returned directly rather than wrapped in a mutation envelope. Pass this when you need something the `omitted` note flagged.
+- `format="summary"` (default) — identity (`id`, `entityId`, `resourceId`, `displayName`, `name`, `code`, `workCode`, `entityType`), state (`currentState`, `previousState`, `workState`, `status`), the active step and flow ids (`activeStepId`, `activeStepName`, `flowId`, `flowOriginId`, `flowDisplayName`), the `canEdit` / `canDelete` / `canClone` / `canDelegate` flags, `revision`, `draftWorkId`, `created`, `lastModified`, `createdBy` / `lastModifiedBy`, `publishStatus`, `relationships`, and the asset's `data`. An `omitted` note lists which of the heavy keys (`workDraft`, `steps`, `flowProperties`, `users`, `companies`, `cardLayout`, `dataMap`, `actions`, `chains`, `attachments`, `layoutProperties`) carried a value; unlike `get_work`'s note it covers only those keys, and this view drops `actions` and `attachments` where `get_work`'s keeps them.
+- `format="full"` — the raw document. Pass this when you need something the `omitted` note flagged.
 
 Date fields here are `created` and `lastModified`; other tools spell them differently — see `references/common-pitfalls.md` pitfall #65.
 
