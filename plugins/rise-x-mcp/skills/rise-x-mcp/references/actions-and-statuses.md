@@ -23,6 +23,7 @@
   - [Grid Columns](#grid-columns)
   - [Adding Custom Columns](#adding-custom-columns)
   - [Default Columns](#default-columns)
+- [Status Labels: Prefer the Action Over a State Chain](#status-labels-prefer-the-action-over-a-state-chain)
 - [Common Mistakes](#common-mistakes)
 
 ## What are Actions?
@@ -465,6 +466,39 @@ When created with `AddAll` flags, flows get these default columns automatically:
 - **Last Modified** — timestamp
 - **Created By** — initiator
 - **Assigned Users** — current assignees
+
+## Status Labels: Prefer the Action Over a State Chain
+
+A flow can express "what state is this in, and what colour is it" two ways: the
+`completedName`/`completedColor` on each action, or a state chain via
+`manage_chain`. Prefer the action.
+
+One thing to configure instead of two. It is set in the same place as the action
+that produces the state, so the label sits on the thing that caused it. A chain
+is a second mapping, keyed by state name, that has to be kept in step with the
+actions by hand.
+
+**Read them, then sanity-check them.** These fields are frequently wrong, because
+nothing validates them and nobody looks. A live flow inspected recently had, on
+one approval task:
+
+```
+Submit     → completedName: "Transport Details"   color: primary
+Send Back  → completedName: "Submitted"           color: primary
+```
+
+A rejected request named "Submitted", and a send-back sharing the primary colour
+with an approval. Before an app renders these, check that each `completedName`
+describes the state the action *leaves behind* and that a rejection is not
+wearing an approval's colour.
+
+**A flow's chain is often unconfigured boilerplate.** `manage_chain(flow_id,
+"list")` on that same flow returned one chain, `chainColours`, whose rules had
+`displayName: "Display Name"` keyed to `UntitledTask/Generated-…` state names
+matching no task in the flow. The chain *feature* works — that flow's chain was
+never filled in. Two conclusions to avoid: don't decide the platform has no
+state model from one empty chain, and don't build on a chain without checking
+its rules resolve against the current task set.
 
 ## Common Mistakes
 
