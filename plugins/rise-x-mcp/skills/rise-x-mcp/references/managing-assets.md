@@ -21,8 +21,8 @@ Prefer `search_flows` (above), which returns the same fields (including `entityT
 
 Response: `[{"thingType": "vessel", "displayName": "Vessel", "assetId": "flow-guid", "flowOriginId": "origin-guid"}]`
 
-### `get_asset_type_properties(asset_id: str)`
-Get field labels and dataPaths for an asset type. Takes the `assetId` (not flowOriginId).
+### `get_asset_type_properties(flow_id: str)`
+Get field labels and dataPaths for an asset type. Takes the asset type's flow id (the `id` of a `search_flows` row or the `assetId` from `list_asset_types`, not `flowOriginId`). Do not pass an asset instance id.
 
 Response: `[{"Vessel Name": {"id": "comp-guid", "dataPath": "$.vesselDetails.vesselName"}}]`
 
@@ -31,7 +31,7 @@ Response: `[{"Vessel Name": {"id": "comp-guid", "dataPath": "$.vesselDetails.ves
 | Identifier | What it is | Source | Used in |
 |---|---|---|---|
 | `flowOriginId` | Identifies the asset type | `search_flows` / `list_asset_types()` | `create_asset`, `list_assets` |
-| `assetId` | Internal flow ID | `search_flows` (as `id`) / `list_asset_types()` | `get_asset_type_properties` |
+| `assetId` | Internal flow ID | `search_flows` (as `id`) / `list_asset_types()` | `get_asset_type_properties` (as `flow_id`) |
 | `entityId` | Specific asset instance | `create_asset` response, `list_assets`, `get_asset` | `get_asset`, `edit_asset`, `delete_asset` |
 | `workId` | Draft work item for in-progress create/edit | `create_asset`/`edit_asset` response | `update_work_data`, `submit_work` |
 
@@ -67,7 +67,10 @@ Step 2: Set field values (repeat per field)
   )
 
 Step 3: Finalize
-  # Before submitting, call get_work(workId) to find the actual submit step & event.
+  # create_asset already returned the resolved stepName, eventName and
+  # invitation (Common Mistakes #7 and #8) — pass those straight to submit_work.
+  # Only if that response lacked them, call get_work(workId, format="full"):
+  # this fallback reads steps[], which the default summary view drops.
   # Look inside steps[] for a nested step with displayName: "Submitted" and
   # name: "SubmitUntitledStep/Generated-..." — this full name is what you need
   # for BOTH step_name AND event_name (they are identical).
@@ -155,8 +158,13 @@ Initiates an edit workflow for an existing asset. Same response structure as `cr
 
 **Do not** call `list_assets` and then filter or sort the result client-side — `search_assets` is a real filter / sort / projection engine, including dynamic `data.*` fields. Every `search_assets` query needs a `flowOriginId` pin on the AND-spine (the asset type's `flowOriginId` from `search_flows` or `list_asset_types`), not just `data.*` ones; for a `data.*` query, discover the valid paths first with `get_flow_data_schema`. `contains` / `endsWith` are Flow- and Company-only — use `startsWith`. Asset `status` is `DianaEntityStatus` (`Open` / `Closed` / `Deleted`), not Work's states.
 
-### `get_asset(entity_id: str)`
-Full asset data including all properties, metadata, and workflow state.
+### `get_asset(entity_id: str, format: str = "summary")`
+- `format="summary"` (default) — identity (`id`, `entityId`, `resourceId` — the id of the resource this entity record was created from, from which its `id` is derived; not the app-manifest `resourceId` in `managing-apps.md` — `displayName`, `name`, `code`, `workCode`, `entityType`), state (`currentState`, `previousState`, `workState`, `status`), the active step and flow ids (`activeStepId`, `activeStepName`, `flowId`, `flowOriginId`, `flowDisplayName`), the `canEdit` / `canDelete` / `canClone` / `canDelegate` flags, `revision`, `draftWorkId`, `created`, `lastModified`, `createdBy` / `lastModifiedBy`, `publishStatus` (lifted from the document's `dianaVersion`; the same `DianaPublishStatus` enum as a flow's, see `managing-flows.md`, but an asset record is only ever written as `Draft` or `Published`, and deletion is tracked on `status`, not here; not the asset type's), `relationships`, and the asset's `data`. An `omitted` note lists which of the heavy keys (`workDraft`, `steps`, `flowProperties`, `users`, `companies`, `cardLayout`, `dataMap`, `actions`, `chains`, `attachments`, `layoutProperties`) carried a value; unlike `get_work`'s note it covers only those keys, and this view drops `actions` and `attachments` where `get_work`'s keeps them.
+- `format="full"` — the raw document. Pass this when you need something the `omitted` note flagged.
+
+Date fields here are `created` and `lastModified`; other tools spell them differently — see `references/common-pitfalls.md` pitfall #65.
+
+The create/edit flow does not need `full`: `create_asset` / `edit_asset` return the resolved `stepName`, `eventName`, and `invitation` (Common Mistakes #7 and #8).
 
 ### `list_assets(flow_origin_id: str, skip: int = 0, limit: int = 50)`
 Simple paginated list of one asset type's assets — `flowOriginId` from `search_flows` or `list_asset_types`. Returns the paginated envelope `{items, returned, skip, limit, hasMore, nextSkip}` (loop on `nextSkip` while `hasMore`). For any filter / sort / projection, use `search_assets`, not this.
@@ -174,7 +182,7 @@ search_flows(filter={"field": "flowResourceType", "operator": "equals", "values"
 # Find: {"displayName": "Vessel", "flowOriginId": "abc-123", "id": "def-456", "entityType": "vessel"}
 
 # 2. Get field paths
-get_asset_type_properties("def-456")
+get_asset_type_properties(flow_id="def-456")
 # Returns: [{"Vessel Name": {"dataPath": "$.vesselDetails.vesselName"}}, ...]
 
 # 3. Find the step id, then fetch the full step to get its taskName
@@ -199,8 +207,9 @@ update_work_data("work-789", "$.vesselDetails.vesselName", "set", "Pacific Explo
 update_work_data("work-789", "$.vesselDetails.imoNumber", "set", "9876543", section_name="UntitledTask/Generated-xxx")
 update_work_data("work-789", "$.vesselDetails.flagState", "set", "Panama", section_name="UntitledTask/Generated-xxx")
 
-# 6. Find the real submit step + event name, and the invitation payload
-get_work("work-789")
+# 6. Fallback only — step 4's response normally carries the resolved stepName,
+#    eventName and invitation (Common Mistakes #7 and #8); use those. If it did not:
+get_work("work-789", format="full")
 # Inside steps[] find the nested step with displayName: "Submitted" and
 # name: "SubmitUntitledStep/Generated-yyy" — that is BOTH step_name and event_name.
 # Also grab actions[0].invitation to route to End.

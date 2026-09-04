@@ -18,6 +18,9 @@ Any of these marks the app as old:
   own component kit or icon set, another component library.
 - Data fetched with hand-rolled `useEffect`/axios instead of the `/query`
   hooks or `/connectors`.
+- Flow / asset-type / agent GUIDs hardcoded in source or a hand-rolled config
+  module — no `rise-x-app.json` at the app root. `npx @rise-x/apps-sdk scan`
+  answers this one for you, without reading the app first (SDK 0.12.0 or later).
 - No `APP.md` / `AGENTS.md` at the app root.
 - An in-app top-bar navigation (now disallowed — nav belongs on the left).
 
@@ -84,8 +87,50 @@ habit.
    system and get explicit approval before rebuilding. A component-library
    migration changes every screen; it is never a silent swap.
 4. **Adopt the data layer.** Replace hand-rolled fetching with `/query` hooks
-   in components; `/connectors` in event handlers and lifecycle hooks.
-5. **Add the docs.** `AGENTS.md` and the one-line `CLAUDE.md` pointer can be
+   in components; `/connectors` in event handlers and lifecycle hooks. In an
+   offline-capable app, bump `@rise-x/apps-sdk` to >= 0.12 before this step —
+   that is where the hooks' offline-cache behaviour lives
+   (`references/offline.md` §4). Check that version is available first
+   (`npm view @rise-x/apps-sdk version`) — on an older SDK this step lands
+   without the offline behaviour.
+5. **Move ids into `rise-x-app.json`** (needs the SDK version named in
+   `references/build.md` §App dependencies). **Start by finding them — don't
+   read the code hunting for GUIDs by hand:**
+
+   ```bash
+   npx @rise-x/apps-sdk scan            # every undeclared id, with its kind
+   npx @rise-x/apps-sdk scan --json     # same, machine-readable
+   ```
+
+   Each finding carries the id, the inferred kind, a suggested alias, and every
+   file:line it appears at. Work from that list, and treat an unclear kind as a
+   question for the user (or a `list_flows` / `list_asset_types` / `list_agents`
+   call), never a guess.
+
+   Then run `npx @rise-x/apps-sdk scan --show-ignored` and read what it set
+   aside. It skips step ids, row ids, section ids, integration endpoints and
+   sample data by name — right on the apps those rules were written against, and
+   not guaranteed on this one. A migration is exactly when a wrongly dismissed
+   dependency costs the most, because nothing downstream will notice it.
+
+   Then create the manifest at the app root, declare each real dependency as an
+   aliased entry (with `label`/`description` and per-environment ids — an
+   agent's id field is `agentId`, not `flowOriginId`), and replace the GUID
+   constants with `useAppDependencies()` reads (`references/build.md`
+   §App dependencies). Re-run `scan` when you're done: a clean report is the
+   evidence the migration is complete, and it is the only check that notices a
+   constant you declared but forgot to stop using. For CI,
+   `npx @rise-x/apps-sdk scan --strict` exits non-zero on a finding, a skipped
+   scan, or an unreadable file, so a green report from plain `scan` is not the
+   gate. An app being migrated
+   usually has ids for one environment only — the one it was built against — so
+   collect the rest before declaring the environment: every dependency needs an
+   id for every environment the manifest declares. Finish with
+   `npx @rise-x/apps-sdk validate`, the spelling to use before the template's
+   `validate` script exists in `package.json`; add that script and the
+   `build:<env>` ones while you are in there, and run `pnpm validate` from then
+   on.
+6. **Add the docs.** `AGENTS.md` and the one-line `CLAUDE.md` pointer can be
    copied from the SDK's `template/` directory
    (`node_modules/@rise-x/apps-sdk/template/`; `packages/apps-sdk/template/` in
    the rise-x-app monorepo, which also ships a `README.md`). `APP.md` is **not**
@@ -94,6 +139,7 @@ habit.
    `typecheck: tsc --noEmit`; add it if absent. The preset's `pluginTypeCheck`
    only runs inside an rsbuild invocation, so this script is how you type-check
    without doing a full build.
-6. **Verify and deploy** per `references/build.md`: `pnpm build` produces
-   `dist/remoteEntry.js`, then the deploy question (test environment by
-   default).
+7. **Verify and deploy** per `references/build.md`: `pnpm validate` passes for
+   every declared environment, `pnpm build` produces `dist/remoteEntry.js`
+   (with `APP_ENV` matching the deploy target), then the deploy question (test
+   environment by default).

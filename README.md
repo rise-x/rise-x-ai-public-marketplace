@@ -294,8 +294,8 @@ implementation on the SDK's shell hooks / connectors / query layer / UI
 components, and deployment to a Rise-X environment.
 
 **What's inside:** the `rise-x-apps` skill with reference docs for each phase
-(design, build, upgrade) plus the Rise-X experience principles — the visual
-language and interaction rules every Rise-X app is held to.
+(design, build, upgrade, offline) plus the Rise-X experience principles — the
+visual language and interaction rules every Rise-X app is held to.
 
 **Requirements:**
 - Claude Code or Cowork

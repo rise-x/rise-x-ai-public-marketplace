@@ -113,7 +113,10 @@ PATCH semantics — only include changed fields.
 - `icon` — icon config: `{"shape": "CheckCircleOutlined", "color": "#4CAF50"}`
 - `entityType` — ThingType identifier for Entity flows (e.g. `"vessel"`)
 - `displayNameTemplate` — JSONPath-based template for instance display names (e.g. `"{$.vessel.displayName} - {$.inquiry.deliveryWindow.from.date:yyyy-MM-dd}"`). Tokens are `{$.path}` or `{$.path:format}`. See `managing-asset-types.md` for details.
-- `featureFlags` — feature toggles (e.g. `{"OnlyAssetTypeOwnersCanCreateAsset": true}`)
+- `featureFlags` — feature toggles (e.g. `{"OnlyAssetTypeOwnersCanCreateAsset": true}`; the
+  offline write flag `isOfflineModeEnabled` lives here too). ⚠️ Draft-only like every properties
+  write — target a draft id or the update is silently stripped. ⚠️ A passed `featureFlags` replaces
+  the whole bag: read it back first and send it complete, or seeded keys are dropped.
 - `allowedStartSources` — consent allow-list for the `StartCrossEcosystemWork` activity: a list of `{"ecosystemId": "<id>", "flowOriginId": "<id>"}` objects naming the source flows permitted to start THIS flow from another ecosystem. Default-deny (absent/empty ⇒ no cross-ecosystem starts). Set this on the **target** flow. See `actions-and-statuses.md` § Start Cross Ecosystem Work.
 
 Example:
