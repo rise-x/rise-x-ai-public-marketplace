@@ -189,7 +189,7 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 | `name`, `displayName`, `workCode` | string | |
 | `normalisedName` | string | Pre-uppercased copy of `name`; faster case-insensitive search |
 | `status` | string (enum, PascalCase) | one of: `"Open"`, `"Closed"`, `"Completed"`, `"Deleted"`, `"Ok"` (from `DianaWorkState`). `"Deleted"` is **hidden by default** — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). |
-| `flowState` | string (enum, **PascalCase**) | one of: `"NotStarted"`, `"Created"`, `"New"`, `"InProgress"`, `"Rework"`, `"Complete"`, `"Skipped"`, `"Cancelled"`, `"Declined"`, `"Deleted"` (from `DianaStepState`). ⚠️ Matched **verbatim** — unlike `status`/`state` it has no int/string dual-form coercion, so a wrong-cased value (e.g. `"inProgress"`) silently returns **empty**, not 400. |
+| `flowState` | string (enum, **PascalCase**) | one of: `"NotStarted"`, `"Created"`, `"InProgress"`, `"InReview"`, `"Complete"`, `"Skipped"`, `"Cancelled"`, `"Declined"`, `"Deleted"`. ⚠️ Matched **verbatim** — unlike `status`/`state` it has no int/string dual-form coercion, so a wrong-cased value (e.g. `"inProgress"`) silently returns **empty**, not 400. |
 | `flowDisplayName` | string | free-form — the flow's human display name. |
 | `flowType` | string | free-form — flow-defined identifier (e.g. `"vessel-inspection"`). |
 | `flowId`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only |
