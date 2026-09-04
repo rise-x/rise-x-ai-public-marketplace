@@ -49,7 +49,7 @@ Key fields in the summary response:
 - `activeStepName` — current step the work is on
 - `actions` — available actions, with `events[].eventName` for `submit_work`
 - `data` — form field values
-- `status` — Open, Closed, or Terminated
+- `status` — `Open`, `Closed`, `Completed`, or `Deleted` (`DianaWorkState`)
 
 ### `duplicate_work(id: str, response_format="summary")`
 Duplicate a work item into a **brand-new work** on the same flow — the DIANA-native "Duplicate" button.
@@ -78,6 +78,8 @@ Response rows are **projected** to the useful fields only (cardLayout, per-role 
 - State: `activeStepId`, `status`, `state`, `statusLabel`, `statusColor`
 - Permissions: `canEdit`, `canDelete`, `canDelegate`, `roleName`
 - Audit: `createdBy` / `lastModifiedBy` (each `{id, email, displayName}`), `createdDate`, `lastModifiedDate`
+
+Date names differ by source: the `get_work` document carries `createdDate` and `lastModified`; `list_work` rows flatten the search index's `created.date` / `lastModified.date` objects into `createdDate` / `lastModifiedDate`; asset documents (`get_asset`) carry `created` and `lastModified`.
 
 For form data, status and actions, call `get_work(id)` (summary); for `cardLayout`, per-role user lists, `chains`, or `steps`, call `get_work(id, format="full")`.
 
