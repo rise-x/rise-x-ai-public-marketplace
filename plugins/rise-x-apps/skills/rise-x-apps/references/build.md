@@ -346,6 +346,53 @@ localises the label. On earlier SDKs `AppRail` does not render one — on 0.9.0
 it exists but goes to a horizontal scrolling strip at narrow widths — so the
 bar is yours to build.
 
+
+### More than one language
+
+Rise-X flows are often bilingual, and the platform carries both languages
+**inside one string**: a field label reads `Fecha de entrega prevista – Planned
+Delivery Date`, a select option reads `Fumigación - Fumigation`. There is no
+locale field to switch on.
+
+Do not try to split those at runtime. Splitting is unreliable in practice —
+mixed hyphen and en-dash separators, three-segment labels from nested asset
+references, separators appearing inside one half, and pairs that are not
+translations of each other at all. A language toggle built on splitting will
+show the wrong half somewhere and you will not find out from a screenshot.
+
+Instead:
+
+- **Hold a string catalogue keyed by field path**, seeded once from the flow's
+  labels, and translate in the app. `t(key)` returns the string for the current
+  language.
+- **Treat flow enumerations as data, not chrome.** A select's options belong
+  beside the data as `[es, en]` pairs, not as catalogue entries — they are the
+  flow's values, and the app is only choosing which half to display.
+- **Pick the default deliberately.** Where the operation runs in Spanish, Spanish
+  is the default and English is the toggle, not the other way round.
+
+Three checks that repay themselves, because each caught a real bug:
+
+1. **Never substitute English→`t(key)` across a whole file.** It rewrites the
+   catalogue's own English values into `t()` calls. One pass clobbered 74
+   entries: `"st.sentBack"` became `"st.sent${t("lt.back")}"`, because the word
+   `Back` appears inside the key. Split the source at the catalogue and
+   substitute only in the remainder; anchor short words such as `Back`, `Close`,
+   `Next` and `Cancel` to a specific attribute like `aria-label="…"`.
+2. **Keep a catalogue integrity check.** No entry may contain `t(`; every `t()`
+   key must exist; both languages must be filled. Run it on every change.
+3. **Sweep for English twice, from both ends.** A check that renders each screen
+   in the non-default language and looks for catalogue English values only finds
+   English that *has* a translation. Hard-coded strings with no catalogue entry
+   are invisible to it — three table headers survived every sweep that way. A
+   second check reading the source for prose between tags and in
+   `title`/`placeholder`/`aria-label` catches those, but still misses English in
+   data seeds and object literals. Run both, and treat every whitelist entry as
+   a debt with a reason attached.
+
+One trap worth naming: `t()` called at module top level runs before the state it
+reads exists. Store the key and resolve it at render.
+
 ### Lifecycle hooks (`src/lifecycle.ts`)
 
 Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently. They run inside the shell page, so all the SDK accessors work from inside them.
@@ -505,6 +552,13 @@ manifest with the live `remoteUrl` and `module` (defaults to `./App`).
 - **Don't** put navigation in a top bar. The host already renders top-bar nav above the app; app navigation belongs in a left sidebar/rail.
 - **Don't** assume the user or environment is non-null inside lifecycle hooks — accept the typed `ctx` and check.
 - **Don't** modify `src/index.tsx`'s `import('./bootstrap')` line. That async dynamic import is the Module Federation boundary; the shell-side `eager: true` shares depend on it.
+- **Don't rebuild a platform screen the host already owns.** Editing an asset,
+  browsing a registry and opening an attachment are platform functionality —
+  link out to them in a new tab instead of building an editor. The routes are
+  stable: one asset at `/:environment/asset/:thingId`, a registry listing at
+  `/:environment/assets/:flowOriginId`, and a file at
+  `/app/open-file/:attachmentId/:resourceType/:resourceId`. Your app's job is to
+  show which record is involved and why, then get out of the way.
 
 ## Wrap-up — do this before reporting done
 

@@ -35,6 +35,27 @@ Response: `[{"Vessel Name": {"id": "comp-guid", "dataPath": "$.vesselDetails.ves
 | `entityId` | Specific asset instance | `create_asset` response, `list_assets`, `get_asset` | `get_asset`, `edit_asset`, `delete_asset` |
 | `workId` | Draft work item for in-progress create/edit | `create_asset`/`edit_asset` response | `update_work_data`, `submit_work` |
 
+## `entityType` Is Not Always `data.thingType`
+
+The skill elsewhere treats `entityType` and `thingType` as one value under two
+names, and inside `data` they do agree. The **top-level** projection can differ:
+
+```
+entityType:           eseasa-registeredTrucks        # top level
+data.entityType:      woodsidehouston-registeredTrucks
+data.thingType:       woodsidehouston-registeredTrucks
+```
+
+That asset type originates in one ecosystem and is being read from another —
+assets do resolve across ecosystem boundaries, so a registry your app depends on
+may not live in your ecosystem at all. Check both before concluding where an
+asset type is defined, and don't key logic on the pair agreeing.
+
+The same `flowOriginId` can also carry a different `entityType` between
+environments — one registry answered `eseasa-registeredTrucks` on production and
+`eseasa-truckRegister` on test. Test is not a copy of production; confirm ids and
+types in the environment you are targeting.
+
 ## The 3-Step Pattern
 
 ### Creating a New Asset
@@ -160,6 +181,43 @@ Full asset data including all properties, metadata, and workflow state.
 
 ### `list_assets(flow_origin_id: str, skip: int = 0, limit: int = 50)`
 Simple paginated list of one asset type's assets — `flowOriginId` from `search_flows` or `list_asset_types`. Returns the paginated envelope `{items, returned, skip, limit, hasMore, nextSkip}` (loop on `nextSkip` while `hasMore`). For any filter / sort / projection, use `search_assets`, not this.
+
+## An Asset's Attachments
+
+`get_asset` returns an `attachments[]` array alongside `data`. Each entry:
+
+```yaml
+attachmentId: 11ff85de-…          # the id the file route needs
+path: Registration                # WHICH document this is — the folder name
+fileType: .pdf
+title: TC NP300-20260901224650241
+fullUri: /api/v3/attachments/download/{attachmentId}/{resourceType}/{resourceId}?v=1
+expiry: '9999-12-31T23:59:59.999+00:00'
+verification:
+  userId: 00000000-0000-0000-0000-000000000000
+  verificationDate: '0001-01-01T00:00:00.000+00:00'
+  verified: false
+```
+
+**`path` is the discriminator.** It carries the folder configured on the
+`attachments` component that owns the slot, and it is how you tell a registration
+certificate from an insurance certificate. Read `path`, not filename order.
+
+**Two slot patterns coexist, often on one flow.** Some asset types give each
+document its own `dataPath` (`$.vehicleRegistrationDocument`,
+`$.insuranceCertificate`); others share one `$.attachments` array and
+discriminate purely by folder. A client that reads `path` handles both without
+branching — which is the reason to read `path`.
+
+**Verify the data, not just the schema.** A schema can promise a field that no
+record populates. Across four registries on production, every `data.*ExpiryDate`
+was absent from the records and every attachment `expiry` was the sentinel
+`9999-12-31T23:59:59.999` — so a rule of the form "valid unless expired" was
+unevaluable in practice while looking perfectly implementable from
+`get_flow_data_schema`. Every attachment also carried `verification.verified:
+false`; there is a verification mechanism, and nobody was using it. Before you
+promise behaviour that depends on a field, `list_assets` a handful of real
+records and look.
 
 ## Deleting Assets
 

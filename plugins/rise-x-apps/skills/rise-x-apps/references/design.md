@@ -87,6 +87,41 @@ app and paste the resulting id back here.
 Before any Rise-X MCP call, load the `rise-x-mcp` skill — it is mandatory and
 covers server selection, ecosystems, and routing.
 
+### Read the layout before you design a form
+
+If the app renders or captures a work item's data, **read the flow's layout for
+every task the app covers before you lay out a single field**. Not the data
+schema alone — the layout, because the layout is where the field set, the
+required flags and the conditional logic live.
+
+```
+get_flow_steps(flow_id)              → the layoutId for each task
+get_layout(id, format="summary")     → the field list: component, label, dataPath
+get_layout(id, format="components")  → required flags AND conditions
+get_flow_data_schema(origin_id)      → the data.* paths, for filters and sorts
+```
+
+Two rules follow, both learned the hard way:
+
+- **Every field in the app maps to a `dataPath` the flow defines, or it does not
+  exist.** A field you invent has nowhere to be stored and nobody downstream can
+  read it. One request form asked for a delivery title, a cargo type and a
+  destination well, none of which the flow had a home for. Meanwhile the
+  layout's actual vendor selection, contact details, point of origin and
+  business area went uncollected. The form could not have worked, and the mock was approved
+  before anyone noticed.
+- **`format="summary"` omits `condition`.** Summary gives component, label and
+  dataPath, which is the right way to orient. It does not tell you that a whole
+  section appears only when a toggle is on. Read conditions from `components` —
+  see "Conditional forms" below.
+
+Layouts are routinely far larger than the design conversation suggests. The one
+above held 98 components across 26 sections, against a mock of three stages.
+
+Read the `search-things` components too: their `assetTypeOriginId` and
+`entityDataFilter` properties tell you which asset backs a field and how it is
+scoped, which answers "where does this list come from" without asking anyone.
+
 ## 4. Design mock — static HTML, iterate to approval
 
 Produce a static HTML mock and present it in the browser. Iterate until the
@@ -204,6 +239,15 @@ How to build the mock:
   utilities for every class the design system uses, so copied markup renders
   pixel-identical to the implemented app either way. Never hand-roll a
   look-alike of a component or restyle one.
+- **If the mock needs live state, the audit needs more care.** A mock
+  demonstrating a multi-party handoff — submit, approve, return, complete — has
+  to be JS-driven rather than static, and its classes then sit inside template
+  literals. The check above reads `class="…"` attributes literally, so it will
+  report every `${…}` interpolation as an unknown class. Strip interpolations
+  with a balanced-brace scanner before tokenising, or the real failures drown:
+  150 false positives once hid a `mb-4` with no rule, used 26 times, which meant
+  no vertical spacing rendered anywhere on the page. A noisy audit is worse than
+  none, because nobody reads it.
 - **Layout glue may be plain CSS** in the mock's own `<style>` block (page
   scaffolding, columns, spacing): the stylesheet ships the utilities the design
   system and the demo page use, not every utility that exists, so one you
@@ -261,6 +305,47 @@ Design rules (apply to the mock exactly as they apply to the app):
   over flashy, hierarchy over decoration, data-first, progressive disclosure;
   empty, loading, error and wrong states get the same care as the happy path;
   keyboard- and screen-reader-friendly structure.
+
+### Conditional forms — the branching *is* the design
+
+Rise-X layouts are frequently mostly conditional: a few answers decide which of
+many sections a person is asked to fill. That branching is the design work, and
+a mock showing every field at once — or a guessed subset — designs the wrong
+thing.
+
+Read the conditions from `get_layout(format="components")`. They are string
+expressions over `dataPath`s, with doubled single quotes, and they compare
+against the **whole option label** rather than a code or an index:
+
+```
+'{$.deliveryIncluded}' == 'true'
+'{$.request.typeOfDelivery}' == 'Entrega General - General Delivery'
+false                                  ← a section deliberately never rendered
+```
+
+Then design to them:
+
+- **Ask for what the answers call for, and nothing else.** In one flow three
+  toggles and three selects decided which of 24 document slots a vendor had to
+  attach. Radioactive sources demanded five named permits; "no cargo to deliver"
+  demanded none. Showing all 24 buries the five that matter; guessing omits them.
+- **Say why each field is being asked for.** Name the answer that revealed it.
+  Someone who cannot see why they are being asked for a particular authorisation
+  cannot tell whether they answered an earlier question wrongly.
+- **Withdrawing an answer withdraws its demands.** Turning a branch off must
+  clear what it revealed, or a stale answer keeps demanding documents nobody
+  asked for.
+- **A section with `condition: false` is configuration, not dead weight.** It is
+  a common way to carry role bindings on a layout without rendering them. Do not
+  surface it and do not delete it.
+- **Know how the flow reveals things.** Components carrying conditions set
+  `onChange: /api/v3/flow/execute/activity/{$.id}?refreshLayout=true` — the
+  platform re-fetches the layout on change. The app either makes that round trip
+  or applies the same rules client-side, but it must know which it is doing.
+
+**Write the mapping down** — a table of answer → revealed fields → required
+documents — and get it agreed before you build. It is the part of the design
+most likely to be wrong and the part least visible in a screenshot.
 
 ### Check the mock before you show it
 

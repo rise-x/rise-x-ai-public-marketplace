@@ -17,6 +17,7 @@
   - [`isHiddenDataPath` — Data-Driven Visibility](#mechanism-1-ishiddendatapath--data-driven-visibility)
   - [`renderWhen` — Step-State Visibility](#mechanism-2-renderwhen--step-state-visibility)
   - [`readOnlyWhen` — Conditional Editability](#mechanism-3-readonlywhen--conditional-editability)
+  - [`condition` — Section and Component Gating](#mechanism-4-condition--section-and-component-gating)
   - [Expression Engine Reference (`dynamicValue()`)](#expression-engine-reference-dynamicvalue)
 - [Component Types Reference](#component-types-reference)
 - [date-picker Properties (Critical)](#date-picker-properties-critical)
@@ -397,7 +398,7 @@ On each target field, set `defaultValue` to that path and watch the picker's pat
 
 ## Conditional Rendering & Dynamic Visibility
 
-Rise-X supports three mechanisms for conditionally showing/hiding or making fields read-only. All expression-based mechanisms use the `dynamicValue()` engine which supports math.js expression syntax with token replacement.
+Rise-X supports four mechanisms for conditionally showing/hiding or making fields read-only. The first three use the `dynamicValue()` engine — math.js expression syntax with token replacement. The fourth, `condition`, is what no-code-builder flows carry: a different syntax, the opposite polarity, and the only one that gates a whole **section**. Expect to meet it in any flow you did not author yourself.
 
 ### Mechanism 1: `isHiddenDataPath` — Data-Driven Visibility
 
@@ -595,6 +596,58 @@ All `isHiddenDataPath` and `readOnlyWhen` expressions are evaluated by the `dyna
   }
 ]
 ```
+
+### Mechanism 4: `condition` — Section and Component Gating
+
+**Purpose:** show or hide a component, **or a whole section**, based on work data.
+**Property location:** top-level `condition` on the component or section record —
+not under `properties`.
+**Evaluation:** truthy result = the component or section **IS shown**. This is the
+opposite polarity to `isHiddenDataPath`.
+
+This is what flows authored in the no-code builder carry, and its expression
+syntax differs from the `dynamicValue()` mechanisms above — no leading `=`, and
+single quotes are doubled by the serialiser:
+
+```
+'{$.deliveryIncluded}' == 'true'                                   # toggle is on
+'{$.request.typeOfDelivery}' == 'Entrega General - General Delivery'
+'{$.a}' == 'X' or '{$.a}' == 'Y'                                   # `or`, not ||
+false                                                              # never rendered
+```
+
+Three things to know before you read or write one:
+
+- **The compared value is the whole option label**, not a code or an index. For
+  an `input-select` that means the entire `Spanish - English` string, verbatim.
+  Get one character wrong and the section silently never appears.
+- **A section's `condition` gates every component inside it.** This is the
+  structural mechanism; `isHiddenDataPath` and `renderWhen` are per-component.
+  A real flow used three toggles and three selects, all with section conditions,
+  to decide which of 24 attachment slots a person had to fill.
+- **`condition: false` is deliberate configuration, not dead weight.** It is a
+  common way to carry role bindings — a section of `user-invitation` components
+  populated from an asset — on the layout without ever rendering them. Do not
+  surface such a section, and do not delete it.
+
+**`get_layout(format="summary")` does not return `condition`.** Summary gives
+component, label and dataPath, which is the right way to orient in a large
+layout. Read `format="components"` before you conclude anything about what a
+layout asks for, or you will design against a flat field list that does not
+exist. One layout read this way looked like a handful of fields and was in fact
+98 components across 26 sections, almost all of them conditional.
+
+**How the reveal happens at runtime.** Components carrying a `condition`
+typically also set:
+
+```
+onChange: /api/v3/flow/execute/activity/{$.id}?refreshLayout=true
+```
+
+The platform re-executes the activity and returns a fresh layout, so visibility
+is resolved server-side. A client rendering the layout itself must either make
+that round trip on change or evaluate the same conditions locally — but it has
+to know which, because the two behave differently on a slow connection.
 
 ## Component Types Reference
 

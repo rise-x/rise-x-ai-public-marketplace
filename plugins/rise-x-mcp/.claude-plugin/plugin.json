@@ -2,7 +2,7 @@
   "name": "rise-x-mcp",
   "displayName": "Rise-X",
   "description": "Configure workflows, layouts and dashboards, query data, and manage work items on the Rise-X platform.",
-  "version": "1.3.4",
+  "version": "1.4.0",
   "author": {
     "name": "Rise-X",
     "url": "https://rise-x.io"
