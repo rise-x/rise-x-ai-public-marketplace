@@ -210,7 +210,7 @@ doesn't show up in the UI.
 
 ## Tool Inventory
 
-All 91 tools grouped by category (Session, Flow, Flow Structure, Flow Config,
+All 92 tools grouped by category (Session, Flow, Flow Structure, Flow Config,
 Columns, Layout, Component, Schema, Compare, Work, Search, Asset, Apps,
 Dashboard, Integration, Agent), with signatures and per-tool caveats:
 `references/tool-inventory.md`. Load it when you need an exact tool name or
