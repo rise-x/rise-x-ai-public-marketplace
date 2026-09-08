@@ -55,16 +55,20 @@ that moves or disappears rewrites what partners install. This ruleset
 restricts creating, updating, and deleting those tags.
 
 `kit-release.yml` creates the tag through the releases API as the GitHub
-Actions app, so that app is the single bypass actor (`actor_id: 15368`,
-`actor_type: Integration`). Nobody pushes a `kit-v*` tag by hand. Two things
-here are unverified and worth checking on the first real release:
+Actions app. The JSON ships with an empty bypass list because the import
+rejects the app's actor id in this enterprise ("invalid actor"). After the
+import, open the ruleset and add the bypass in the UI: **Bypass list** →
+**Add bypass** → pick **GitHub Actions** if it is offered; if it is not,
+add the maintainers team instead and keep the release fallback below in mind.
+Nobody pushes a `kit-v*` tag by hand.
 
-- Whether the enterprise policy that forbids Actions from creating pull
-  requests also stops Actions from creating tags or releases. The manual
-  fallback is in `kit-release.yml`'s header comment.
-- Whether `actor_id: 15368` is the GitHub Actions app in this enterprise. If
-  the import cannot resolve it, remove the bypass actor from the file and add
-  **GitHub Actions** as a bypass actor in the UI instead.
+Until the first real release has run, set **Enforcement** to **Evaluate**:
+the rule then only records what it would have blocked under **Rule
+insights**, so a wrong bypass list cannot stop the release. Switch to
+**Active** once the workflow has created a tag successfully. Unverified and
+worth checking on that first release: whether the enterprise policy that
+forbids Actions from creating pull requests also stops it from creating tags
+or releases. The manual fallback is in `kit-release.yml`'s header comment.
 
 ## protect-main and the kit
 
