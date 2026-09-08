@@ -53,8 +53,17 @@ type McpInfo struct {
 	// Stale holds the connections pointing at an address Rise-X has moved
 	// off, each with the address it should point at instead.
 	Stale []mcp.Stale `json:"stale,omitempty"`
-	Raw   string      `json:"raw,omitempty"`
+	// Message explains a verdict the page cannot read off the servers, such
+	// as a `claude mcp list` that could not run at all.
+	Message string `json:"message,omitempty"`
+	// Raw is `claude mcp list`'s own output, passed through runner.Redact:
+	// the page shows it verbatim, so a token in it must not reach the browser.
+	Raw string `json:"raw,omitempty"`
 }
+
+// McpCheckFailedMessage is shown when `claude mcp list` could not be run or
+// did not finish, so the connection state is genuinely unknown.
+const McpCheckFailedMessage = "Could not check the connection right now."
 
 // DoctorResponse is GET /api/doctor's shape.
 type DoctorResponse struct {

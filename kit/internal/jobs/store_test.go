@@ -177,6 +177,8 @@ func TestStore_EvictsOldestJobs(t *testing.T) {
 	}
 }
 
+// waitFinished relies on the store freeing the running slot before it records
+// a terminal status, so a caller that sees one can start the next job.
 func waitFinished(t *testing.T, s *Store, id string) {
 	t.Helper()
 	waitUntil(t, func() bool {
@@ -226,4 +228,82 @@ func TestStart_TimeoutDropsLateLines(t *testing.T) {
 			t.Fatalf("a line appended after the timeout was kept: %+v", snap.Log)
 		}
 	}
+}
+
+// Shutdown must not leave a claude process running behind a closed UI: the
+// job's context is cancelled, the job fails, and the slot is free again -
+// even for an fn that ignores its context.
+func TestStore_CancelAll_FailsRunningJobAndFreesStore(t *testing.T) {
+	s := NewStore()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	started := make(chan struct{})
+
+	id, err := s.Start("plugin.install", testTimeout, func(ctx context.Context, onLine func(string)) (int, error) {
+		close(started)
+		<-release // ignores ctx, like a claude wedged on a full pipe
+		return 0, nil
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	<-started
+
+	s.CancelAll()
+	if !s.WaitIdle(2 * time.Second) {
+		t.Fatal("store still busy after CancelAll")
+	}
+
+	waitFinished(t, s, id)
+	snap, _ := s.Snapshot(id, 0)
+	if snap.Job.Status != StatusFailed {
+		t.Fatalf("status = %v, want failed", snap.Job.Status)
+	}
+	if !strings.Contains(snap.Job.Error, "canceled") {
+		t.Fatalf("error = %q, want a cancellation message", snap.Job.Error)
+	}
+
+	next, err := s.Start("marketplace.update", testTimeout, func(context.Context, func(string)) (int, error) {
+		return 0, nil
+	})
+	if err != nil || next == "" {
+		t.Fatalf("Start after CancelAll = %q, %v; want a new job", next, err)
+	}
+	waitFinished(t, s, next)
+}
+
+// A well-behaved job sees the cancellation on its own context.
+func TestStore_CancelAll_CancelsJobContext(t *testing.T) {
+	s := NewStore()
+	id, err := s.Start("marketplace.add", testTimeout, func(ctx context.Context, onLine func(string)) (int, error) {
+		<-ctx.Done()
+		return -1, ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	s.CancelAll()
+	waitFinished(t, s, id)
+	if snap, _ := s.Snapshot(id, 0); snap.Job.Status != StatusFailed {
+		t.Fatalf("status = %v, want failed", snap.Job.Status)
+	}
+}
+
+// WaitIdle must report the truth rather than block for its whole timeout.
+func TestStore_WaitIdle_ReportsBusy(t *testing.T) {
+	s := NewStore()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	id, err := s.Start("plugin.install", testTimeout, func(context.Context, func(string)) (int, error) {
+		<-release
+		return 0, nil
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if s.WaitIdle(20 * time.Millisecond) {
+		t.Fatal("WaitIdle = true while a job is running")
+	}
+	s.CancelAll()
+	waitFinished(t, s, id)
 }

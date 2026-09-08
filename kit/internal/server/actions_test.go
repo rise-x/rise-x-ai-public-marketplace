@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/catalog"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/claudecli"
@@ -242,4 +244,136 @@ func TestHandler_PluginInstall_EmptyAvailableUsesLocalClone(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
+}
+
+// The uninstall argv is the whole action: a wrong name here removes the wrong
+// skill, and the CLI would report success either way.
+func TestHandler_PluginUninstall_Argv(t *testing.T) {
+	fake := newFakeCLI(pluginListFixture)
+	fake.Set(fakeCLIPath, []string{"plugin", "uninstall", "rise-x-apps@rise-x-public"},
+		runnertest.Result{Stdout: "uninstalled\n"})
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
+
+	resp := post(t, baseURL+"/api/actions/plugin.uninstall", token, map[string]any{"name": "rise-x-apps"})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "succeeded" {
+		t.Fatalf("job status = %q", status)
+	}
+
+	var uninstalls [][]string
+	for _, call := range fake.Calls {
+		if len(call.Args) > 1 && call.Args[0] == "plugin" && call.Args[1] == "uninstall" {
+			uninstalls = append(uninstalls, call.Args)
+		}
+	}
+	want := []string{"plugin", "uninstall", "rise-x-apps@rise-x-public"}
+	if len(uninstalls) != 1 || !slices.Equal(uninstalls[0], want) {
+		t.Fatalf("uninstall calls = %v, want exactly one %v", uninstalls, want)
+	}
+}
+
+// A body the server cannot read as the action's own shape is a 400, not a
+// field silently read as false.
+func TestHandler_ActionBody_Rejected(t *testing.T) {
+	baseURL, token, _ := newTestServer(t)
+
+	cases := []struct{ name, body string }{
+		{"non-bool enabled", `{"enabled":"yes"}`},
+		{"null enabled", `{"marketplace":"rise-x-public"}`},
+		{"unknown field", `{"enabled":true,"enable":true}`},
+		{"not an object", `["enabled"]`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resp := postRaw(t, baseURL+"/api/actions/autoupdate.set", token, c.body)
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+		})
+	}
+}
+
+// A settings edit takes the same single-writer slot a job does: `claude plugin
+// marketplace add` rewrites the very key autoupdate.set writes.
+func TestHandler_AutoUpdateSet_WhileJobRunning_409(t *testing.T) {
+	blocked := []string{"plugin", "marketplace", "update", "rise-x-public"}
+	r := newBlockingRunner(newFakeCLI(pluginListFixture), blocked)
+	t.Cleanup(func() { close(r.release) })
+	claudeDir := t.TempDir()
+	baseURL, token := newServer(t, Config{Runner: r, LocateEnv: locateAt(fakeCLIPath), ClaudeDir: claudeDir})
+
+	first := post(t, baseURL+"/api/actions/marketplace.update", token, nil)
+	first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("marketplace.update status = %d, want 200", first.StatusCode)
+	}
+	select {
+	case <-r.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the job never started")
+	}
+
+	for _, action := range []string{"autoupdate.set", "npmrc.clean"} {
+		body := map[string]any{"enabled": true}
+		if action == "npmrc.clean" {
+			body = map[string]any{"confirm": true}
+		}
+		resp := post(t, baseURL+"/api/actions/"+action, token, body)
+		if resp.StatusCode != http.StatusConflict {
+			resp.Body.Close()
+			t.Fatalf("%s status = %d, want 409", action, resp.StatusCode)
+		}
+		if got := errorMessage(t, resp); got != "a job is already running" {
+			t.Fatalf("%s error = %q", action, got)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(claudeDir, "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("settings.json was written while a job held the slot: %v", err)
+	}
+}
+
+// Dismissing the restart banner sticks: the next refresh must not bring it
+// back, or every action leaves a banner nothing can clear.
+func TestHandler_ReloadHintDismiss(t *testing.T) {
+	fake := newFakeCLI(pluginListFixture)
+	fake.Set(fakeCLIPath, []string{"plugin", "install", "rise-x-apps@rise-x-public"},
+		runnertest.Result{Stdout: "installed\n"})
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
+
+	resp := post(t, baseURL+"/api/actions/plugin.install", token, map[string]any{"name": "rise-x-apps"})
+	if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "succeeded" {
+		t.Fatalf("job status = %q", status)
+	}
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if !got.ReloadHint {
+		t.Fatal("reloadHint = false after a successful job, want true")
+	}
+
+	post(t, baseURL+"/api/actions/reload-hint.dismiss", token, nil).Body.Close()
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if got.ReloadHint {
+		t.Fatal("reloadHint came back after being dismissed")
+	}
+}
+
+// postRaw sends a body the way a page could, without going through a Go map.
+func postRaw(t *testing.T, url, token, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-RiseX-Token", token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
 }

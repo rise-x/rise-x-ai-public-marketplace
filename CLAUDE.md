@@ -174,9 +174,10 @@ no plugin version, is not listed in `marketplace.json`, and never reaches the
 private marketplace.
 
 It releases on its own `kit-v<semver>` tags, which `kit-release.yml` builds
-and publishes; `kit-ci.yml` gates every PR touching `kit/**`. A tag is the
-only way a partner receives a new kit, so merging to `main` releases nothing
-here.
+and publishes; `kit-ci.yml` gates every PR touching `kit/**`. Only a tag ships
+a new kit binary, but merging to `main` still matters here: partners `curl`
+`install.sh` from `main`, so a merge changes the installer they run
+immediately, ahead of the next kit release.
 
 ## Validate before any PR
 
@@ -190,12 +191,14 @@ All must pass. Also run each with `--strict` — it should pass too.
 A PR touching `kit/**` must also pass what `kit-ci.yml` runs, from `kit/`:
 
 ```
-gofmt -l . && go vet ./... && go test -race -count=1 ./...
+test -z "$(gofmt -l .)" && go vet ./... && go test -race -count=1 ./...
 ```
 
-`gofmt -l` must print nothing. The module needs the Go version in
-`kit/go.mod`; an older toolchain cannot parse the generics in
-`internal/server`.
+`gofmt -l` must print nothing — piping it straight into `&&` doesn't catch
+that, since `gofmt -l` still exits 0 even when it lists files. `kit-ci.yml`
+also cross-compiles `go build ./...` for darwin/arm64, darwin/amd64, and
+windows/amd64 in a separate matrix job; that job needs the Go version pinned
+in `kit/go.mod`.
 
 ## Public-repo scrub rules (repo-wide)
 

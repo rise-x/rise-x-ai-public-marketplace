@@ -283,8 +283,9 @@ func TestHandler_AutoUpdateSet_OtherMarketplace(t *testing.T) {
 }
 
 // An unparsable settings.json must refuse the write outright rather than
-// leave the writer to fail after already deciding to touch the file.
-func TestHandler_AutoUpdateSet_InvalidSettingsJSON_409(t *testing.T) {
+// leave the writer to fail after already deciding to touch the file. It is a
+// 422, not the 409 a busy job gets: the page shows the server's own message.
+func TestHandler_AutoUpdateSet_InvalidSettingsJSON_422(t *testing.T) {
 	claudeDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{ not json"), 0o600); err != nil {
 		t.Fatal(err)
@@ -297,8 +298,8 @@ func TestHandler_AutoUpdateSet_InvalidSettingsJSON_409(t *testing.T) {
 
 	resp := post(t, baseURL+"/api/actions/autoupdate.set", token, map[string]any{"enabled": true})
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
 	}
 	if got := errorMessage(t, resp); got != doctor.SettingsUnreadableMessage {
 		t.Fatalf("error = %q", got)
@@ -317,4 +318,111 @@ func callIndex(fake *runnertest.Fake, args []string) int {
 		}
 	}
 	return -1
+}
+
+// desktopSyncedDir is the Desktop app's data directory with one rise-x-mcp the
+// account holder picked themselves - not an organisation push - materialised
+// at version.
+func desktopSyncedDir(t *testing.T, version string) string {
+	t.Helper()
+	dataDir := t.TempDir()
+	root := filepath.Join(dataDir, "local-agent-mode-sessions", "org-1", "account-1", "rpm")
+	dir := filepath.Join(root, "plugin_user")
+	if err := os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"plugins":[{"id":"plugin_user","name":"rise-x-mcp","marketplaceName":"",` +
+		`"installedBy":"user","installationPreference":"available"}]}`
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".claude-plugin", "plugin.json"),
+		[]byte(`{"name":"rise-x-mcp","version":"`+version+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".mcp.json"), []byte(riseXMcpJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dataDir
+}
+
+func desktopSyncedServer(t *testing.T, localVersion, publicVersion string) (baseURL, token string) {
+	t.Helper()
+	fake := newFakeCLI(`{"installed": [], "available": [
+      {"pluginId":"rise-x-mcp@rise-x-public","name":"rise-x-mcp","marketplaceName":"rise-x-public","source":"./plugins/rise-x-mcp"}
+    ]}`)
+	return newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath),
+		Catalog: versionCatalog(t, publicVersion), DesktopDataDir: desktopSyncedDir(t, localVersion)})
+}
+
+// A skill only Claude Desktop knows about is reported as such. It used to read
+// as "installed from another marketplace" with no marketplace name, and the
+// Update button then installed a second copy from the public one.
+func TestGather_DesktopSyncedPlugin(t *testing.T) {
+	baseURL, token := desktopSyncedServer(t, "1.3.3", "1.3.5")
+
+	p := pluginInfo(t, baseURL, token, "rise-x-mcp")
+	if !p.Installed || !p.Enabled {
+		t.Fatalf("plugin = %+v, want installed and enabled", p)
+	}
+	if p.InstallSource != doctor.SourceDesktop {
+		t.Fatalf("installSource = %q, want %q", p.InstallSource, doctor.SourceDesktop)
+	}
+	if p.LocalVersion != "1.3.3" || !p.UpdateAvailable {
+		t.Fatalf("versions = %+v", p)
+	}
+
+	c := doctorCheck(t, baseURL, token, "plugin.rise-x-mcp")
+	if c.Status != doctor.StatusOK || c.Fix != "" {
+		t.Fatalf("doctor row = %+v, want an ok with no fix", c)
+	}
+	if c.Message != "Installed through Claude Desktop (1.3.3)." {
+		t.Fatalf("message = %q", c.Message)
+	}
+}
+
+// The public marketplace must not be allowed to update a copy it did not
+// install, whatever the page sends.
+func TestHandler_PluginUpdate_DesktopCopy_400(t *testing.T) {
+	baseURL, token := desktopSyncedServer(t, "1.3.3", "1.3.5")
+
+	for _, body := range []map[string]any{
+		{"name": "rise-x-mcp"},
+		{"name": "rise-x-mcp", "marketplace": ""},
+		{"name": "rise-x-mcp", "marketplace": "rise-x-public"},
+	} {
+		resp := post(t, baseURL+"/api/actions/plugin.update", token, body)
+		if resp.StatusCode != http.StatusBadRequest {
+			resp.Body.Close()
+			t.Fatalf("%v status = %d, want 400", body, resp.StatusCode)
+		}
+		if got := errorMessage(t, resp); !strings.Contains(got, "did not come from the public marketplace") {
+			t.Fatalf("%v error = %q", body, got)
+		}
+	}
+}
+
+// The same rule must not block the reinstall the page offers for a
+// CLI-installed copy with no version stamp.
+func TestHandler_PluginUpdate_PublicCopy_Allowed(t *testing.T) {
+	pluginList := `{
+  "installed": [{"id":"rise-x-apps@rise-x-public","version":"unknown","scope":"user","enabled":true,"installPath":"/tmp/apps"}],
+  "available": [
+    {"pluginId":"rise-x-mcp@rise-x-public","name":"rise-x-mcp","marketplaceName":"rise-x-public","source":"./plugins/rise-x-mcp"},
+    {"pluginId":"rise-x-apps@rise-x-public","name":"rise-x-apps","marketplaceName":"rise-x-public","source":"./plugins/rise-x-apps"}
+  ]
+}`
+	fake := newFakeCLI(pluginList)
+	fake.Set(fakeCLIPath, []string{"plugin", "update", "rise-x-apps@rise-x-public"},
+		runnertest.Result{Stdout: "updated\n"})
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
+
+	resp := post(t, baseURL+"/api/actions/plugin.update", token, map[string]any{"name": "rise-x-apps"})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "succeeded" {
+		t.Fatalf("job status = %q", status)
+	}
 }

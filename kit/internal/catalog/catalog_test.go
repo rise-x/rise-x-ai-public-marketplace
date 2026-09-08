@@ -198,3 +198,37 @@ func TestRemoteHEAD_NegativeCached(t *testing.T) {
 		t.Fatalf("made %d API calls, want 1 (the failure should be cached)", *hits)
 	}
 }
+
+// The raw paths are a contract with the repo layout: plugins/<name>/
+// .claude-plugin/plugin.json and .claude-plugin/marketplace.json on main.
+// Getting one wrong reads as "no such plugin", not as an error.
+func TestRawPaths(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Write([]byte(`{"version":"1.5.0","plugins":[{"name":"rise-x-apps"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New("rise-x/rise-x-ai-public-marketplace")
+	c.RawBaseURL = srv.URL
+	if _, err := c.RemoteVersion(context.Background(), "rise-x-apps"); err != nil {
+		t.Fatalf("RemoteVersion: %v", err)
+	}
+	if _, err := c.CatalogNames(context.Background()); err != nil {
+		t.Fatalf("CatalogNames: %v", err)
+	}
+
+	want := []string{
+		"/rise-x/rise-x-ai-public-marketplace/main/plugins/rise-x-apps/.claude-plugin/plugin.json",
+		"/rise-x/rise-x-ai-public-marketplace/main/.claude-plugin/marketplace.json",
+	}
+	if len(paths) != len(want) {
+		t.Fatalf("requested %v, want %v", paths, want)
+	}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Errorf("request %d = %q, want %q", i, paths[i], want[i])
+		}
+	}
+}

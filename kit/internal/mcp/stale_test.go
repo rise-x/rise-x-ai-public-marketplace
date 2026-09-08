@@ -90,21 +90,27 @@ func TestScan_MissingFiles(t *testing.T) {
 	}
 }
 
+// The environment comes from the host alone: a connector named "test", or a
+// path carrying "latest", must not repoint a production server at test.
 func TestSuggestedURL(t *testing.T) {
-	cases := []struct{ name, url, want string }{
-		{"rise-x", "https://old.example.com/mcp", prodURL},
-		{"rise-x-test", "https://old.example.com/mcp", testURL},
-		{"eop", "https://mcp-test.old.example.com/mcp", testURL},
-		{"RISE-X-TEST", "https://old.example.com/mcp", testURL},
+	cases := []struct{ url, want string }{
+		{"https://old.example.com/mcp", prodURL},
+		{"https://mcp-test.old.example.com/mcp", testURL},
+		{"https://MCP-TEST.example.com/mcp", testURL},
+		{"https://x-test.example/mcp", testURL},
+		{"https://test.example.com/mcp", testURL},
+		{"https://rise-x-latest.bluesea.eastus.azurecontainerapps.io/mcp", prodURL},
+		{"https://mcp-server-prod.bluesea.eastus.azurecontainerapps.io/latest/mcp", prodURL},
+		{"https://contest.example.com/mcp", prodURL},
 		// The bluefield host is the old dev environment; it maps to test even
-		// though the name carries no "test" hint - the exact-host mapping
-		// wins over the substring rule.
-		{"mcp-dev", "https://mcp-server.bluefield-efc1f90d.australiaeast.azurecontainerapps.io/mcp", testURL},
-		{"mcp-prod", "https://mcp-server.lemonmeadow-b9fe5140.australiaeast.azurecontainerapps.io/mcp", prodURL},
+		// though nothing in the host says "test" - the exact-host map is
+		// consulted first.
+		{"https://mcp-server.bluefield-efc1f90d.australiaeast.azurecontainerapps.io/mcp", testURL},
+		{"https://mcp-server.lemonmeadow-b9fe5140.australiaeast.azurecontainerapps.io/mcp", prodURL},
 	}
 	for _, c := range cases {
-		if got := SuggestedURL(c.name, c.url); got != c.want {
-			t.Errorf("SuggestedURL(%q, %q) = %q, want %q", c.name, c.url, got, c.want)
+		if got := SuggestedURL(c.url); got != c.want {
+			t.Errorf("SuggestedURL(%q) = %q, want %q", c.url, got, c.want)
 		}
 	}
 }

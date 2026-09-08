@@ -157,11 +157,11 @@
           <table data-slot="table" class="kit-skills-table w-full caption-bottom border-separate border-spacing-0 text-ui">
             <thead data-slot="table-header">
               <tr>
-                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] text-muted-foreground">Skill</th>
-                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Installed</th>
-                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Public</th>
-                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Status</th>
-                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-right align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Actions</th>
+                <th scope="col" data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] text-muted-foreground">Skill</th>
+                <th scope="col" data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Installed</th>
+                <th scope="col" data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Public</th>
+                <th scope="col" data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Status</th>
+                <th scope="col" data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-right align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody data-slot="table-body">
@@ -289,7 +289,7 @@
 
           <!-- org-managed: every catalog skill comes from the organisation, so the
                public marketplace's autoUpdate flag has nothing to control here. -->
-          <div data-when="autoupdate:org" data-slot="choice-row" class="flex items-start gap-2.5 shrink-0" data-tip="Your organisation installs and updates Rise-X skills through its own marketplace, so this setting is not used on this machine." title="Your organisation installs and updates Rise-X skills through its own marketplace, so this setting is not used on this machine." hidden>
+          <div data-when="autoupdate:org" data-slot="choice-row" class="flex items-start gap-2.5 shrink-0" data-tip="Your organisation installs and updates Rise-X skills through its own marketplace, so this setting is not used on this machine." title="Your organisation installs and updates Rise-X skills through its own marketplace, so this setting is not used on this machine." tabindex="0" hidden>
             <button
               type="button"
               role="checkbox"
@@ -653,7 +653,8 @@ writing ~/.claude/plugins/rise-x-mcp
         this.setAttribute('aria-checked', String(on));
         this.dataset.state = on ? 'checked' : 'unchecked';
         this.toggleAttribute('data-checked', on);
-        this.querySelector('svg').hidden = !on;
+        // An SVGElement has no 'hidden' property, so this must be the attribute.
+        this.querySelector('svg').toggleAttribute('hidden', !on);
       });
 
       // Deep link for review: #dark,cli:missing,jobs:open

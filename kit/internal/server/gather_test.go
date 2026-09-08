@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/catalog"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/claudecli"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/doctor"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner/runnertest"
 )
@@ -491,5 +493,178 @@ func TestGather_MachineProbesCachedUntilRescan(t *testing.T) {
 	getJSON(t, baseURL+"/api/overview", token, &got)
 	if n := nodeProbes(); n != 2 {
 		t.Fatalf("node probed %d times after a rescan, want 2", n)
+	}
+}
+
+// A probe that could not answer is remembered for 10 seconds, not 60: the
+// partner fixes the machine and presses Refresh.
+func TestProbeCache_FailureExpiresSooner(t *testing.T) {
+	if probeFailTTL != 10*time.Second {
+		t.Fatalf("probeFailTTL = %v, want 10s", probeFailTTL)
+	}
+	var cache probeCache[int]
+	calls := 0
+	probe := func(failed bool) func() (int, bool) {
+		return func() (int, bool) {
+			calls++
+			return calls, failed
+		}
+	}
+
+	cache.getOrFail(probe(true))
+	if cache.getOrFail(probe(true)); calls != 1 {
+		t.Fatalf("a fresh failure was re-probed: %d calls", calls)
+	}
+	cache.at = time.Now().Add(-probeFailTTL - time.Millisecond)
+	if cache.getOrFail(probe(false)); calls != 2 {
+		t.Fatalf("a stale failure was not re-probed: %d calls", calls)
+	}
+	cache.at = time.Now().Add(-probeFailTTL - time.Millisecond)
+	if cache.getOrFail(probe(false)); calls != 2 {
+		t.Fatalf("a success was re-probed after the failure TTL: %d calls", calls)
+	}
+	cache.at = time.Now().Add(-probeTTL - time.Millisecond)
+	if cache.getOrFail(probe(false)); calls != 3 {
+		t.Fatalf("a stale success was not re-probed: %d calls", calls)
+	}
+}
+
+// A `claude mcp list` that could not run - timed out, killed - leaves the
+// connection state unknown with a message to show. It must never read as
+// "not installed": nothing was learned about the servers at all.
+func TestGather_McpListFailed_IsUnknownNotNotInstalled(t *testing.T) {
+	fake := newFakeCLI(pluginListFixture)
+	fake.Set(fakeCLIPath, []string{"mcp", "list"}, runnertest.Result{Err: errors.New("signal: killed")})
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if got.Mcp == nil {
+		t.Fatal("no mcp block")
+	}
+	if got.Mcp.Verdict != string(mcp.VerdictUnknown) {
+		t.Fatalf("verdict = %q, want unknown", got.Mcp.Verdict)
+	}
+	if got.Mcp.Message != McpCheckFailedMessage {
+		t.Fatalf("message = %q, want %q", got.Mcp.Message, McpCheckFailedMessage)
+	}
+	if got.Mcp.Raw != "" {
+		t.Fatalf("raw = %q, want nothing from a failed check", got.Mcp.Raw)
+	}
+}
+
+// `claude mcp list` prints whatever a server's own config carries, so its
+// output reaches the page redacted.
+func TestGather_McpRawIsRedacted(t *testing.T) {
+	fake := newFakeCLI(pluginListFixture)
+	fake.Set(fakeCLIPath, []string{"mcp", "list"}, runnertest.Result{
+		Stdout: "plugin:rise-x-mcp:rise-x: https://mcp.rise-x.io/mcp (HTTP) - ✔ Connected\nheader: Authorization: Bearer sk-ant-secret123\n"})
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if strings.Contains(got.Mcp.Raw, "sk-ant-secret123") {
+		t.Fatalf("raw carries a credential: %q", got.Mcp.Raw)
+	}
+	if !strings.Contains(got.Mcp.Raw, "[redacted]") {
+		t.Fatalf("raw = %q, want the credential redacted", got.Mcp.Raw)
+	}
+}
+
+// npmrcServer points the kit at a temp ~/.npmrc holding a real-looking token.
+func npmrcServer(t *testing.T) (baseURL, token, npmrcPath string) {
+	t.Helper()
+	npmrcPath = filepath.Join(t.TempDir(), ".npmrc")
+	body := "@rise-x:registry=https://rise-x.pkgs.visualstudio.com/_packaging/npm/registry/\n" +
+		"//rise-x.pkgs.visualstudio.com/_packaging/npm/registry/:_authToken=supersecrettoken\n" +
+		"registry=https://registry.npmjs.org/\n"
+	if err := os.WriteFile(npmrcPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseURL, token = newServer(t, Config{Runner: newFakeCLI(pluginListFixture),
+		LocateEnv: locateAt(fakeCLIPath), NpmrcPath: npmrcPath})
+	return baseURL, token, npmrcPath
+}
+
+// The doctor names the lines it would remove, never their values: the detail
+// is shown on the page and copied into bug reports.
+func TestDoctor_NpmrcDetailIsMasked(t *testing.T) {
+	baseURL, token, _ := npmrcServer(t)
+
+	c := doctorCheck(t, baseURL, token, "npmrc")
+	if c.Status != doctor.StatusWarn || c.Fix != "npmrc.clean" {
+		t.Fatalf("npmrc row = %+v", c)
+	}
+	if strings.Contains(c.Detail, "supersecrettoken") {
+		t.Fatalf("detail carries the token: %q", c.Detail)
+	}
+	if !strings.Contains(c.Detail, "_authToken=…") {
+		t.Fatalf("detail = %q, want the masked key", c.Detail)
+	}
+}
+
+// npmrc.clean end to end: the leftover lines go, the npmjs line stays, and a
+// backup is left next to the file.
+func TestHandler_NpmrcClean_EditsTheFile(t *testing.T) {
+	baseURL, token, path := npmrcServer(t)
+
+	resp := post(t, baseURL+"/api/actions/npmrc.clean", token, map[string]any{"confirm": true})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Removed []string `json:"removed"`
+		Backup  string   `json:"backup"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Removed) != 2 {
+		t.Fatalf("removed = %v, want the two Rise-X lines", body.Removed)
+	}
+	for _, line := range body.Removed {
+		if strings.Contains(line, "supersecrettoken") {
+			t.Fatalf("response carries the token: %q", line)
+		}
+	}
+	kept, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(kept), "rise-x.pkgs.visualstudio.com") {
+		t.Fatalf("~/.npmrc still carries the old registry: %s", kept)
+	}
+	if !strings.Contains(string(kept), "registry=https://registry.npmjs.org/") {
+		t.Fatalf("~/.npmrc lost its npmjs line: %s", kept)
+	}
+	if _, err := os.Stat(body.Backup); err != nil {
+		t.Fatalf("backup %q: %v", body.Backup, err)
+	}
+	if c := doctorCheck(t, baseURL, token, "npmrc"); c.Status != doctor.StatusOK {
+		t.Fatalf("npmrc row after the clean = %+v, want ok", c)
+	}
+}
+
+// An unreadable settings.json must reach the page even with no CLI to gather
+// the rest: it is what disables the auto-update switch.
+func TestGather_NoCLI_ReportsSettingsError(t *testing.T) {
+	claudeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseURL, token := newServer(t, Config{Runner: runnertest.NewFake(), LocateEnv: locateNone,
+		ClaudeDir: claudeDir})
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if got.CLI == nil || got.CLI.Found {
+		t.Fatalf("cli = %+v, want not found", got.CLI)
+	}
+	if got.Marketplace == nil || !got.Marketplace.SettingsError {
+		t.Fatalf("marketplace = %+v, want settingsError", got.Marketplace)
+	}
+	if got.Marketplace.Registered {
+		t.Fatalf("marketplace = %+v, want registered false with no CLI", got.Marketplace)
 	}
 }

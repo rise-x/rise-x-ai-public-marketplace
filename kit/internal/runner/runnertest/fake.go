@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner"
 )
@@ -38,12 +39,44 @@ type Fake struct {
 	Responses map[string]Result
 
 	Calls []Call
+
+	delay time.Duration
 }
 
 var _ runner.Runner = (*Fake)(nil)
 
 func NewFake() *Fake {
 	return &Fake{Responses: map[string]Result{}}
+}
+
+// SetDelay makes every later call block for d before answering, so a test can
+// drive a real timeout (the wait still ends early if the context does).
+func (f *Fake) SetDelay(d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delay = d
+}
+
+// wait honours the caller's context: a context that is already done, or that
+// ends while the delay runs, answers with its error instead of the Result.
+func (f *Fake) wait(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	d := f.delay
+	f.mu.Unlock()
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return ctx.Err()
+	}
 }
 
 // Set registers the Result returned for name+args.
@@ -68,7 +101,10 @@ func (f *Fake) lookup(dir, name string, args []string) Result {
 	return r
 }
 
-func (f *Fake) Run(_ context.Context, name string, args []string) (string, string, int, error) {
+func (f *Fake) Run(ctx context.Context, name string, args []string) (string, string, int, error) {
+	if err := f.wait(ctx); err != nil {
+		return "", "", -1, err
+	}
 	r := f.lookup("", name, args)
 	return r.Stdout, r.Stderr, r.ExitCode, r.Err
 }
@@ -79,7 +115,10 @@ func (f *Fake) Stream(ctx context.Context, name string, args []string, onLine fu
 
 // StreamDir answers the same canned Result as Stream; the requested directory
 // is recorded on the Call so a test can assert the scope a command ran in.
-func (f *Fake) StreamDir(_ context.Context, dir, name string, args []string, onLine func(runner.Line)) (int, error) {
+func (f *Fake) StreamDir(ctx context.Context, dir, name string, args []string, onLine func(runner.Line)) (int, error) {
+	if err := f.wait(ctx); err != nil {
+		return -1, err
+	}
 	r := f.lookup(dir, name, args)
 	if onLine != nil {
 		for _, line := range splitNonEmptyLines(r.Stdout) {

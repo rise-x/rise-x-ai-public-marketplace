@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -508,10 +509,113 @@ func TestWriteAtomic_RenameFails_RemovesTmp(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(target, "in-the-way"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeAtomic(target, []byte(`{}`), 0o600); err == nil {
+	if err := writeAtomic(target, []byte(`{}`), 0o600, statStamp(target)); err == nil {
 		t.Fatal("expected the rename onto a non-empty directory to fail")
 	}
-	if _, err := os.Stat(target + ".tmp"); !os.IsNotExist(err) {
-		t.Fatalf("tmp file left behind: %v", err)
+	assertNoTmpFiles(t, dir)
+}
+
+// The temp file is named uniquely, so a fixed "settings.json.tmp" a partner (or
+// an older kit) left behind is neither read nor overwritten.
+func TestWriteAtomic_DoesNotUseTheFixedTmpName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	write(t, path, `{}`, 0o644)
+	sentinel := path + ".tmp"
+	write(t, sentinel, "not mine", 0o644)
+
+	if _, err := NewWriter(path).SetAutoUpdate("rise-x-public", repo, true); err != nil {
+		t.Fatalf("SetAutoUpdate: %v", err)
+	}
+	kept, err := os.ReadFile(sentinel)
+	if err != nil || string(kept) != "not mine" {
+		t.Fatalf("settings.json.tmp = %q, err = %v; the fixed name must not be used", kept, err)
+	}
+	assertNoTmpFiles(t, dir)
+}
+
+// Claude Code rewrites settings.json for its own reasons. A write that landed
+// while the kit was editing must not be clobbered: the kit redoes its edit on
+// top of the new file.
+func TestSetAutoUpdate_ConcurrentWrite_RedoesTheEdit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	write(t, path, `{"model":"opus"}`, 0o644)
+
+	w := NewWriter(path)
+	writes := 0
+	w.afterRead = func() {
+		writes++
+		if writes > 1 {
+			return // only the first attempt is interrupted
+		}
+		write(t, path, `{"model":"opus","extraKnownMarketplaces":{"acme":{"autoUpdate":false}}}`, 0o644)
+	}
+
+	if _, err := w.SetAutoUpdate("rise-x-public", repo, true); err != nil {
+		t.Fatalf("SetAutoUpdate: %v", err)
+	}
+	if writes != 2 {
+		t.Fatalf("read the file %d times, want 2 (one redo)", writes)
+	}
+
+	var got map[string]json.RawMessage
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("settings.json = %s: %v", data, err)
+	}
+	var ekm map[string]map[string]any
+	if err := json.Unmarshal(got["extraKnownMarketplaces"], &ekm); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ekm["acme"]; !ok {
+		t.Fatalf("the concurrent write was clobbered: %s", data)
+	}
+	if ekm["rise-x-public"]["autoUpdate"] != true {
+		t.Fatalf("autoUpdate did not land: %s", data)
+	}
+	assertNoTmpFiles(t, dir)
+}
+
+// A file that keeps moving is left alone, with an error the page can show.
+func TestSetAutoUpdate_KeepsChanging_Fails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	write(t, path, `{"model":"opus"}`, 0o644)
+
+	w := NewWriter(path)
+	round := 0
+	w.afterRead = func() {
+		round++
+		write(t, path, `{"model":"opus","round":`+strconv.Itoa(round)+`}`, 0o644)
+	}
+
+	if _, err := w.SetAutoUpdate("rise-x-public", repo, true); err == nil ||
+		!strings.Contains(err.Error(), "another program is writing it") {
+		t.Fatalf("err = %v, want a clear refusal", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "autoUpdate") {
+		t.Fatalf("the kit wrote over the other program: %s", data)
+	}
+	assertNoTmpFiles(t, dir)
+}
+
+func assertNoTmpFiles(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".settings-") && strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("leftover tmp file: %s", e.Name())
+		}
 	}
 }

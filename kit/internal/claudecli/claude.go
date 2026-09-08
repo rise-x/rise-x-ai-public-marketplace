@@ -31,12 +31,21 @@ func (c *Client) run(ctx context.Context, args []string) (stdout string, err err
 	defer cancel()
 	stdout, stderr, exitCode, err := c.Runner.Run(ctx, c.Path, args)
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", runner.Argv(c.Path, args), err)
+		return "", cmdError(runner.Argv(c.Path, args), err, stderr)
 	}
 	if exitCode != 0 {
 		return "", fmt.Errorf("%s: exit %d: %s", runner.Argv(c.Path, args), exitCode, strings.TrimSpace(stderr))
 	}
 	return stdout, nil
+}
+
+// cmdError wraps a command failure, quoting the stderr tail when there is
+// one so a timeout says why rather than just "deadline exceeded".
+func cmdError(argv string, err error, stderr string) error {
+	if s := strings.TrimSpace(stderr); s != "" {
+		return fmt.Errorf("%s: %w: %s", argv, err, s)
+	}
+	return fmt.Errorf("%s: %w", argv, err)
 }
 
 // Version runs `claude --version` and returns just the number.
@@ -86,13 +95,15 @@ func (c *Client) PluginListAvailable(ctx context.Context) (PluginListResult, err
 // McpList runs `claude mcp list` and returns its raw text; callers parse it
 // with the mcp package. The command can exit non-zero while still printing a
 // useful per-server status list, so a non-zero exit is not treated as an
-// error here.
+// error here. A timeout or a signalled process is: empty output must not read
+// as "this partner has no MCP servers".
 func (c *Client) McpList(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultReadTimeout)
 	defer cancel()
-	stdout, _, _, err := c.Runner.Run(ctx, c.Path, []string{"mcp", "list"})
+	args := []string{"mcp", "list"}
+	stdout, stderr, _, err := c.Runner.Run(ctx, c.Path, args)
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", runner.Argv(c.Path, []string{"mcp", "list"}), err)
+		return "", cmdError(runner.Argv(c.Path, args), err, stderr)
 	}
 	return stdout, nil
 }

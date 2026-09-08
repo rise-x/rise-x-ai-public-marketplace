@@ -2,8 +2,10 @@ package claudecli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner/runnertest"
 )
@@ -129,6 +131,49 @@ func TestClient_McpList_RawText(t *testing.T) {
 	}
 	if !strings.Contains(got, "plugin:rise-x-mcp:rise-x") {
 		t.Fatalf("expected raw text passthrough, got %q", got)
+	}
+}
+
+// A `claude mcp list` the deadline killed must surface as an error, not as
+// empty output: the page would otherwise report the partner has no MCP
+// servers at all.
+func TestClient_McpList_ContextDeadline_ReturnsError(t *testing.T) {
+	f := runnertest.NewFake()
+	f.Set("claude", []string{"mcp", "list"}, runnertest.Result{Stdout: mcpListFixture})
+	f.SetDelay(5 * time.Second)
+	c := New("claude", f)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	got, err := c.McpList(ctx)
+	if err == nil {
+		t.Fatalf("McpList err = nil, want a deadline error (raw %q)", got)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("McpList err = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+// The runner's own error - a timeout, a signalled process - must reach the
+// caller with the stderr tail the runner collected.
+func TestClient_McpList_RunnerError_QuotesStderr(t *testing.T) {
+	f := runnertest.NewFake()
+	f.Set("claude", []string{"mcp", "list"}, runnertest.Result{
+		Stderr: "node: out of memory",
+		Err:    context.DeadlineExceeded,
+	})
+	c := New("claude", f)
+
+	_, err := c.McpList(context.Background())
+	if err == nil {
+		t.Fatal("McpList err = nil, want the runner's error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("McpList err = %v, want the wrapped runner error", err)
+	}
+	if !strings.Contains(err.Error(), "out of memory") {
+		t.Fatalf("err = %q, want the stderr quoted", err)
 	}
 }
 

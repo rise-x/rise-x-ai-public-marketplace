@@ -7,6 +7,7 @@ package settings
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,6 +112,10 @@ func extraKnownMarketplaces(top map[string]json.RawMessage) (map[string]json.Raw
 type Writer struct {
 	Path string
 
+	// afterRead runs between reading the file and writing it back; only tests
+	// set it, to stand in for Claude Code rewriting settings.json mid-edit.
+	afterRead func()
+
 	mu       sync.Mutex
 	backedUp bool
 }
@@ -119,22 +124,78 @@ func NewWriter(path string) *Writer {
 	return &Writer{Path: path}
 }
 
+// errChanged means the file was rewritten while the kit was editing it, so
+// installing the edit would drop whatever the other writer put there.
+var errChanged = errors.New("settings.json changed while the kit was editing it")
+
 // SetAutoUpdate creates or updates extraKnownMarketplaces.<name>, setting only
 // autoUpdate and filling in source when the entry does not carry one and repo
-// names a GitHub one. It
-// refuses a settings file that isn't valid JSON, and writes atomically next to
-// the file a symlink resolves to.
+// names a GitHub one. It refuses a settings file that isn't valid JSON, and
+// writes atomically next to the file a symlink resolves to.
+//
+// Claude Code writes the same file for its own reasons - `claude plugin
+// marketplace add` rewrites extraKnownMarketplaces - so this read-modify-write
+// only installs its result while the file still looks exactly as it did when it
+// was read. A file that moved under it is read and edited again once, and then
+// the write is refused rather than clobbering the other writer.
 func (w *Writer) SetAutoUpdate(name, repo string, enabled bool) (backupPath string, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	target := resolve(w.Path)
-	original, err := os.ReadFile(target)
-	exists := err == nil
-	if err != nil && !os.IsNotExist(err) {
+	for attempt := 0; attempt < 2; attempt++ {
+		backupPath, err = w.setOnce(target, name, repo, enabled)
+		if !errors.Is(err, errChanged) {
+			return backupPath, err
+		}
+	}
+	return "", fmt.Errorf("refusing to modify %s: another program is writing it; try again", w.Path)
+}
+
+// setOnce is one read-modify-write attempt. It returns errChanged when the
+// file moved between the read and the write.
+func (w *Writer) setOnce(target, name, repo string, enabled bool) (backupPath string, err error) {
+	before := statStamp(target)
+	original, exists, err := readTarget(target)
+	if err != nil {
+		return "", err
+	}
+	read := statStamp(target)
+	if read != before {
+		return "", errChanged // the bytes just read may be half of two versions
+	}
+	if w.afterRead != nil {
+		w.afterRead()
+	}
+
+	out, err := w.edit(original, name, repo, enabled)
+	if err != nil {
 		return "", err
 	}
 
+	mode := defaultMode
+	if fi, serr := os.Stat(target); serr == nil {
+		mode = fi.Mode().Perm()
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return "", err
+	}
+	if exists && !w.backedUp {
+		if backupPath, err = backup(target, original, mode); err != nil {
+			return "", err
+		}
+		w.backedUp = true
+	}
+	if err := writeAtomic(target, out, mode, read); err != nil {
+		return "", err
+	}
+	return backupPath, nil
+}
+
+// edit renders original with only extraKnownMarketplaces.<name>.autoUpdate
+// changed, keeping every other key's value, position and escaping, and the
+// file's own BOM and line endings.
+func (w *Writer) edit(original []byte, name, repo string, enabled bool) ([]byte, error) {
 	body := original
 	hadBOM := bytes.HasPrefix(body, utf8BOM)
 	if hadBOM {
@@ -147,49 +208,49 @@ func (w *Writer) SetAutoUpdate(name, repo string, enabled bool) (backupPath stri
 
 	top, err := decodeObject(body)
 	if err != nil {
-		return "", fmt.Errorf("refusing to modify %s: invalid JSON: %w", w.Path, err)
+		return nil, fmt.Errorf("refusing to modify %s: invalid JSON: %w", w.Path, err)
 	}
 
 	ekm := newObject()
 	if raw, ok := top.get("extraKnownMarketplaces"); ok && !isNull(raw) {
 		if ekm, err = decodeObject(raw); err != nil {
-			return "", fmt.Errorf("refusing to modify %s: extraKnownMarketplaces: %w", w.Path, err)
+			return nil, fmt.Errorf("refusing to modify %s: extraKnownMarketplaces: %w", w.Path, err)
 		}
 	}
 
 	entry := newObject()
 	if raw, ok := ekm.get(name); ok && !isNull(raw) {
 		if entry, err = decodeObject(raw); err != nil {
-			return "", fmt.Errorf("refusing to modify %s: extraKnownMarketplaces.%s: %w", w.Path, name, err)
+			return nil, fmt.Errorf("refusing to modify %s: extraKnownMarketplaces.%s: %w", w.Path, name, err)
 		}
 	}
 	if _, ok := entry.get("source"); !ok && repo != "" {
 		source, err := encodeJSON(Source{Source: "github", Repo: repo})
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		entry.set("source", source)
 	}
 	autoUpdate, err := encodeJSON(enabled)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	entry.set("autoUpdate", autoUpdate)
 
 	entryBytes, err := entry.marshal()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	ekm.set(name, entryBytes)
 	ekmBytes, err := ekm.marshal()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	top.set("extraKnownMarketplaces", ekmBytes)
 
 	out, err := top.indent()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if crlf {
 		out = bytes.ReplaceAll(out, []byte("\n"), []byte("\r\n"))
@@ -197,25 +258,36 @@ func (w *Writer) SetAutoUpdate(name, repo string, enabled bool) (backupPath stri
 	if hadBOM {
 		out = append(append([]byte{}, utf8BOM...), out...)
 	}
+	return out, nil
+}
 
-	mode := defaultMode
-	if fi, serr := os.Stat(target); serr == nil {
-		mode = fi.Mode().Perm()
+// readTarget reads the file as-is, reporting whether it exists at all; a
+// missing file is an empty settings object, not an error.
+func readTarget(target string) (data []byte, exists bool, err error) {
+	data, err = os.ReadFile(target)
+	if err == nil {
+		return data, true, nil
 	}
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	return nil, false, err
+}
 
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return "", err
+// stamp is a file's size and modification time, the pair used to notice
+// another program writing settings.json. Compared only, never shown.
+type stamp struct {
+	exists bool
+	size   int64
+	mtime  int64
+}
+
+func statStamp(path string) stamp {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return stamp{}
 	}
-	if exists && !w.backedUp {
-		if backupPath, err = backup(target, original, mode); err != nil {
-			return "", err
-		}
-		w.backedUp = true
-	}
-	if err := writeAtomic(target, out, mode); err != nil {
-		return "", err
-	}
-	return backupPath, nil
+	return stamp{exists: true, size: fi.Size(), mtime: fi.ModTime().UnixNano()}
 }
 
 // resolve follows a symlinked settings.json to the real file, so a dotfiles
@@ -261,20 +333,34 @@ func readFile(path string) (data []byte, hadBOM bool, err error) {
 	return data, hadBOM, nil
 }
 
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
+// writeAtomic installs data at path via a uniquely named temp file in the same
+// directory, but only while path still matches expect: a rename over a file
+// another program has just rewritten would silently drop its change.
+func writeAtomic(path string, data []byte, mode os.FileMode, expect stamp) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
+	if err != nil {
 		return err
 	}
-	// WriteFile only applies mode when it creates the file; a leftover tmp
-	// from a crashed run would keep its old permissions.
-	if err := os.Chmod(tmp, mode); err != nil {
-		_ = os.Remove(tmp)
+	name := tmp.Name()
+	defer func() {
+		// Removing a file already renamed away is a no-op; this only ever
+		// cleans up a copy of settings.json left behind by a failure.
+		tmp.Close()
+		_ = os.Remove(name)
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp) // never leave a copy of settings.json lying around
+	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return nil
+	// CreateTemp makes the file 0600; settings.json may be more permissive.
+	if err := os.Chmod(name, mode); err != nil {
+		return err
+	}
+	if statStamp(path) != expect {
+		return errChanged
+	}
+	return os.Rename(name, path)
 }

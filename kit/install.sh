@@ -74,31 +74,36 @@ curl -fsSL -o "$tmp/checksums.txt" "$DOWNLOAD_BASE/checksums.txt"
 
 tar -xzf "$tmp/$ASSET" -C "$tmp"
 
-LOCAL_BIN="$HOME/.local/bin"
-if mkdir -p "$LOCAL_BIN" 2>/dev/null && [ -w "$LOCAL_BIN" ]; then
-  dest_dir="$LOCAL_BIN"
+if pgrep -x rise-x-kit >/dev/null 2>&1; then
+  echo "Rise-X Kit is running. Click Quit in the app, then run this installer again." >&2
+  exit 1
+fi
+
+if existing="$(command -v rise-x-kit 2>/dev/null)"; then
+  # Already on PATH somewhere -- replace it there instead of adding a second,
+  # possibly-shadowed copy elsewhere.
+  dest_dir="$(dirname "$existing")"
 elif [ -w /usr/local/bin ]; then
   dest_dir="/usr/local/bin"
 else
-  echo "error: neither $LOCAL_BIN nor /usr/local/bin is writable" >&2
-  exit 1
+  dest_dir="$HOME/.local/bin"
+  mkdir -p "$dest_dir"
+  case ":$PATH:" in
+    *":$dest_dir:"*) ;;
+    *)
+      echo
+      echo "$dest_dir is not on your PATH. Run this, then open a new Terminal window:"
+      echo
+      echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
+      echo
+      ;;
+  esac
 fi
 
 dest="$dest_dir/rise-x-kit"
 cp "$tmp/rise-x-kit" "$dest"
 chmod +x "$dest"
 xattr -d com.apple.quarantine "$dest" 2>/dev/null || true
-
-case ":$PATH:" in
-  *":$dest_dir:"*) ;;
-  *)
-    echo
-    echo "$dest_dir is not on your PATH. Add this to ~/.zshrc:"
-    echo
-    echo "  export PATH=\"$dest_dir:\$PATH\""
-    echo
-    ;;
-esac
 
 echo "Installed rise-x-kit ${VERSION}. Run: rise-x-kit"
 

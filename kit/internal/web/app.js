@@ -16,13 +16,16 @@
  *     plugins?: [{ name, description?, installed, enabled, localVersion?,
  *       publicVersion?, versionUnknown?, offline?, publicCheckError?,
  *       updateAvailable?,
- *       installSource?: "public"|"marketplace"|"organisation", // absent = not installed
+ *       // absent = not installed; "desktop" = synced by Claude Desktop, so
+ *       // the CLI cannot install, update or remove that copy
+ *       installSource?: "public"|"marketplace"|"desktop"|"organisation",
  *       sourceName? }],      // the marketplace installSource came from
  *     mcp?: { verdict: "connected"|"needs_auth"|"failed"|"pending"|"unknown"
  *               |"not_installed"|"managed", // managed = the Desktop app owns them
  *       servers?: [{ name, target, status }], configured?: [{ name, type?, url?, command?, args? }],
  *       stale?: [{ name, scope: "user"|"local"|"desktop", projectPath?, url, suggestedUrl }],
- *       raw?: string },      // full `claude mcp list` text
+ *       message?: string,    // why the verdict is unknown, when it is
+ *       raw?: string },      // full `claude mcp list` text, redacted
  *     reloadHint: bool }
  *
  * GET /api/doctor -> 200
@@ -32,18 +35,22 @@
  *   fix would change, shown behind "Show lines". npmrc.clean has no fixArgs
  *   but the server demands {confirm:true}, so the page adds it.
  *
- * POST /api/actions/{name}  body: JSON (may be empty) -> 200 | 400 | 403 | 409
+ * POST /api/actions/{name}  body: JSON (may be empty) -> 200 | 400 | 403 | 409 | 422
  *   Sync actions respond immediately:
  *     autoupdate.set {enabled, marketplace?} -> {backup}
  *     npmrc.clean {confirm:true} -> {removed: [string], backup}
  *     cli.rescan {} -> {found}  |  quit {} -> {ok: true}
+ *     reload-hint.dismiss {} -> {ok: true}
  *   Job actions respond {jobId} and stream their log via GET /api/jobs/{id}:
  *     marketplace.add, marketplace.update, cli.install,
  *     plugin.install / plugin.uninstall {name},
  *     plugin.update {name, marketplace?}, mcp.login {server},
  *     mcp.fix {name, scope, projectPath?} - or {} for every fixable connection
- *   403 = bad/missing token or Host. 409 = a job is already running.
- *   Every error body is {error: string}, e.g. mcp.login 400 "unknown MCP server target".
+ *   400 = a bad Host, an unreadable body, or an argument the server refused.
+ *   403 = a bad or missing token. 409 = a job is already running (the two sync
+ *   file edits take the same slot). 422 = ~/.claude/settings.json is not valid
+ *   JSON, so the switch cannot be changed; show the server's message.
+ *   Every error body is {error: string}, the middlewares' included.
  *
  * GET /api/jobs/{id}?since=N -> 200
  *   { job: { id, action, status: "running"|"succeeded"|"failed", exitCode,
@@ -199,6 +206,7 @@ const CONNECTION = {
 /** Where a skill came from, for the Status column's badge. */
 const SOURCE_BADGE = {
   organisation: () => "Installed by your organisation",
+  desktop: () => "Installed through Claude Desktop",
   marketplace: (plugin) =>
     `Installed from ${plugin.sourceName || "another marketplace"}`,
 };
@@ -231,12 +239,11 @@ let overview = null;
 let checks = null;
 const jobs = []; // newest first
 let drawerOpen = false;
-let poller = null;
 
 function notice(kind, text) {
   const info = kind === "info";
   $("kit-notice").innerHTML = `
-    <div data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start ${info ? "border-info/25 bg-info/8" : "border-error/25 bg-error/8"}">
+    <div data-slot="alert" role="${info ? "status" : "alert"}" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start ${info ? "border-info/25 bg-info/8" : "border-error/25 bg-error/8"}">
       ${info ? ICON.info : ICON.alert}
       <div data-slot="alert-description" class="min-w-0 flex-1 text-xs text-muted-foreground">${esc(text)}</div>
       ${btn(ICON.close, { act: "notice-dismiss", variant: "ghost", size: "icon-xs", aria: "Dismiss" })}
@@ -281,6 +288,7 @@ async function runAction(name, body, button) {
         title: (JOB_TITLES[name] || (() => name))(payload),
         subtitle: payload.name || "",
         lines: [],
+        rendered: 0,
         since: 0,
         status: "running",
         startedAt: new Date().toISOString(),
@@ -301,39 +309,50 @@ async function runAction(name, body, button) {
   }
 }
 
+/**
+ * startPolling follows one job to its end. The interval id lives in this
+ * closure, so a late answer for one job can never stop another's polling, and
+ * inFlight keeps one request outstanding at a time.
+ */
 function startPolling(job) {
-  clearInterval(poller);
-  poller = setInterval(async () => {
-    let snap;
+  if (job.timer) return;
+  let inFlight = false;
+  job.timer = setInterval(async () => {
+    if (inFlight) return;
+    inFlight = true;
     try {
-      snap = await api(
+      const snap = await api(
         `/api/jobs/${encodeURIComponent(job.id)}?since=${job.since}`,
       );
+      for (const line of snap.log || []) {
+        job.lines.push(line.text);
+        job.since = line.seq;
+      }
+      job.status = snap.job.status;
+      job.startedAt = snap.job.startedAt;
+      job.finishedAt = snap.job.finishedAt;
+      job.error = snap.job.error || "";
+      patchJob(job);
+      if (job.status === "running") return; // still going: keep polling
+      stopPolling(job);
+      if (job.status === "failed")
+        notice("error", job.error || `${job.title} did not finish.`);
+      refresh();
     } catch (err) {
-      clearInterval(poller);
-      poller = null;
+      stopPolling(job);
       job.status = "failed";
       job.error = err.message;
-      renderJobs();
+      patchJob(job);
       notice("error", err.message);
-      return;
+    } finally {
+      inFlight = false;
     }
-    for (const line of snap.log || []) {
-      job.lines.push(line.text);
-      job.since = line.seq;
-    }
-    job.status = snap.job.status;
-    job.startedAt = snap.job.startedAt;
-    job.finishedAt = snap.job.finishedAt;
-    job.error = snap.job.error || "";
-    renderJobs();
-    if (snap.job.status === "running") return; // still going: keep polling
-    clearInterval(poller);
-    poller = null;
-    if (job.status === "failed")
-      notice("error", job.error || `${job.title} did not finish.`);
-    refresh();
   }, 500);
+}
+
+function stopPolling(job) {
+  clearInterval(job.timer);
+  job.timer = null;
 }
 
 /* render */
@@ -365,23 +384,33 @@ function renderBanner() {
  * listItem renders one row of a bordered list. The CLI facts, the connection
  * targets and the doctor checks all use it, so they cannot drift apart.
  */
-function listItem({ dot, name, code, description, detail, trailing, muted }) {
+function listItem({
+  dot,
+  name,
+  code,
+  description,
+  detail,
+  detailKey,
+  trailing,
+  muted,
+}) {
   return `
     <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
       ${dot || ""}
       <div data-slot="list-main" class="min-w-0 flex-1">
         <span data-slot="list-name" class="flex items-center gap-2 text-ui${muted ? " text-muted-foreground" : ""}">${esc(name)}${code ? `<span class="text-micro text-subtle font-mono">${esc(code)}</span>` : ""}</span>
         ${description ? `<span data-slot="list-description" class="mt-0.5 block text-xs ${muted ? "text-subtle" : "text-muted-foreground"}">${esc(description)}</span>` : ""}
-        ${detail ? lines(detail) : ""}
+        ${detail ? lines(detail, detailKey) : ""}
       </div>
       ${trailing || ""}
     </div>`;
 }
 
-/** lines shows the exact entries a fix would change, collapsed by default. */
-function lines(detail) {
+/** lines shows the exact entries a fix would change, collapsed by default.
+ * key is stable across refreshes, so one the reader opened stays open. */
+function lines(detail, key) {
   return `
-    <details data-slot="collapsible" class="mt-1">
+    <details data-slot="collapsible" class="mt-1"${key ? ` data-detail="${esc(key)}"` : ""}>
       <summary data-slot="collapsible-trigger" class="${btnClass("ghost", "xs")} w-fit list-none px-1">
         Show lines
         <svg viewBox="0 0 24 24" ${STROKE}>${ICON.chevronDown}</svg>
@@ -603,6 +632,9 @@ const SETTINGS_ERROR_TIP =
 
 function renderSkillsFooter() {
   const marketplace = overview.marketplace || {};
+  // Every catalog button needs the CLI, and "not set up yet" would be a guess
+  // without one: with no CLI the footer is the auto-update switch alone.
+  const cliFound = !!(overview.cli && overview.cli.found);
   const on = marketplace.autoUpdate === true;
   const orgManaged = isOrgManaged(overview);
   const settingsError = marketplace.settingsError === true;
@@ -615,8 +647,8 @@ function renderSkillsFooter() {
       : "Claude Code refreshes the catalog and updates installed skills after each session starts.";
 
   $("kit-skills-footer").innerHTML = `
-    <div class="min-w-0 flex-1">${catalogStatus(marketplace)}</div>
-    <div data-slot="choice-row" class="flex items-start gap-2.5 shrink-0"${disabled ? ` data-tip="${esc(tip)}" title="${esc(tip)}"` : ""}>
+    <div class="min-w-0 flex-1">${cliFound ? catalogStatus(marketplace) : ""}</div>
+    <div data-slot="choice-row" class="flex items-start gap-2.5 shrink-0"${disabled ? ` data-tip="${esc(tip)}" title="${esc(tip)}" tabindex="0"` : ""}>
       <button
         type="button" role="checkbox" data-act="autoupdate" id="kit-autoupdate"
         aria-checked="${on}" data-state="${on ? "checked" : "unchecked"}" ${on ? "data-checked" : ""}
@@ -700,6 +732,24 @@ function staleRows(stale) {
     .join("");
 }
 
+/**
+ * signInTarget is the connector `claude mcp login` should be pointed at: the
+ * one the last check said needs signing in, else the first. The server only
+ * accepts the bare .mcp.json names; mcp.servers carries the prefixed session
+ * names (plugin:rise-x-mcp:...), which it rejects.
+ */
+function signInTarget(mcp) {
+  const configured = (mcp.configured || []).map((s) => s.name).filter(Boolean);
+  const needsAuth = (mcp.servers || []).find((server) =>
+    /^\s*!/.test(server.status || ""),
+  );
+  if (needsAuth) {
+    const bare = String(needsAuth.name || "").replace(/^plugin:[^:]+:/, "");
+    if (configured.includes(bare)) return bare;
+  }
+  return configured[0] || "";
+}
+
 function renderConnection() {
   const mcp = overview.mcp || { verdict: "unknown" };
   const [label, variant] = CONNECTION[mcp.verdict] || CONNECTION.unknown;
@@ -707,11 +757,7 @@ function renderConnection() {
 
   const rows = connectionRows(mcp);
   const managed = mcp.verdict === "managed";
-  // The bare .mcp.json name is what the server accepts; mcp.servers holds the
-  // prefixed session names (plugin:rise-x-mcp:...), which it rejects.
-  const signIn = managed
-    ? ""
-    : (mcp.configured || []).map((s) => s.name).filter(Boolean)[0];
+  const signIn = managed ? "" : signInTarget(mcp);
 
   const guide = managed
     ? `<div class="rounded-lg bg-fill-0 p-3.5">
@@ -740,11 +786,22 @@ function renderConnection() {
        </div>`
     : "";
 
+  // A check that could not run leaves the badge on "Unknown"; the server says
+  // why in plain words.
+  const note = mcp.message
+    ? `<div data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start border-info/25 bg-info/8">
+         ${ICON.info}
+         <div data-slot="alert-description" class="min-w-0 flex-1 text-xs text-muted-foreground">${esc(mcp.message)}</div>
+       </div>`
+    : "";
+
   const body = rows
-    ? `<div data-slot="list" class="flex flex-col rounded-lg border border-border-subtle">${rows}</div>
+    ? `${note}
+       <div data-slot="list" class="flex flex-col rounded-lg border border-border-subtle">${rows}</div>
        ${staleBlock}
        ${guide}`
-    : `${staleBlock}
+    : `${note}
+       ${staleBlock}
        <div class="rounded-lg bg-fill-0 px-3.5 py-3 text-xs text-muted-foreground">
          Install the Rise-X skill above, then its connection details appear here.
        </div>`;
@@ -769,7 +826,7 @@ function renderConnection() {
     </div>
     ${
       mcp.raw
-        ? `<details data-slot="collapsible">
+        ? `<details data-slot="collapsible" data-detail="mcp-raw">
              <summary data-slot="collapsible-trigger" class="${btnClass("ghost", "sm")} w-fit list-none">
                Show raw check output
                <svg viewBox="0 0 24 24" ${STROKE}>${ICON.chevronDown}</svg>
@@ -815,6 +872,7 @@ function renderDoctor() {
         code: isSkill ? check.id.slice("plugin.".length) : "",
         description: sentence(check.message),
         detail: check.detail,
+        detailKey: check.id,
         trailing: checkAction(check),
         muted: check.status === "skip",
       });
@@ -828,33 +886,48 @@ function seconds(job) {
   return `${Math.max(1, Math.round(ms / 1000))} s`;
 }
 
-function jobItem(job) {
-  const failed = job.status === "failed";
-  const running = job.status === "running";
-  const glyph = running
+const jobGlyph = (job) =>
+  job.status === "running"
     ? SPINNER
-    : dot(failed ? "bg-error" : "bg-success", failed ? "Failed" : "Done");
-  const right = running
+    : dot(
+        job.status === "failed" ? "bg-error" : "bg-success",
+        job.status === "failed" ? "Failed" : "Done",
+      );
+
+const jobResult = (job) =>
+  job.status === "running"
     ? ""
-    : failed
+    : job.status === "failed"
       ? '<span class="text-xs text-error-text">Failed</span>'
       : `<span class="text-xs text-muted-foreground">Done in <span class="tabular-nums">${seconds(job)}</span></span>`;
 
+const jobError = (job) => (job.status === "failed" && job.error) || "";
+
+/**
+ * jobItem renders one drawer entry with every part present even when empty,
+ * so patchJob can update it in place. job.rendered tracks how many log lines
+ * are already in the DOM.
+ */
+function jobItem(job) {
+  job.rendered = job.lines.length;
+  const error = jobError(job);
   return `
-    <div data-slot="item" class="flex flex-col rounded-lg border border-border-subtle p-3.5">
+    <div data-slot="item" id="kit-job-${esc(job.id)}" class="flex flex-col rounded-lg border border-border-subtle p-3.5">
       <div class="flex items-center gap-2.5">
-        ${glyph}
+        <span data-job-glyph class="inline-flex shrink-0">${jobGlyph(job)}</span>
         <span data-slot="item-title" class="text-ui font-medium">${esc(job.title)}</span>
         ${job.subtitle ? `<span class="text-micro text-subtle font-mono">${esc(job.subtitle)}</span>` : ""}
         <span class="flex-1"></span>
-        ${right}
+        <span data-job-result>${jobResult(job)}</span>
       </div>
-      ${failed && job.error ? `<div class="mt-1.5 text-xs text-error-text">${esc(job.error)}</div>` : ""}
-      ${job.lines.length ? `<pre class="kit-log mt-2.5 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground" data-job-log="${esc(job.id)}">${esc(job.lines.join("\n"))}</pre>` : ""}
+      <div data-job-error class="mt-1.5 text-xs text-error-text"${error ? "" : " hidden"}>${esc(error)}</div>
+      <pre data-job-log class="kit-log mt-2.5 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground"${job.lines.length ? "" : " hidden"}>${esc(job.lines.join("\n"))}</pre>
     </div>`;
 }
 
-function renderJobs() {
+/** renderJobsHeader draws the collapsed bar: it is the same whether or not the
+ * drawer is open. */
+function renderJobsHeader() {
   const running = jobs.find((job) => job.status === "running");
   const finished = jobs.length - (running ? 1 : 0);
 
@@ -875,21 +948,57 @@ function renderJobs() {
   $("kit-jobs-chevron").innerHTML = drawerOpen
     ? ICON.chevronDown
     : ICON.chevronUp;
+  $("kit-jobs-panel").hidden = !drawerOpen;
+}
 
-  const panel = $("kit-jobs-panel");
-  panel.hidden = !drawerOpen;
+/** renderJobs rebuilds the drawer. Only opening it, or starting a job, calls
+ * this; a poll patches the entry it is about. */
+function renderJobs() {
+  renderJobsHeader();
   if (!drawerOpen) return;
 
-  panel.innerHTML = jobs.length
+  $("kit-jobs-panel").innerHTML = jobs.length
     ? jobs.map(jobItem).join("")
     : '<div class="rounded-lg border border-border-subtle px-3.5 py-2.5 text-xs text-muted-foreground">Nothing has run yet in this session.</div>';
 
-  if (running) {
-    const log = panel.querySelector(
-      `[data-job-log="${CSS.escape(running.id)}"]`,
-    );
-    if (log) log.scrollTop = log.scrollHeight;
+  const running = jobs.find((job) => job.status === "running");
+  if (running) scrollLog(running);
+}
+
+/**
+ * patchJob updates one entry in place: its glyph, its result, and the log
+ * lines that arrived since the last poll. Rebuilding the drawer twice a second
+ * instead would drop the reader's text selection and re-collapse the page.
+ */
+function patchJob(job) {
+  renderJobsHeader();
+  if (!drawerOpen) return;
+  const block = $(`kit-job-${job.id}`);
+  if (!block) {
+    renderJobs(); // the entry is new to the drawer
+    return;
   }
+  block.querySelector("[data-job-glyph]").innerHTML = jobGlyph(job);
+  block.querySelector("[data-job-result]").innerHTML = jobResult(job);
+
+  const error = block.querySelector("[data-job-error]");
+  error.textContent = jobError(job);
+  error.hidden = !jobError(job);
+
+  if (job.lines.length > job.rendered) {
+    const log = block.querySelector("[data-job-log]");
+    const fresh = job.lines.slice(job.rendered).join("\n");
+    log.textContent += job.rendered ? `\n${fresh}` : fresh;
+    job.rendered = job.lines.length;
+    log.hidden = false;
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+function scrollLog(job) {
+  const block = $(`kit-job-${job.id}`);
+  const log = block && block.querySelector("[data-job-log]");
+  if (log) log.scrollTop = log.scrollHeight;
 }
 
 /* load */
@@ -908,11 +1017,53 @@ async function loadDoctor() {
   renderDoctor();
 }
 
+/** openDetails/restoreDetails keep a disclosure the reader opened open across
+ * a refresh; each one carries a key that is stable between renders. */
+function openDetails() {
+  return new Set(
+    Array.from(
+      document.querySelectorAll("details[data-detail][open]"),
+      (el) => el.dataset.detail,
+    ),
+  );
+}
+
+function restoreDetails(keys) {
+  for (const el of document.querySelectorAll("details[data-detail]")) {
+    if (keys.has(el.dataset.detail)) el.open = true;
+  }
+}
+
+/** focusKey identifies the control the reader is on by what it does, so a
+ * refresh that replaces the element can put focus back on its successor. */
+function focusKey(el) {
+  const data = el && el.dataset;
+  if (!data || !data.act) return "";
+  return [data.act, data.op || "", data.name || data.server || data.fix || ""].join(
+    "|",
+  );
+}
+
+function restoreFocus(key) {
+  if (!key) return;
+  for (const el of document.querySelectorAll("[data-act]")) {
+    if (focusKey(el) === key) {
+      el.focus();
+      return;
+    }
+  }
+}
+
 async function refresh() {
+  const open = openDetails();
+  const focused = focusKey(document.activeElement);
   try {
     await Promise.all([loadOverview(), loadDoctor()]);
   } catch (err) {
     notice("error", `Could not read this machine: ${err.message}`);
+  } finally {
+    restoreDetails(open);
+    restoreFocus(focused);
   }
 }
 
@@ -958,7 +1109,8 @@ function paintCheckbox(button, on) {
   button.setAttribute("aria-checked", String(on));
   button.dataset.state = on ? "checked" : "unchecked";
   button.toggleAttribute("data-checked", on);
-  button.querySelector("svg").hidden = !on;
+  // An SVGElement has no "hidden" property, so this must be the attribute.
+  button.querySelector("svg").toggleAttribute("hidden", !on);
 }
 
 function toggleAutoUpdate(button) {
@@ -981,7 +1133,7 @@ function toggleAutoUpdate(button) {
 }
 
 function stopped() {
-  clearInterval(poller);
+  jobs.forEach(stopPolling);
   document.querySelector("header").hidden = true;
   $("kit-activity").hidden = true;
   $("kit-main").innerHTML = `
@@ -1025,6 +1177,7 @@ function runFix(button) {
         title: "Clean up ~/.npmrc",
         subtitle: "",
         lines: removed.length ? ["Removed:", ...removed] : [],
+        rendered: 0,
         since: 0,
         status: "succeeded",
         startedAt: new Date().toISOString(),
@@ -1048,6 +1201,8 @@ const ACTIONS = {
   "banner-dismiss": () => {
     overview.reloadHint = false;
     renderBanner();
+    // Forget it server-side too, or the next refresh brings it back.
+    return runAction("reload-hint.dismiss", {});
   },
   "jobs-toggle": () => {
     drawerOpen = !drawerOpen;

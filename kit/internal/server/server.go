@@ -56,6 +56,10 @@ type Config struct {
 	// ClaudeJSONPath is the CLI's own config, scanned for MCP servers; empty
 	// defaults to ~/.claude.json.
 	ClaudeJSONPath string
+
+	// NpmrcPath is the npm config the doctor reads and npmrc.clean edits;
+	// empty defaults to ~/.npmrc.
+	NpmrcPath string
 }
 
 // Server holds everything the HTTP handlers need.
@@ -73,6 +77,7 @@ type Server struct {
 	jobs           *jobs.Store
 	desktopDataDir string
 	claudeJSONPath string
+	npmrcPath      string
 
 	mcpCache    probeCache[mcpListResult]
 	nodeCache   probeCache[nodeProbe]
@@ -93,10 +98,6 @@ type Server struct {
 	gatherOK    bool
 	gatherOv    OverviewResponse
 	gatherFacts doctor.Facts
-
-	// npmrcMu keeps npmrc.clean to one writer at a time, like the settings
-	// writer's own lock.
-	npmrcMu sync.Mutex
 
 	mu            sync.Mutex
 	cachedCLI     *claudecli.CLI
@@ -131,6 +132,10 @@ func New(cfg Config) *Server {
 	if claudeJSONPath == "" {
 		claudeJSONPath = defaultClaudeJSONPath()
 	}
+	npmrcPath := cfg.NpmrcPath
+	if npmrcPath == "" {
+		npmrcPath = defaultNpmrcPath()
+	}
 	s := &Server{
 		port:           cfg.Port,
 		token:          cfg.Token,
@@ -143,6 +148,7 @@ func New(cfg Config) *Server {
 		jobs:           jobs.NewStore(),
 		desktopDataDir: desktopDataDir,
 		claudeJSONPath: claudeJSONPath,
+		npmrcPath:      npmrcPath,
 		quitRequested:  make(chan struct{}),
 	}
 	s.writer = settings.NewWriter(s.settingsPath())
@@ -188,6 +194,10 @@ func (s *Server) invalidateClaudeProbes() {
 // Quit is closed when the "quit" action runs, so main can shut the process
 // down.
 func (s *Server) Quit() <-chan struct{} { return s.quitRequested }
+
+// Jobs is the store main cancels on shutdown: a claude child runs in its own
+// process group, so nothing else stops it.
+func (s *Server) Jobs() *jobs.Store { return s.jobs }
 
 func (s *Server) settingsPath() string { return filepath.Join(s.claudeDir, "settings.json") }
 
@@ -267,6 +277,14 @@ func (s *Server) getReloadHint() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.reloadHint
+}
+
+// clearReloadHint drops the "restart Claude Code" hint once the page has
+// dismissed it, so the next /api/overview doesn't bring it back.
+func (s *Server) clearReloadHint() {
+	s.mu.Lock()
+	s.reloadHint = false
+	s.mu.Unlock()
 }
 
 func (s *Server) setCatalogNames(names []string) {

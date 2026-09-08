@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -154,6 +155,67 @@ func TestHandler_BadHost_400(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// The Host guard covers the whole surface, not just /api/: the page itself
+// carries the CSRF token, so a rebinding attack must not be able to read it.
+func TestHandler_BadHost_Page_400(t *testing.T) {
+	baseURL, _, _ := newTestServer(t)
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "evil.example.com"
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || out.Error == "" {
+		t.Fatalf("body = %q, want a JSON {error}", body)
+	}
+}
+
+// Every response carries the security headers, the middlewares' own errors
+// included: a page served without them is a page that can be framed.
+func TestHandler_SecurityHeaders_OnEveryResponse(t *testing.T) {
+	baseURL, _, _ := newTestServer(t)
+
+	// The page, a static asset, and an /api/ request refused for its token.
+	for _, path := range []string{"/", "/app.js", "/api/overview"} {
+		resp, err := http.Get(baseURL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		for header, value := range map[string]string{
+			"X-Content-Type-Options": "nosniff",
+			"Referrer-Policy":        "no-referrer",
+			"X-Frame-Options":        "DENY",
+		} {
+			if got := resp.Header.Get(header); got != value {
+				t.Errorf("%s %s = %q, want %q", path, header, got, value)
+			}
+		}
+		csp := resp.Header.Get("Content-Security-Policy")
+		for _, directive := range []string{"default-src 'self'", "frame-ancestors 'none'",
+			"base-uri 'none'", "form-action 'none'", "object-src 'none'"} {
+			if !strings.Contains(csp, directive) {
+				t.Errorf("%s CSP %q is missing %q", path, csp, directive)
+			}
+		}
 	}
 }
 

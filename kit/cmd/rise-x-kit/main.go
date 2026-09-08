@@ -25,6 +25,10 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/server"
 )
 
+// shutdownGrace bounds both halves of the shutdown: waiting for the running
+// job to notice its cancelled context, then draining HTTP connections.
+const shutdownGrace = 5 * time.Second
+
 func main() {
 	port := flag.Int("port", 0, "port to listen on (0 = pick any free port)")
 	noBrowser := flag.Bool("no-browser", false, "don't open the browser automatically")
@@ -75,15 +79,23 @@ func main() {
 		}
 	}()
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 
 	select {
-	case <-sig:
+	case <-sigCtx.Done():
 	case <-srv.Quit():
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Cancel the running job before we stop serving: http.Server.Shutdown
+	// waits for connections, not for jobs, and the children run in their own
+	// process group, so a Ctrl-C in the launching terminal never reaches them.
+	srv.Jobs().CancelAll()
+	if !srv.Jobs().WaitIdle(shutdownGrace) {
+		log.Printf("a job was still running after %s; exiting anyway", shutdownGrace)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	_ = httpServer.Shutdown(ctx)
 }

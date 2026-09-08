@@ -17,31 +17,52 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/doctor"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/npmrc"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/semver"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/settings"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/synced"
 )
 
-const probeTTL = 60 * time.Second
+const (
+	probeTTL = 60 * time.Second
+	// probeFailTTL is how long a probe that could not answer is remembered. A
+	// wedged claude, a node that isn't installed yet: the partner fixes those
+	// and presses Refresh, and must not be told the old answer for a minute.
+	probeFailTTL = 10 * time.Second
+)
 
-// probeCache memoizes one probe of the machine for probeTTL. `claude mcp
-// list` takes a couple of seconds per server, DetectNode shells out to node
-// and npmrc.Analyze reads a file, so none of them should re-run for every
-// /api/overview + /api/doctor pair one page load makes.
+// probeCache memoizes one probe of the machine: probeTTL for an answer,
+// probeFailTTL for a failure. `claude mcp list` takes a couple of seconds per
+// server, DetectNode shells out to node and npmrc.Analyze reads a file, so
+// none of them should re-run for every /api/overview + /api/doctor pair one
+// page load makes.
 type probeCache[T any] struct {
-	mu  sync.Mutex
-	at  time.Time
-	val T
-	set bool
+	mu     sync.Mutex
+	at     time.Time
+	val    T
+	set    bool
+	failed bool
 }
 
+// get memoizes a probe whose answer is always usable.
 func (c *probeCache[T]) get(probe func() T) T {
+	return c.getOrFail(func() (T, bool) { return probe(), false })
+}
+
+// getOrFail memoizes a probe that can fail; failed is the probe's own verdict
+// on whether its answer is usable.
+func (c *probeCache[T]) getOrFail(probe func() (val T, failed bool)) T {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.set && time.Since(c.at) < probeTTL {
+	ttl := probeTTL
+	if c.failed {
+		ttl = probeFailTTL
+	}
+	if c.set && time.Since(c.at) < ttl {
 		return c.val
 	}
-	c.val, c.at, c.set = probe(), time.Now(), true
+	c.val, c.failed = probe()
+	c.at, c.set = time.Now(), true
 	return c.val
 }
 
@@ -74,6 +95,10 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 	if err != nil {
 		facts.SettingsError = oneLine(err.Error())
 	}
+	// Filled in before anything that needs the CLI: a machine without one
+	// still has a settings.json, and the page's auto-update switch must know
+	// when it cannot be read.
+	overview.Marketplace = &MarketplaceInfo{SettingsError: facts.SettingsError != ""}
 
 	if cli, found := s.cli(ctx); found {
 		overview.CLI = &CLIInfo{Found: true, Path: cli.Path, Version: cli.Version, Source: cli.Source}
@@ -86,18 +111,18 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 		overview.Mcp = &McpInfo{Verdict: string(mcp.VerdictUnknown), Stale: s.staleMcp()}
 	}
 
-	node := s.nodeCache.get(func() nodeProbe {
+	node := s.nodeCache.getOrFail(func() (nodeProbe, bool) {
 		v, ok := doctor.DetectNode(s.nodeEnv(s.runner))
-		return nodeProbe{version: v, found: ok}
+		return nodeProbe{version: v, found: ok}, !ok
 	})
 	facts.NodeFound, facts.NodeVersion = node.found, node.version
 
-	facts.NpmrcOffendingLines = s.npmrcCache.get(func() []string {
-		lines, err := npmrc.Analyze(npmrcPath())
+	facts.NpmrcOffendingLines = s.npmrcCache.getOrFail(func() ([]string, bool) {
+		lines, err := npmrc.Analyze(s.npmrcPath)
 		if err != nil {
-			return nil
+			return nil, true
 		}
-		return lines
+		return lines, false
 	})
 
 	if runtime.GOOS == "windows" {
@@ -119,7 +144,7 @@ func (s *Server) gatherClaude(ctx context.Context, client *claudecli.Client, set
 		mp = findMarketplace(marketplaces, claudecli.MarketplaceName)
 	}
 	facts.MarketplaceRegistered = mp != nil
-	overview.Marketplace = &MarketplaceInfo{Registered: mp != nil, SettingsError: facts.SettingsError != ""}
+	overview.Marketplace.Registered = mp != nil
 
 	plResult, plErr := client.PluginListAvailable(ctx)
 
@@ -211,7 +236,10 @@ func (s *Server) gatherPlugins(ctx context.Context, installLocation string, plRe
 				// carries no such flag, so it counts as enabled.
 				pi.Installed, pi.Enabled = true, true
 				pi.LocalVersion, pi.SourceName = sp.Version, sp.Source
-				pi.InstallSource = doctor.SourceMarketplace
+				// No CLI install record, so the CLI cannot update or remove
+				// this copy: it is Claude Desktop's, whatever marketplace the
+				// account picked it from.
+				pi.InstallSource = doctor.SourceDesktop
 				if sp.Org {
 					pi.InstallSource = doctor.SourceOrganisation
 				}
@@ -376,14 +404,19 @@ func (s *Server) gatherHead(ctx context.Context, mp *claudecli.Marketplace, over
 func (s *Server) gatherMcp(ctx context.Context, client *claudecli.Client, plResult claudecli.PluginListResult, plErr error, overview *OverviewResponse) {
 	info := &McpInfo{Verdict: string(mcp.VerdictUnknown), Stale: s.staleMcp()}
 
-	res := s.mcpCache.get(func() mcpListResult {
+	res := s.mcpCache.getOrFail(func() (mcpListResult, bool) {
 		raw, err := client.McpList(ctx)
-		return mcpListResult{raw: raw, err: err}
+		return mcpListResult{raw: raw, err: err}, err != nil
 	})
 	if res.err == nil {
 		info.Servers = mcp.RiseXServers(mcp.Parse(res.raw))
 		info.Verdict = string(mcp.Overall(info.Servers))
-		info.Raw = res.raw
+		info.Raw = runner.Redact(res.raw)
+	} else {
+		// A check that could not run says nothing about whether the servers
+		// are configured, so the verdict stays unknown - never "not
+		// installed" on the strength of a timed-out or killed command.
+		info.Message = McpCheckFailedMessage
 	}
 
 	if plErr == nil {
@@ -395,6 +428,7 @@ func (s *Server) gatherMcp(ctx context.Context, client *claudecli.Client, plResu
 		if configured := syncedMcpConfig(s.synced()); len(configured) > 0 {
 			info.Configured = configured
 			info.Verdict = string(mcp.VerdictManaged)
+			info.Message = "" // the Desktop app owns them; nothing failed
 		}
 	}
 	overview.Mcp = info
@@ -432,7 +466,7 @@ func autoupdaterEnv(set settings.Settings) (disable, force bool) {
 	return disable, force
 }
 
-func npmrcPath() string {
+func defaultNpmrcPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".npmrc")
 }

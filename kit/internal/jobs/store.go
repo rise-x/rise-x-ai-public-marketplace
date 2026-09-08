@@ -110,6 +110,9 @@ type Store struct {
 	jobs      map[string]*job
 	finished  []string
 	runningID string
+	// runningCancel cancels the running job's context. Only one job runs at a
+	// time, so one cancel func is the whole set.
+	runningCancel context.CancelFunc
 }
 
 func NewStore() *Store {
@@ -120,18 +123,21 @@ func NewStore() *Store {
 // already running. At timeout the job fails and the slot is freed even if fn
 // ignores its context.
 func (s *Store) Start(action string, timeout time.Duration, fn Func) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
 	s.mu.Lock()
 	if s.runningID != "" {
 		s.mu.Unlock()
+		cancel()
 		return "", ErrBusy
 	}
 	id := newID()
 	j := &job{job: Job{ID: id, Action: action, Status: StatusRunning, StartedAt: time.Now()}}
 	s.jobs[id] = j
 	s.runningID = id
+	s.runningCancel = cancel
 	s.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	go func() {
 		defer cancel()
 		type result struct {
@@ -151,14 +157,24 @@ func (s *Store) Start(action string, timeout time.Duration, fn Func) (string, er
 			done <- result{code, err}
 		}()
 
+		var code int
+		var jerr error
 		select {
 		case r := <-done:
-			j.finish(r.code, r.err)
+			code, jerr = r.code, r.err
 		case <-ctx.Done():
-			j.appendLine(fmt.Sprintf("timed out after %s", timeout))
-			j.finish(-1, fmt.Errorf("%s timed out after %s", action, timeout))
+			if errors.Is(ctx.Err(), context.Canceled) {
+				j.appendLine("canceled")
+				code, jerr = -1, fmt.Errorf("%s canceled: %w", action, ctx.Err())
+			} else {
+				j.appendLine(fmt.Sprintf("timed out after %s", timeout))
+				code, jerr = -1, fmt.Errorf("%s timed out after %s", action, timeout)
+			}
 		}
+		// Free the slot before recording the verdict: a poller that sees a
+		// terminal status must be able to start the next job at once.
 		s.release(id)
+		j.finish(code, jerr)
 	}()
 
 	return id, nil
@@ -169,12 +185,42 @@ func (s *Store) release(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.runningID == id {
-		s.runningID = ""
+		s.runningID, s.runningCancel = "", nil
 	}
 	s.finished = append(s.finished, id)
 	for len(s.finished) > maxRetainedJobs {
 		delete(s.jobs, s.finished[0])
 		s.finished = append(s.finished[:0], s.finished[1:]...)
+	}
+}
+
+// CancelAll cancels every running job's context, so a shutdown does not leave
+// a `claude plugin install` running behind a closed UI. Children run in their
+// own process group, so a Ctrl-C in the launching terminal never reaches them.
+func (s *Store) CancelAll() {
+	s.mu.Lock()
+	cancel := s.runningCancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// WaitIdle blocks until no job is running or timeout elapses, and reports
+// whether the store went idle.
+func (s *Store) WaitIdle(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.Lock()
+		idle := s.runningID == ""
+		s.mu.Unlock()
+		if idle {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 

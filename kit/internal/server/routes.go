@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"slices"
@@ -36,6 +37,16 @@ const (
 // short fields.
 const maxActionBody = 64 << 10
 
+// writeSlotTimeout bounds how long a synchronous file edit may hold the jobs
+// store's single-writer slot. Both edits are a read, a render and a rename.
+const writeSlotTimeout = 30 * time.Second
+
+// contentSecurityPolicy is sent with every response. The page carries the CSRF
+// token, so it must never be framed; font-src allows data: only for the design
+// system's web font.
+const contentSecurityPolicy = "default-src 'self'; frame-ancestors 'none'; font-src 'self' data:; " +
+	"base-uri 'none'; form-action 'none'; object-src 'none'"
+
 // Handler builds the full HTTP handler: routes plus the Host and CSRF
 // middleware, wrapping the embedded browser page.
 func (s *Server) Handler() http.Handler {
@@ -53,7 +64,20 @@ func (s *Server) Handler() http.Handler {
 	var h http.Handler = mux
 	h = s.requireToken(h)
 	h = s.requireHost(h)
-	return h
+	return securityHeaders(h)
+}
+
+// securityHeaders sets the headers every response needs, the middlewares' own
+// error responses included.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // requireToken guards /api/* with the per-process CSRF token; the browser
@@ -63,7 +87,7 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			got := r.Header.Get("X-RiseX-Token")
 			if s.token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
-				http.Error(w, "forbidden", http.StatusForbidden)
+				httpError(w, http.StatusForbidden, "forbidden")
 				return
 			}
 		}
@@ -80,7 +104,7 @@ func (s *Server) requireHost(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !allowed[r.Host] {
-			http.Error(w, "bad host", http.StatusBadRequest)
+			httpError(w, http.StatusBadRequest, "bad host")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -90,14 +114,8 @@ func (s *Server) requireHost(next http.Handler) http.Handler {
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
-	// This page carries the CSRF token, so it must never be framed. font-src
-	// allows data: only for the design system's web font.
-	h.Set("Content-Security-Policy",
-		"default-src 'self'; frame-ancestors 'none'; font-src 'self' data:")
-	h.Set("X-Frame-Options", "DENY")
-	h.Set("X-Content-Type-Options", "nosniff")
+	// The page carries the CSRF token, so no cache may keep a copy of it.
 	h.Set("Cache-Control", "no-store")
-	h.Set("Referrer-Policy", "no-referrer")
 	_, _ = w.Write(web.Index(s.token))
 }
 
@@ -138,13 +156,41 @@ func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, snap)
 }
 
+// actionBody is every field the actions read. Decoding into one typed struct
+// with unknown fields rejected means a misspelled or wrongly typed field is a
+// 400 the page can show, not a value silently read as its zero.
+type actionBody struct {
+	Name        string `json:"name"`
+	Marketplace string `json:"marketplace"`
+	Server      string `json:"server"`
+	Scope       string `json:"scope"`
+	ProjectPath string `json:"projectPath"`
+	// Enabled is a pointer so "not sent" and false are different things.
+	Enabled *bool `json:"enabled"`
+	Confirm bool  `json:"confirm"`
+}
+
+// decodeActionBody reads the request body. An empty body is valid - most
+// actions take none - but anything present must parse into actionBody.
+func decodeActionBody(w http.ResponseWriter, r *http.Request) (actionBody, error) {
+	var body actionBody
+	if r.Body == nil {
+		return body, nil
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxActionBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		return actionBody{}, err
+	}
+	return body, nil
+}
+
 func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	body := map[string]any{}
-	if r.Body != nil {
-		// An empty body is valid; a malformed or oversized one just leaves
-		// body empty, and the per-action checks below reject what they need.
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, maxActionBody)).Decode(&body)
+	body, err := decodeActionBody(w, r)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body")
+		return
 	}
 
 	ctx := r.Context()
@@ -171,6 +217,12 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		s.handleAutoUpdateSet(w, ctx, body)
 	case "npmrc.clean":
 		s.handleNpmrcClean(w, body)
+	case "reload-hint.dismiss":
+		// The page dismissed the "restart Claude Code" banner; forget it
+		// server-side so the next refresh doesn't bring it back.
+		s.clearReloadHint()
+		s.invalidateGather()
+		writeJSON(w, map[string]any{"ok": true})
 	case "cli.install":
 		// The one action that must work with no CLI on the machine: it is
 		// what puts one there.
@@ -199,8 +251,8 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handlePluginAction(w http.ResponseWriter, ctx context.Context, name string, body map[string]any) {
-	pluginName, _ := body["name"].(string)
+func (s *Server) handlePluginAction(w http.ResponseWriter, ctx context.Context, name string, body actionBody) {
+	pluginName := body.Name
 	if !s.isKnownPlugin(ctx, pluginName) {
 		httpError(w, http.StatusBadRequest, "unknown plugin target")
 		return
@@ -208,7 +260,8 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, ctx context.Context, 
 	// A skill installed from a mirror of the public marketplace must be
 	// updated from that mirror; the public one would install a second copy.
 	marketplace := claudecli.MarketplaceName
-	if from, _ := body["marketplace"].(string); from != "" && from != claudecli.MarketplaceName {
+	switch from := body.Marketplace; {
+	case from != "" && from != claudecli.MarketplaceName:
 		if name != "plugin.update" {
 			httpError(w, http.StatusBadRequest, "marketplace is only valid for plugin.update")
 			return
@@ -218,6 +271,12 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, ctx context.Context, 
 			return
 		}
 		marketplace = from
+	case name == "plugin.update" && !s.updatableFromPublic(ctx, pluginName):
+		// A copy Claude Desktop or another marketplace owns must not be
+		// updated from the public marketplace: that installs a second copy.
+		httpError(w, http.StatusBadRequest,
+			"this copy of "+pluginName+" did not come from the public marketplace; update it where it was installed from")
+		return
 	}
 	s.startJob(w, ctx, name, needsCLI, pluginJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
 		client, ok := s.client(jctx)
@@ -243,8 +302,8 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, ctx context.Context, 
 // handleMcpLogin validates the target against the server names the rise-x-mcp
 // plugin actually declares in its .mcp.json, so nothing a page sends can shape
 // the claude argv.
-func (s *Server) handleMcpLogin(w http.ResponseWriter, ctx context.Context, name string, body map[string]any) {
-	target, _ := body["server"].(string)
+func (s *Server) handleMcpLogin(w http.ResponseWriter, ctx context.Context, name string, body actionBody) {
+	target := body.Server
 	if target == "" {
 		httpError(w, http.StatusBadRequest, "server is required")
 		return
@@ -276,12 +335,10 @@ func (s *Server) handleMcpLogin(w http.ResponseWriter, ctx context.Context, name
 // today: the one the body names, or every fixable one when it names none. The
 // targets come from the scan rather than the request, so nothing a page sends
 // can shape the claude argv.
-func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action string, body map[string]any) {
+func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action string, body actionBody) {
 	targets := s.staleMcp()
-	if name, _ := body["name"].(string); name != "" {
-		scope, _ := body["scope"].(string)
-		projectPath, _ := body["projectPath"].(string)
-		match := findStale(targets, name, scope, projectPath)
+	if name := body.Name; name != "" {
+		match := findStale(targets, name, body.Scope, body.ProjectPath)
 		if match == nil {
 			httpError(w, http.StatusBadRequest, "unknown stale connection target")
 			return
@@ -356,6 +413,27 @@ func (s *Server) knownMarketplace(ctx context.Context, name string) (*claudecli.
 	return mp, mp != nil
 }
 
+// updatableFromPublic reports whether name's copy on this machine is the one
+// `claude plugin update <name>@rise-x-public` would change: a CLI install
+// record from the public marketplace, or no install record at all (the
+// reinstall the page offers for a copy with no version stamp). A copy Claude
+// Desktop synced from the account is not the CLI's to update.
+func (s *Server) updatableFromPublic(ctx context.Context, name string) bool {
+	client, ok := s.client(ctx)
+	if !ok {
+		return false
+	}
+	res, err := client.PluginListAvailable(ctx)
+	if err != nil {
+		return true // unreadable, not "wrong source": leave the update alone
+	}
+	if installed, market := findInstalled(res.Installed, name); installed != nil {
+		return market == claudecli.MarketplaceName
+	}
+	_, synced := pickSynced(s.synced(), name)
+	return !synced
+}
+
 // configuredMcpServers reads the rise-x-mcp plugin's bundled .mcp.json, the
 // same source /api/overview reports as mcp.configured.
 func (s *Server) configuredMcpServers(ctx context.Context) []mcp.ConfiguredServer {
@@ -382,19 +460,23 @@ func (s *Server) marketplaceRegistered(ctx context.Context) bool {
 	return findMarketplace(marketplaces, claudecli.MarketplaceName) != nil
 }
 
-func (s *Server) handleAutoUpdateSet(w http.ResponseWriter, ctx context.Context, body map[string]any) {
-	// settings.Read fails only when the file itself isn't valid JSON - the
-	// same case the doctor row reports as SettingsError - and the write below
-	// would refuse it anyway, just with a less friendly message.
-	if _, err := settings.Read(s.settingsPath()); err != nil {
-		httpError(w, http.StatusConflict, doctor.SettingsUnreadableMessage)
+func (s *Server) handleAutoUpdateSet(w http.ResponseWriter, ctx context.Context, body actionBody) {
+	if body.Enabled == nil {
+		httpError(w, http.StatusBadRequest, "enabled must be true or false")
 		return
 	}
-	enabled, _ := body["enabled"].(bool)
+	// settings.Read fails only when the file itself isn't valid JSON - the
+	// same case the doctor row reports as SettingsError - and the write below
+	// would refuse it anyway, just with a less friendly message. It is not a
+	// 409: nothing is running, the file needs fixing by hand.
+	if _, err := settings.Read(s.settingsPath()); err != nil {
+		httpError(w, http.StatusUnprocessableEntity, doctor.SettingsUnreadableMessage)
+		return
+	}
 	name, repo := claudecli.MarketplaceName, claudecli.MarketplaceRepo
 	// Skills can come from a mirror of the public marketplace, and it is that
 	// mirror's autoUpdate flag that then governs them.
-	if from, _ := body["marketplace"].(string); from != "" && from != claudecli.MarketplaceName {
+	if from := body.Marketplace; from != "" && from != claudecli.MarketplaceName {
 		mp, ok := s.knownMarketplace(ctx, from)
 		if !ok {
 			httpError(w, http.StatusBadRequest, "unknown marketplace: "+from)
@@ -402,33 +484,70 @@ func (s *Server) handleAutoUpdateSet(w http.ResponseWriter, ctx context.Context,
 		}
 		name, repo = mp.Name, mp.Repo
 	}
-	backup, err := s.writer.SetAutoUpdate(name, repo, enabled)
+	var backup string
+	err := s.withWriteSlot("autoupdate.set", func() (err error) {
+		backup, err = s.writer.SetAutoUpdate(name, repo, *body.Enabled)
+		return err
+	})
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		writeSlotError(w, err)
 		return
 	}
 	s.invalidateGather()
 	writeJSON(w, map[string]any{"backup": backup})
 }
 
-func (s *Server) handleNpmrcClean(w http.ResponseWriter, body map[string]any) {
-	confirm, _ := body["confirm"].(bool)
-	if !confirm {
+func (s *Server) handleNpmrcClean(w http.ResponseWriter, body actionBody) {
+	if !body.Confirm {
 		httpError(w, http.StatusBadRequest, "confirm:true is required")
 		return
 	}
 	// res.Removed is masked by the npmrc package: the response says which
 	// host and key went, never the credential itself.
-	s.npmrcMu.Lock()
-	res, err := npmrc.Clean(npmrcPath())
-	s.npmrcMu.Unlock()
+	var res npmrc.Result
+	err := s.withWriteSlot("npmrc.clean", func() (err error) {
+		res, err = npmrc.Clean(s.npmrcPath)
+		return err
+	})
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, err.Error())
+		writeSlotError(w, err)
 		return
 	}
 	s.npmrcCache.invalidate()
 	s.invalidateGather()
 	writeJSON(w, map[string]any{"removed": res.Removed, "backup": res.Backup})
+}
+
+// withWriteSlot runs fn while holding the jobs store's one running-job slot.
+// autoupdate.set and npmrc.clean edit files a claude CLI job rewrites too -
+// `claude plugin marketplace add` rewrites extraKnownMarketplaces - so they
+// take the same slot every job takes instead of racing one. fn stays
+// synchronous; the slot is only there to keep the two writers apart.
+func (s *Server) withWriteSlot(action string, fn func() error) error {
+	release := make(chan struct{})
+	_, err := s.jobs.Start(action, writeSlotTimeout, func(jctx context.Context, _ func(string)) (int, error) {
+		select {
+		case <-release:
+			return 0, nil
+		case <-jctx.Done():
+			return -1, jctx.Err()
+		}
+	})
+	if err != nil {
+		return err
+	}
+	defer close(release)
+	return fn()
+}
+
+// writeSlotError answers a refused write: 409 while a job holds the slot,
+// 500 for a write that actually failed.
+func writeSlotError(w http.ResponseWriter, err error) {
+	if errors.Is(err, jobs.ErrBusy) {
+		httpError(w, http.StatusConflict, "a job is already running")
+		return
+	}
+	httpError(w, http.StatusInternalServerError, err.Error())
 }
 
 // needsCLI/noCLI name startJob's gate at the call site.

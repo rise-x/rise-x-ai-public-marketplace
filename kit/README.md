@@ -24,8 +24,10 @@ irm https://raw.githubusercontent.com/rise-x/rise-x-ai-public-marketplace/main/k
 
 ### Run it
 
-On macOS, open a new Terminal window and type `rise-x-kit`. On Windows, open the
-Start menu and select **Rise-X Kit**.
+On macOS, the installer prints a line to add to `~/.zshrc` if `rise-x-kit` isn't
+on your PATH yet. Run that line if you see it, then open a new Terminal window
+and type `rise-x-kit`. On Windows, open the Start menu and select **Rise-X
+Kit**.
 
 Rise-X Kit opens its page in your default browser, at a local address such as
 `http://127.0.0.1:53210/`. Closing that browser tab doesn't stop the app — click
@@ -162,22 +164,37 @@ Go 1.23, no third-party dependencies.
   Claude account, which `claude plugin list` does not report.
 - `internal/web` — the embedded HTML, CSS, and JS for the page.
 
-**Design system vendoring:** `kit/scripts/sync-ui.sh [version]` packs
-`@rise-x/apps-sdk` from the public npm registry and copies its `build/ui/styles.css`
-into `kit/internal/web/rise-x-ui.css` and its `build/ui/demo.html` into
-`kit/design/reference/demo.html`, so the page ships the current Rise-X look
-without a Node.js build step. Only a maintainer runs this, after a
-`@rise-x/apps-sdk` release changes the design system. The static design mock this
-UI was built from lives at `kit/design/mock.html`.
+**Design system vendoring:** `kit/scripts/sync-ui.sh [version]` fetches
+`@rise-x/apps-sdk` from the public npm registry — pinned to the script's
+`APPS_SDK_VERSION` constant unless a version argument overrides it — and copies
+its `build/ui/styles.css` into `kit/internal/web/rise-x-ui.css` and its
+`build/ui/demo.html` into `kit/design/reference/demo.html`, so the page ships
+the current Rise-X look without a Node.js build step. The resolved version and
+the tarball's sha256 are recorded in the first line of `rise-x-ui.css`; run
+`kit/scripts/sync-ui.sh --verify` to re-download that pinned tarball and fail if
+its sha256 no longer matches. Only a maintainer runs either mode, after a
+deliberate `@rise-x/apps-sdk` version bump. The static design mock this UI was
+built from lives at `kit/design/mock.html`.
 
 **Release:** push a tag matching `kit-v<semver>` (for example `kit-v0.1.0`) on
-`main`. The workflow builds a universal macOS binary (arm64 and amd64 combined
-with `lipo`) and a windows/amd64 binary, computes `checksums.txt`, and publishes
-both binaries, `checksums.txt`, and `install.sh`/`install.ps1` as release assets
-— the same assets the install commands above download. The macOS binary is
+`main`. `kit-release.yml`'s `guard` job first checks that the tagged commit is
+already on `main`, since there is no tag ruleset yet blocking who can push a
+`kit-v*` tag directly — see "Tag protection" following for the one-time setting
+that closes that gap. The workflow then builds a universal macOS binary (arm64
+and amd64 combined with `lipo`) and a windows/amd64 binary, computes
+`checksums.txt`, attests build provenance for both archives, and publishes the
+binaries, `checksums.txt`, and `install.sh`/`install.ps1` as release assets —
+the same assets the install commands above download. The macOS binary is
 ad-hoc signed today; Developer ID signing and notarization activate once the
 Apple signing secrets are set on the repo. The Windows binary is unsigned until
 Azure Trusted Signing is wired up.
+
+**Tag protection (one-time GitHub setting):** create a tag ruleset that
+restricts who can push a `kit-v*` tag to maintainers — **Settings** > **Rules**
+> **Rulesets** > **New ruleset** > **New tag ruleset**, target the `kit-v*`
+pattern, and restrict tag creation to the maintainers team. `kit-release.yml`'s
+`guard` job only catches a tag pushed at an unreviewed commit after the fact;
+this setting is what stops the tag push itself.
 
 **Marketplace repo rules that apply here:** target the currently open release
 branch (`release/v1.5.0` at the time of writing) instead of `main`. Changes

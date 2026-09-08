@@ -1,11 +1,10 @@
 package runner
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
-	"io"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -29,13 +28,15 @@ const (
 	// the job would never end and the jobs store would stay busy forever.
 	waitDelay = 5 * time.Second
 
-	readBufBytes = 64 * 1024
 	// maxLineBytes caps one output line. A longer line is dropped rather than
 	// buffered, so a single huge blob can't exhaust memory - but draining
 	// continues, so the child never blocks on a full pipe either.
 	maxLineBytes = 1024 * 1024
 
 	truncationMarker = "[line truncated]"
+
+	// stderrTailLines is how much stderr a returned error quotes.
+	stderrTailLines = 3
 )
 
 func (Exec) Run(ctx context.Context, name string, args []string) (stdout, stderr string, exitCode int, err error) {
@@ -65,108 +66,152 @@ func (Exec) StreamDir(ctx context.Context, dir, name string, args []string, onLi
 	cmd.WaitDelay = waitDelay
 	setProcAttr(cmd)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return -1, err
+	// onLine is called from two goroutines (stdout/stderr); serialize so
+	// callers (job logs) don't need to be concurrency-safe themselves.
+	var mu sync.Mutex
+	var tail []string
+	emit := func(l Line) {
+		mu.Lock()
+		defer mu.Unlock()
+		if l.Stderr {
+			tail = append(tail, l.Text)
+			if len(tail) > stderrTailLines {
+				tail = tail[1:]
+			}
+		}
+		if onLine != nil {
+			onLine(l)
+		}
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return -1, err
-	}
+
+	// Our own writers, not StdoutPipe: exec then owns the pipes and their
+	// copying goroutines, so cmd.Wait drains every byte the child wrote
+	// before returning, and WaitDelay force-closes them when a grandchild
+	// keeps its copy open.
+	outW := &lineWriter{onLine: emit}
+	errW := &lineWriter{stderr: true, onLine: emit}
+	cmd.Stdout = outW
+	cmd.Stderr = errW
 
 	if err := cmd.Start(); err != nil {
 		return -1, err
 	}
 
-	// onLine is called from two goroutines (stdout/stderr); serialize so
-	// callers (job logs) don't need to be concurrency-safe themselves.
-	var mu sync.Mutex
-	safeOnLine := onLine
-	if safeOnLine != nil {
-		safeOnLine = func(l Line) {
-			mu.Lock()
-			defer mu.Unlock()
-			onLine(l)
-		}
+	err := cmd.Wait()
+	if errors.Is(err, exec.ErrWaitDelay) {
+		// Only here is the process reaped while something still holds its
+		// pipes: kill the group so the grandchild goes too. After a normal
+		// exit the pid may already be reused, so we leave it alone.
+		_ = killTree(cmd)
 	}
+	outW.Close()
+	errW.Close()
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go scanLines(stdout, false, safeOnLine, &wg)
-	go scanLines(stderr, true, safeOnLine, &wg)
-
-	// Wait first, then join the scanners: WaitDelay closes the pipes once the
-	// process is gone, which is what unblocks a scanner still reading from a
-	// grandchild's copy of them.
-	err = cmd.Wait()
-	// cmd.Cancel only fires if ctx.Done() beats the direct child's own exit;
-	// when the child (a Node wrapper, say) exits on its own first, Cancel
-	// never runs and its process group is never signaled. Reap it here too,
-	// so no grandchild outlives Stream regardless of which one wins that race.
-	_ = killTree(cmd)
-	wg.Wait()
-
-	if err == nil {
-		return 0, nil
-	}
+	code := -1
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode(), nil
-	}
-	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil {
+	switch {
+	case err == nil:
+		code = 0
+	case errors.As(err, &exitErr):
+		code = exitErr.ExitCode()
+	case errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil:
 		// The process itself finished; only leaked pipes kept us waiting.
-		return cmd.ProcessState.ExitCode(), nil
+		code = cmd.ProcessState.ExitCode()
 	}
-	return -1, err
+
+	mu.Lock()
+	stderrTail := strings.Join(tail, "; ")
+	mu.Unlock()
+
+	// A command the deadline killed exits with code -1; reporting that as a
+	// success with no error made a timed-out `claude mcp list` read as "no
+	// servers at all".
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return code, cmdError(name, args, ctxErr, stderrTail)
+	}
+	if code < 0 {
+		if err == nil {
+			err = errors.New("did not exit normally")
+		}
+		return code, cmdError(name, args, err, stderrTail)
+	}
+	return code, nil
 }
 
-// scanLines reads r line by line and hands each line to onLine. A line longer
-// than maxLineBytes is dropped and replaced, once per stream, by
-// truncationMarker; reading then carries on with the next line, so neither an
-// over-long line nor a closed pipe can wedge the goroutine.
-func scanLines(r io.Reader, stderr bool, onLine func(Line), wg *sync.WaitGroup) {
-	defer wg.Done()
-	emit := func(text string) {
-		if onLine != nil {
-			onLine(Line{Stderr: stderr, Text: text})
-		}
+func cmdError(name string, args []string, err error, stderrTail string) error {
+	if stderrTail != "" {
+		return fmt.Errorf("%s: %w: %s", Argv(name, args), err, stderrTail)
 	}
+	return fmt.Errorf("%s: %w", Argv(name, args), err)
+}
 
-	br := bufio.NewReaderSize(r, readBufBytes)
-	var line []byte
-	dropped, marked := false, false
+// lineWriter splits what a command writes into lines and hands each one to
+// onLine. Partial lines are buffered until their "\n" arrives; Close emits
+// whatever is left, so a command that exits without a trailing newline still
+// reports its last line. A line longer than maxLineBytes is dropped and
+// replaced, once per stream, by truncationMarker.
+type lineWriter struct {
+	stderr  bool
+	onLine  func(Line)
+	buf     []byte
+	dropped bool
+	marked  bool
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	n := len(p)
 	for {
-		chunk, err := br.ReadSlice('\n')
-		if !dropped {
-			if len(line)+len(chunk) > maxLineBytes {
-				dropped, line = true, nil
-			} else {
-				line = append(line, chunk...)
-			}
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			w.accumulate(p)
+			return n, nil
 		}
-		if errors.Is(err, bufio.ErrBufferFull) {
-			continue // more of the same line is still in the pipe
-		}
-		switch {
-		case dropped:
-			if !marked {
-				emit(truncationMarker)
-				marked = true
-			}
-		case err == nil || len(line) > 0:
-			emit(trimEOL(line))
-		}
-		line, dropped = nil, false
-		if err != nil {
-			return
-		}
+		w.accumulate(p[:i])
+		w.flush()
+		p = p[i+1:]
 	}
 }
 
-// trimEOL strips one trailing "\n" and the "\r" before it, matching what
+// Close emits the trailing partial line, if any. It is not io.Closer for the
+// command's benefit - exec never calls it - but for ours, after cmd.Wait.
+func (w *lineWriter) Close() {
+	if w.dropped || len(w.buf) > 0 {
+		w.flush()
+	}
+}
+
+func (w *lineWriter) accumulate(chunk []byte) {
+	if w.dropped {
+		return
+	}
+	if len(w.buf)+len(chunk) > maxLineBytes {
+		w.dropped, w.buf = true, nil
+		return
+	}
+	w.buf = append(w.buf, chunk...)
+}
+
+func (w *lineWriter) flush() {
+	switch {
+	case w.dropped:
+		if !w.marked {
+			w.emit(truncationMarker)
+			w.marked = true
+		}
+	default:
+		w.emit(trimCR(w.buf))
+	}
+	w.buf, w.dropped = nil, false
+}
+
+func (w *lineWriter) emit(text string) {
+	if w.onLine != nil {
+		w.onLine(Line{Stderr: w.stderr, Text: text})
+	}
+}
+
+// trimCR strips the "\r" of a "\r\n" line ending, matching what
 // bufio.ScanLines did.
-func trimEOL(b []byte) string {
-	b = bytes.TrimSuffix(b, []byte("\n"))
-	b = bytes.TrimSuffix(b, []byte("\r"))
-	return string(b)
+func trimCR(b []byte) string {
+	return string(bytes.TrimSuffix(b, []byte("\r")))
 }

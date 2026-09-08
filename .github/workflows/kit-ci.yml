@@ -28,8 +28,8 @@ jobs:
       run:
         working-directory: kit
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: kit/go.mod
       - name: gofmt
@@ -60,10 +60,20 @@ jobs:
           - goos: windows
             goarch: amd64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: kit/go.mod
+      # The `test` job's go vet only runs on ubuntu-latest for the host
+      # (linux) GOOS -- this is the one place windows-only files like
+      # procattr_windows.go get vetted at all.
+      - name: go vet windows/amd64
+        if: matrix.goos == 'windows'
+        env:
+          CGO_ENABLED: 0
+          GOOS: windows
+          GOARCH: amd64
+        run: go vet ./...
       - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
           CGO_ENABLED: 0

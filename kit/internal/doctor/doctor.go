@@ -35,8 +35,12 @@ type Check struct {
 // Where a plugin on this machine came from. An empty InstallSource means it
 // is not installed at all.
 const (
-	SourcePublic       = "public"       // CLI-installed from rise-x-public
-	SourceMarketplace  = "marketplace"  // installed from another marketplace
+	SourcePublic      = "public"      // CLI-installed from rise-x-public
+	SourceMarketplace = "marketplace" // CLI-installed from another marketplace
+	// SourceDesktop is a plugin the Claude Desktop app synced from the
+	// account. There is no CLI install record for it, so the CLI cannot
+	// install, update or remove that copy.
+	SourceDesktop      = "desktop"
 	SourceOrganisation = "organisation" // pushed to this account by the organisation
 )
 
@@ -231,6 +235,9 @@ func pluginCheck(p PluginFact) Check {
 	case SourceOrganisation:
 		return Check{ID: id, Status: StatusOK, Title: pluginTitle,
 			Message: "Installed by your organisation" + versionSuffix(p.LocalVersion) + "."}
+	case SourceDesktop:
+		return Check{ID: id, Status: StatusOK, Title: pluginTitle,
+			Message: "Installed through Claude Desktop" + versionSuffix(p.LocalVersion) + "."}
 	case SourceMarketplace:
 		return Check{ID: id, Status: StatusOK, Title: pluginTitle,
 			Message: fmt.Sprintf("Installed from %s%s.", sourceName(p), versionSuffix(p.LocalVersion))}

@@ -1,11 +1,14 @@
 package runner
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -48,11 +51,40 @@ func TestHelperProcess(t *testing.T) {
 			os.Exit(4)
 		}
 		fmt.Fprintln(os.Stdout, "grandchild", child.Process.Pid)
+	case "many-lines":
+		// Buffered, so the lines land in the pipes as a burst and the process
+		// exits immediately after: the tail used to be lost when cmd.Wait
+		// closed the read ends before the readers had drained them.
+		bo, be := bufio.NewWriterSize(os.Stdout, 64*1024), bufio.NewWriterSize(os.Stderr, 64*1024)
+		for i := 1; i <= manyLines; i++ {
+			fmt.Fprintln(bo, manyLine("out", i))
+			fmt.Fprintln(be, manyLine("err", i))
+		}
+		bo.Flush()
+		be.Flush()
+	case "no-eol":
+		fmt.Fprint(os.Stdout, "first\nlast-without-newline")
+	case "streams":
+		fmt.Fprintln(os.Stdout, "STDOUT-ONLY")
+		fmt.Fprintln(os.Stderr, "STDERR-ONLY")
+	case "partial-then-sleep":
+		fmt.Fprintln(os.Stdout, "partial")
+		fmt.Fprintln(os.Stderr, "something went wrong")
+		time.Sleep(60 * time.Second)
 	case "long-line":
 		fmt.Fprintln(os.Stdout, "head")
 		fmt.Fprintln(os.Stdout, strings.Repeat("a", 2*maxLineBytes))
 		fmt.Fprintln(os.Stdout, "TAIL-MARKER")
 	}
+}
+
+// manyLines is how much output the "many-lines" helper writes per stream. The
+// lines are padded so each stream is far more than one pipe buffer, which is
+// what puts output in flight when the child exits.
+const manyLines = 2000
+
+func manyLine(prefix string, i int) string {
+	return fmt.Sprintf("%s %d %s", prefix, i, strings.Repeat("x", 100))
 }
 
 func helperArgs(sub string) (string, []string) {
@@ -184,5 +216,132 @@ func TestExecStream_OverLongLine_KeepsDraining(t *testing.T) {
 		if len(l) > maxLineBytes {
 			t.Fatalf("a line of %d bytes reached the caller", len(l))
 		}
+	}
+}
+
+// Every line a command writes must reach the caller, including the ones
+// written just before it exits: with StdoutPipe, cmd.Wait closed the read
+// ends as soon as the child was reaped and the tail was silently dropped.
+func TestExecStream_ManyLines_AllDelivered(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	name, args := helperArgs("many-lines")
+
+	var mu sync.Mutex
+	var out, errs []string
+	var slept bool
+	code, err := Exec{}.Stream(context.Background(), name, args, func(l Line) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !slept {
+			// Lag the consumer once, so the child has exited and been reaped
+			// with most of its output still sitting in the pipes - the shape
+			// that used to lose everything past the first read.
+			slept = true
+			time.Sleep(300 * time.Millisecond)
+		}
+		if l.Stderr {
+			errs = append(errs, l.Text)
+		} else {
+			out = append(out, l.Text)
+		}
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("exitCode = %d, want 0", code)
+	}
+	for _, s := range []struct {
+		stream string
+		lines  []string
+		prefix string
+	}{{"stdout", out, "out"}, {"stderr", errs, "err"}} {
+		if len(s.lines) != manyLines {
+			t.Fatalf("%s: got %d lines, want %d", s.stream, len(s.lines), manyLines)
+		}
+		for i, got := range s.lines {
+			if want := manyLine(s.prefix, i+1); got != want {
+				t.Fatalf("%s line %d = %q, want %q", s.stream, i+1, got, want)
+			}
+		}
+	}
+}
+
+// A command that exits without a trailing newline still wrote a last line.
+func TestExecStream_NoTrailingNewline_DeliversLastLine(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	name, args := helperArgs("no-eol")
+
+	var lines []string
+	if _, err := (Exec{}).Stream(context.Background(), name, args, func(l Line) {
+		lines = append(lines, l.Text)
+	}); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	want := []string{"first", "last-without-newline"}
+	if len(lines) != 2 || lines[0] != want[0] || lines[1] != want[1] {
+		t.Fatalf("lines = %v, want %v", lines, want)
+	}
+}
+
+// Guards the stream attribution itself: swapping stdout and stderr anywhere
+// between the writers and Run's buffers must fail here.
+func TestExecRun_StreamsNotSwapped(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	name, args := helperArgs("streams")
+
+	stdout, stderr, code, err := Exec{}.Run(context.Background(), name, args)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("exitCode = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "STDOUT-ONLY") || strings.Contains(stdout, "STDERR-ONLY") {
+		t.Fatalf("stdout = %q, want only the stdout line", stdout)
+	}
+	if !strings.Contains(stderr, "STDERR-ONLY") || strings.Contains(stderr, "STDOUT-ONLY") {
+		t.Fatalf("stderr = %q, want only the stderr line", stderr)
+	}
+}
+
+// A command the deadline killed must not look like a clean run: it used to
+// return exit code -1 with a nil error, which read as "the command said
+// nothing" to every caller.
+func TestExecRun_ContextDeadline_ReturnsError(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	name, args := helperArgs("partial-then-sleep")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	type result struct {
+		stdout, stderr string
+		code           int
+		err            error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, errOut, code, err := Exec{}.Run(ctx, name, args)
+		done <- result{out, errOut, code, err}
+	}()
+
+	var r result
+	select {
+	case r = <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("Run still blocked long after its deadline")
+	}
+	if r.err == nil {
+		t.Fatalf("Run err = nil, want a deadline error (code %d, stdout %q)", r.code, r.stdout)
+	}
+	if !errors.Is(r.err, context.DeadlineExceeded) {
+		t.Fatalf("Run err = %v, want context.DeadlineExceeded", r.err)
+	}
+	if !strings.Contains(r.err.Error(), "something went wrong") {
+		t.Fatalf("err = %q, want the stderr tail quoted", r.err)
+	}
+	if !strings.Contains(r.stdout, "partial") {
+		t.Fatalf("stdout = %q, want the output written before the deadline", r.stdout)
 	}
 }

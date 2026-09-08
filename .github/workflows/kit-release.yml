@@ -22,22 +22,38 @@ env:
   GO_MODULE: github.com/rise-x/rise-x-ai-public-marketplace/kit
 
 jobs:
+  guard:
+    # A tag push bypasses the PR-review branch protection on main, since
+    # there is no tag ruleset yet restricting who can push a `kit-v*` tag
+    # (see kit/README.md "For maintainers" for the one-time repo setting that
+    # closes this gap). Refuse to build unless the tagged commit is already
+    # on main.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Verify tag is on main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
   build-mac:
+    needs: guard
     runs-on: macos-14
     env:
-      # `secrets` isn't a legal context in a step `if:`, so the Apple secrets
-      # are mirrored into job-level env and every gate below reads env instead.
-      APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
-      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      # `secrets` isn't a legal context in a step `if:`, and the Apple secret
+      # *values* no longer sit in job-level env (they used to leak into `go
+      # test`/`go build`'s environment) -- this boolean is safe at job level;
+      # the real values are step-level env on only the steps that need them.
+      APPLE_SIGNING: ${{ secrets.APPLE_CERT_P12 != '' }}
     defaults:
       run:
         working-directory: kit
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: kit/go.mod
 
@@ -68,9 +84,12 @@ jobs:
         run: codesign -s - --force dist/rise-x-kit
 
       # Everything below is hardened but inactive until an Apple Developer ID
-      # certificate exists -- APPLE_CERT_P12 gates the whole path.
+      # certificate exists -- APPLE_SIGNING gates the whole path.
       - name: Import Developer ID certificate
-        if: env.APPLE_CERT_P12 != ''
+        if: env.APPLE_SIGNING == 'true'
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
         run: |
           set -euo pipefail
           KEYCHAIN_PATH="$RUNNER_TEMP/kit-signing.keychain-db"
@@ -85,37 +104,50 @@ jobs:
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Sign with Developer ID
-        if: env.APPLE_CERT_P12 != ''
+        if: env.APPLE_SIGNING == 'true'
         run: |
           set -euo pipefail
           identity="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Developer ID Application' | head -n1 | sed -E 's/.*"(.+)"/\1/')"
           codesign --force --options runtime --timestamp -s "$identity" --keychain "$KEYCHAIN_PATH" dist/rise-x-kit
 
       - name: Notarize
-        if: env.APPLE_CERT_P12 != ''
+        if: env.APPLE_SIGNING == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           set -euo pipefail
           ditto -c -k --keepParent dist/rise-x-kit "$RUNNER_TEMP/notarize.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          # `--wait` alone has no reliable exit status for "Invalid" --
+          # read the actual status out of the JSON result instead.
+          result="$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait --output-format json)"
+          echo "$result"
+          status="$(jq -r '.status' <<<"$result")"
+          if [[ "$status" != "Accepted" ]]; then
+            echo "::error::notarization status: $status"
+            exit 1
+          fi
 
       - name: Package
         run: |
           mkdir -p out
           tar -C dist -czf "out/rise-x-kit_${VERSION}_darwin_universal.tar.gz" rise-x-kit
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: darwin-universal
           path: kit/out/*
 
   build-windows:
+    needs: guard
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: kit
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: kit/go.mod
 
@@ -139,7 +171,7 @@ jobs:
           mkdir -p out
           (cd dist && zip -j "../out/rise-x-kit_${VERSION}_windows_amd64.zip" rise-x-kit.exe)
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-amd64
           path: kit/out/*
@@ -149,10 +181,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
           merge-multiple: true
@@ -160,6 +194,13 @@ jobs:
       - name: Checksums
         working-directory: artifacts
         run: sha256sum * > checksums.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            artifacts/*_darwin_universal.tar.gz
+            artifacts/*_windows_amd64.zip
 
       - name: Publish release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2

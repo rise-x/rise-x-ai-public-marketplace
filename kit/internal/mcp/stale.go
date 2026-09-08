@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -98,7 +99,7 @@ func staleIn(servers map[string]configuredEntry, scope, projectPath string) []St
 			continue
 		}
 		out = append(out, Stale{Name: name, Scope: scope, ProjectPath: projectPath,
-			URL: entry.URL, SuggestedURL: SuggestedURL(name, entry.URL)})
+			URL: entry.URL, SuggestedURL: SuggestedURL(entry.URL)})
 	}
 	return out
 }
@@ -131,18 +132,23 @@ func isStale(name, rawURL string) bool {
 
 // SuggestedURL is the current address a stale server should point at: the
 // mapped address for a host in exactStaleHosts, the test environment when the
-// name or URL says "test", production otherwise.
-func SuggestedURL(name, rawURL string) string {
-	if u, ok := exactStaleHosts[hostOf(rawURL)]; ok {
+// host itself is a test host, production otherwise.
+func SuggestedURL(rawURL string) string {
+	host := hostOf(rawURL)
+	if u, ok := exactStaleHosts[host]; ok {
 		return u
 	}
-	if riseXTest(name) || riseXTest(rawURL) {
+	if testHostRe.MatchString(host) {
 		return testURL
 	}
 	return prodURL
 }
 
-func riseXTest(s string) bool { return strings.Contains(strings.ToLower(s), "test") }
+// testHostRe matches a host carrying "test" as a whole label or a
+// dash-separated word: "mcp-test.rise-x.io", "x-test.example". The host is the
+// only thing that decides, so neither a connector named "rise-x-latest" nor a
+// "/latest/" path can send a production connector to the test environment.
+var testHostRe = regexp.MustCompile(`(^|[.-])test([.-]|$)`)
 
 // riseXHint reports whether s names Rise-X in any of the spellings that have
 // been used for a connector or a host.
