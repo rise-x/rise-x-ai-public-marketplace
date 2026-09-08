@@ -120,25 +120,30 @@ back to per-field `update_work_data` calls, run sequentially.
   `{"$.vessel": {"name": "Aurora"}}` is a full-value `set` of the whole `vessel` object and
   **drops every sibling it omits**. For the same reason, never pass a parent path and one of
   its own descendants in one call (`{"$.vessel": {…}, "$.vessel.name": "x"}`): the two ops
-  overlap, and which one wins depends on the order the backend applies them, which nothing
-  guarantees. One op per leaf path, always. An empty or non-dict `fields` fails with code
+  overlap, and nothing defines which wins. The ops leave the client in your `fields` order,
+  but the order the **backend applies** them is unspecified, so the outcome is not something
+  you can reason about from the call. One op per leaf path, always. An empty or non-dict `fields` fails with code
   `validation`.
-- `section_name` — **required** — the task name the data belongs to, the same value
-  `update_work_data` takes. **This tool accepts either the internal name or the display
-  label** — it resolves the name against the work's own step tree (depth-first,
-  case-insensitive, first match wins), trying internal names `name` / `taskName` /
-  `stepName` first, then labels `displayName` / `taskDisplayName` / `stepDisplayName`.
-  Internal names go first deliberately, so a label that collides with another task's
-  internal name cannot win. That makes the `get_flow_step` round-trip below optional here:
-  a `taskDisplayName` straight from `get_flow_steps` resolves. `update_work_data` has no
-  such leniency — it passes the value to the v3 endpoint as-is.
-
-  The resolved task id is what the v4 endpoint authorises against, so a name matching no
-  task fails with code `section_not_found` and the real task names listed under `tasks`,
-  rather than as an opaque backend 403. It is a **required** parameter on both writers — it
-  cannot be omitted, only got wrong.
+- `section_name` — **required** — the task the data belongs to. Required on both writers, so
+  it cannot be omitted, only got wrong. The resolved task id is what the v4 endpoint
+  authorises against, so a name matching no task fails with code `section_not_found` and the
+  real task names listed under `tasks`, rather than as an opaque backend 403.
 - `response_format` — `"summary"` (default), or `"full"` to add the raw API response under
   `result`.
+
+> **`section_name` is more forgiving here than on `update_work_data`.** This tool resolves the
+> name against the work's own step tree — depth-first, case-insensitive, first match wins —
+> trying the internal names `name` / `taskName` / `stepName` first, then the labels
+> `displayName` / `taskDisplayName` / `stepDisplayName`. Internal names go first deliberately,
+> so a label colliding with another task's internal name cannot win.
+>
+> **So either form works, and the `get_flow_step` round-trip is optional:** the
+> `taskDisplayName` that `get_flow_steps` already returns resolves, even though `taskName` is
+> projected out of that response. `section_not_found` lists both forms per task, so a wrong
+> name is recoverable without a second lookup.
+>
+> **`update_work_data` has none of this** — it forwards the value to the v3 endpoint verbatim
+> and needs the internal `taskName`, which does require `get_flow_step`.
 
 Other error codes it can return before writing anything: `origin_unresolved` (the work
 carries no `flowOriginId` — the usual cause is passing an **entity** id where a work id
@@ -181,13 +186,15 @@ failure":
 
 | Warning | What it means | What to do |
 |---|---|---|
-| `value_differs` | The write landed; the server stored its own form of the value | Accept it. Do **not** retry — a second write normalises identically, so retrying never converges |
+| `value_differs` | The write reached the field, but the stored value is not the one you sent | **Compare `requested` against `actual`.** Cosmetic difference (formatting, ordering that carries no meaning) → accept it. Semantic difference — a date read as a different day, a list that came back reordered or short — → the **value or its type** is wrong, so fix the value. Either way, do not re-send the same value: it will be transformed identically |
 | `dropped_value` | The value is not there; the old one still is | Fix the **path**, not the call. Retrying the same path is equally futile |
 | `unverified_writes` | Rollup: `persisted < requested` | Read the per-path warnings above it; it adds no information of its own |
 | `no_verification` | The read-back failed; nothing is known | Call `get_work(id)` |
 
-Neither `value_differs` nor a `persisted` below `requested` is, on its own, grounds for
-reporting failure to the user.
+A `persisted` below `requested` is therefore not, on its own, grounds for reporting failure —
+but it is never grounds for reporting success either. Look at what each warning names first: the
+verifier's tolerances mean a `value_differs` has already survived the harmless cases, so treat
+it as a real divergence until you have compared the two values and seen otherwise.
 
 **`changed` absent is not `changed: []`.** When the read-back fails, `changed` is **omitted**
 and `counts` carries `requested` only — verification did not run, so nothing is known about
@@ -238,7 +245,7 @@ invitation stops the server deriving recipients from the flow config.
 3. submit_work(workId, eventName, stepName)  # advance to next step
 ```
 
-The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the flow creation step. The `section_name` — taken by `update_work_data_bulk` and `update_work_data` alike — is the task's `taskName` (slash form like `UntitledTask/Generated-<guid>` on v3-style flows, or bare like `Task_1` on v4 native flows). `get_flow_steps` projects `taskName` **out** of its response — fetch it via `get_flow_step(flow_id, step_id)` (pass the `id` field from `get_flow_steps` as `step_id`) and read `taskName` from the full step.
+The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the flow creation step. Both writers require a `section_name`, but they differ in what they accept: `update_work_data_bulk` resolves either the internal name or the display label (so `taskDisplayName` from `get_flow_steps` is enough), while `update_work_data` needs the internal `taskName` (slash form like `UntitledTask/Generated-<guid>` on v3-style flows, or bare like `Task_1` on v4 native flows). `get_flow_steps` projects `taskName` **out** of its response — fetch it via `get_flow_step(flow_id, step_id)` (pass the `id` field from `get_flow_steps` as `step_id`) and read `taskName` from the full step.
 
 ## Progressing an Existing Work Item
 

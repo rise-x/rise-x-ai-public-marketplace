@@ -3,7 +3,8 @@
 Every tool the Rise-X MCP server exposes, grouped by category, with signatures
 and per-tool caveats.
 
-92 tools. Mutations accept `response_format="summary"|"full"` (summary is the
+92 tools, counting `update_work_data_bulk` — a server without the v4 batch release serves 91
+and simply does not list it. Mutations accept `response_format="summary"|"full"` (summary is the
 default and carries verification warnings).
 
 | Category | Tools |

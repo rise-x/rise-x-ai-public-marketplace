@@ -73,19 +73,22 @@ error: {code, message, hint}      # failures (code like http_403, validation)
    Work **data** is the one place this rule does not hold uniformly: a write to
    an unmodeled `dataPath` may drop or may persist, depending on the
    deployment. `update_work_data_bulk` re-reads the work and reports `changed` /
-   `counts` / `dropped_value`, so you learn what **stored** without a follow-up
+   `counts` / `dropped_value`, so you learn what was **stored** without a follow-up
    read — but storage is not correctness: where the path persists, verification
    passes and only `get_flow_data_schema` tells you the path was wrong at all.
    Pitfall #66 has both halves. With `update_work_data` even storage is unknown
    until you call `get_work(id)`, which is what its own hint instructs.
 2. `value_differs` warnings are informational (server-side normalisation) —
    **except in `update_work_data_bulk`**, whose verifier treats any diff as
-   not-persisted, so a normalised value is left out of `changed` and lowers
-   `counts.persisted`. What to DO with each: `value_differs` → the write landed,
-   accept it and do **not** retry (a second write normalises identically, so
-   retrying never converges); `dropped_value` → the value did not land, and the
-   path is the thing to fix, not the call. Neither is a reason to report failure
-   to the user on its own. See `references/managing-work-items.md`.
+   not-persisted, so such a path is left out of `changed` and lowers
+   `counts.persisted`. Its comparison already tolerates the harmless cases
+   (`4` vs `4.0`, whitespace, GUID case), so a `value_differs` there is a real
+   divergence, not noise. What to DO: **compare the warning's `requested`
+   against its `actual`** — cosmetic difference, accept it; semantic difference
+   (a date read as a different day, a list back short or reordered), the value
+   or its type is wrong, so fix the value. `dropped_value` → the value did not
+   land at all and the **path** is what to fix. In no case re-send the same
+   value unchanged. See `references/managing-work-items.md`.
 3. Need the raw payload? Pass `response_format="full"` — it arrives under
    `result:` with the warnings still attached. This is the mutation envelope
    only: the read tools' `format="full"` (`get_work`, `get_asset`) is a

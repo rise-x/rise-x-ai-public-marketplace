@@ -195,22 +195,31 @@ add_components(layout_id="layout-456", parent_section_id="section-id", component
   {"component": "input-location", "label": "Address"}
 ])
 
-# 7. Publish
+# 7. Publish — this issues a NEW flow id; "abc-123" is now superseded
 publish_flow("abc-123")
+#   Re-resolve both ids before using them. A superseded id can still ACCEPT writes,
+#   which then land on the dead version (troubleshooting.md). search_flows with
+#   flowResourceType == Entity gives the live row: `id` for step reads,
+#   `flowOriginId` for create_asset.
+# liveFlowId, flowOriginId = <the live row's id and flowOriginId>
 
 # Now create a customer instance:
-# find the "customer" asset type's flowOriginId via search_flows (filter: flowResourceType == Entity)
-# response = create_asset(flow_origin_id)   -> workId, and the RESOLVED stepName /
+# response = create_asset(flowOriginId)     -> workId, and the RESOLVED stepName /
 #                                              eventName / invitation — use those verbatim
-# taskName = get_flow_step("abc-123", <step id from get_flow_steps>)["taskName"]
-#   get_flow_steps projects taskName OUT, so it has to come from get_flow_step
+# sectionName = get_flow_steps(liveFlowId)[0]["taskDisplayName"]
+#   update_work_data_bulk resolves the task's displayName as well as its internal
+#   taskName, so get_flow_steps alone is enough. (update_work_data would need the
+#   internal taskName, which is projected out — that one needs get_flow_step.)
 # update_work_data_bulk(workId, {
 #     "$.displayName": "Acme Corp",          # ALWAYS set this — the list/grid
 #                                            # shows the asset by it (pitfall #20)
 #     "$.customerDetails.companyName": "Acme Corp",
-# }, section_name=taskName)
-# submit_work(workId, event_name=response["eventName"], step_name=response["stepName"])
-#   never guess "Submit" — it is a display label (pitfall #21)
+# }, section_name=sectionName)
+# submit_work(workId, event_name=response["eventName"], step_name=response["stepName"],
+#             invitation=response.get("invitation"))
+#   never guess "Submit" — it is a display label (pitfall #21). Pass the returned
+#   invitation verbatim; dropping it can leave the asset in Draft (pitfall #8 in
+#   references/managing-assets.md)
 ```
 
 ## Common Mistakes

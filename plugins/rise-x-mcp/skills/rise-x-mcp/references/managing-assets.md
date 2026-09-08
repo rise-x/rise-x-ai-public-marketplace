@@ -56,9 +56,10 @@ Step 2: Set every field value in ONE call
       "$.vesselDetails.vesselName": "Pacific Explorer",  # paths from get_asset_type_properties
       "$.vesselDetails.imoNumber": "9876543",
     },
-    section_name=taskName  # the task's taskName — see step 3 of the worked
-                           # example below; get_flow_steps projects it OUT,
-                           # so it comes from get_flow_step
+    section_name=sectionName  # bulk accepts EITHER the internal taskName OR the
+                              # task's displayName, so taskDisplayName straight
+                              # from get_flow_steps is enough here. Only
+                              # update_work_data needs get_flow_step.
   )
   # Read `changed` and `counts` on the response — they say which paths actually
   # persisted, so no follow-up get_work is needed WHEN `changed` is present.
@@ -115,9 +116,9 @@ Step 1: Initiate edit
   # Extract: workId, stepName, eventName from response
 
 Step 2: Modify fields
-  # section_name is the task's taskName — same lookup as the create flow
-  # (get_flow_steps → get_flow_step → taskName); it is required here too.
-  update_work_data_bulk(id=workId, section_name=taskName,
+  # Required here too. As above, bulk resolves the task's displayName as well
+  # as its internal taskName, so get_flow_steps alone suffices.
+  update_work_data_bulk(id=workId, section_name=sectionName,
     fields={"$.vesselDetails.vesselName": "New Name"})
 
 Step 3: Finalize
@@ -144,8 +145,9 @@ Initiates an edit workflow for an existing asset. Same response structure as `cr
 
 ## Writing Asset Data
 
-Both writers take `section_name` (the task's `taskName`) and are documented in full in
-`references/managing-work-items.md`.
+Both writers require `section_name`, and they accept different things: `update_work_data_bulk`
+resolves the task's `displayName` as well as its internal `taskName`, `update_work_data` only the
+internal name. Documented in full in `references/managing-work-items.md`.
 
 | Tool | Use it for |
 |---|---|
@@ -200,16 +202,20 @@ search_flows(filter={"field": "flowResourceType", "operator": "equals", "values"
 get_asset_type_properties(flow_id="def-456")
 # Returns: [{"Vessel Name": {"dataPath": "$.vesselDetails.vesselName"}}, ...]
 
-# 3. Find the step id, then fetch the full step to get its taskName
+# 3. Get the task name for section_name
 steps = get_flow_steps("def-456")  # use assetId (the flow's id), NOT flowOriginId
 # Returns: [{id, stepName, stepDisplayName, taskDisplayName,
 #            stepId, taskId, layoutId, actionSetId}, ...]
-# Note: taskName is NOT in this projection — it's the field we actually need.
+# Note: taskName is NOT in this projection. For update_work_data_bulk that is fine —
+# it resolves taskDisplayName too, so you can stop here and pass that. Step 3b is
+# only needed for update_work_data, which requires the internal name.
 
+# 3b. Only for update_work_data:
 step = get_flow_step("def-456", steps[0]["id"])
 # Returns the full FlowPocoStep_v4, including taskName.
 # For v3-style asset flows, taskName is slash form like "UntitledTask/Generated-<guid>".
-# Use step["taskName"] as section_name in the data write below.
+# Either step["taskName"] or steps[0]["taskDisplayName"] works as section_name
+# for the bulk write below.
 
 # 4. Create the asset
 create_asset("abc-123")
@@ -256,6 +262,6 @@ submit_work(
 6. **Missing `$.displayName`** — UI shows assets by `$.displayName`. If you only set domain fields (like `legalEntityName`), the list view will show a blank name. Always set `$.displayName` explicitly.
 7. **Re-deriving the submit `event_name` by hand** — `create_asset`/`edit_asset` now return the **resolved** `stepName` and `eventName` (the nested submit step's full name, e.g. `SubmitUntitledStep/Generated-...`). Pass those straight to `submit_work` for both `event_name` and `step_name`. The `eventName: "Submit"` display label is only a fallback — you no longer need a `get_work()` round-trip to discover the real name.
 8. **Dropping the returned `invitation`** — `create_asset`/`edit_asset` also return the `invitation` payload (when the step requires one). Pass it verbatim to `submit_work`; without it the submit may not finalize and the asset stays in Draft. Only fall back to `get_work(workId).actions[0].invitation` if the create/edit response didn't include one.
-9. **Passing a `section_name` that matches no task** — asset type flows typically have a single task (e.g. `UntitledTask/Generated-...`), and `section_name` is a **required** parameter on both writers, so it cannot be left out. Getting it *wrong* is the real failure: `update_work_data_bulk` reports code `section_not_found` with the real task names under `tasks`, while `update_work_data` surfaces it as a backend error. Get the name from `get_flow_step` (`get_flow_steps` projects `taskName` out), using the flow's `id`, not its `flowOriginId`.
+9. **Passing a `section_name` that matches no task** — asset type flows typically have a single task (e.g. `UntitledTask/Generated-...`), and `section_name` is a **required** parameter on both writers, so it cannot be left out. Getting it *wrong* is the real failure: `update_work_data_bulk` reports code `section_not_found` with the real task names under `tasks`, while `update_work_data` surfaces it as a backend error. For `update_work_data_bulk` the fix is usually free: it resolves the task's `displayName` too, so the `taskDisplayName` in `get_flow_steps` is a valid `section_name`, and `section_not_found` lists both forms. `update_work_data` needs the internal `taskName` from `get_flow_step` — using the flow's `id`, not its `flowOriginId`.
 10. **Writing fields one at a time when `update_work_data_bulk` would do** — a 20-field asset costs 20 sequential PATCHes, and they cannot be parallelised (concurrent writes answer `Cannot connect to host`). Send one `update_work_data_bulk` call instead; fall back to `update_work_data` for a single field, and as the only route to `push` / `pull` / `rename`.
 11. **Reading a `create_asset` 403 as a permissions problem** — it almost always means a flow id (or a stale id) was passed instead of a `flowOriginId`. Get the `flowOriginId` from `search_flows` (flowResourceType=Entity) or `list_asset_types`. The server error hint says this too (since 1.2.0).
