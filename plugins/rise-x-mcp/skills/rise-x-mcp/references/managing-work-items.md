@@ -105,7 +105,9 @@ For dynamic `data.*` paths in the filter, call `get_flow_data_schema(flow_origin
 Set **many** work-data fields in ONE request. Prefer this over repeated `update_work_data`
 calls whenever writing more than one field — it wraps the v4 batch endpoint
 (`PATCH /api/v4/work/{id}/data/batch`), where every entry of `fields` is its own `set` op and
-all of them are applied together.
+all of them are applied together. The request count is **constant, not always literally one**:
+the first write to a brand-new work item costs two (see below), every other call costs one.
+Either way it never costs N.
 
 **Not every server has this release.** The tool arrives with the v4 batch endpoint, and
 environments upgrade independently of marketplace releases. If the server reports no such
@@ -148,10 +150,21 @@ back to per-field `update_work_data` calls, run sequentially.
 Other error codes it can return before writing anything: `origin_unresolved` (the work
 carries no `flowOriginId` — the usual cause is passing an **entity** id where a work id
 belongs, cf. pitfall #7) and `unexpected_response` (the pre-write read of the work came back
-as a non-object; retry). Because the batch is one request, a failure at the write itself
-normally means **no** field was written — the error hint says so, and `get_work(id)` confirms
-it before you retry. An all-`set` batch is idempotent, so re-sending the identical call after
-a `transient` error is safe.
+as a non-object; retry). A failure at the write itself normally means **no** field was
+written — the error hint says so, and `get_work(id)` confirms it before you retry. An
+all-`set` batch is idempotent, so re-sending the identical call after a `transient` error is
+safe.
+
+**The one exception, on the very first write to a brand-new work item.** The batch endpoint
+cannot create a work item's data record — only write into one that exists — so on a work
+nothing has been written to yet, the tool seeds the record with the first field through the
+single-field endpoint and batches the remainder. That is **two** requests instead of one,
+and it happens once per work item; every later call is a single request. The call and the
+response are identical either way, so nothing about how you use the tool changes. The
+consequence worth knowing: on that first call alone, a failure can leave the seeded field
+written while the rest did not land — the error's hint says so, and it is the one case where
+`get_work(id)` can show partial data after a reported failure. Everywhere else the batch is
+all-or-nothing.
 
 `set` is the only operation the batch endpoint offers. For `push` / `pull` / `rename`, use
 `update_work_data`. That is why both tools exist — this one is not a replacement.
