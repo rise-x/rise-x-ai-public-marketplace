@@ -124,12 +124,19 @@ back to per-field `update_work_data` calls, run sequentially.
   guarantees. One op per leaf path, always. An empty or non-dict `fields` fails with code
   `validation`.
 - `section_name` — **required** — the task name the data belongs to, the same value
-  `update_work_data` takes — obtain it via `get_flow_step` (`get_flow_steps` projects
-  `taskName` out). It is resolved client-side to the
-  task id the v4 endpoint authorises against, so a name matching no task fails with code
-  `section_not_found` and the real task names listed under `tasks`, rather than as an opaque
-  backend 403. It is a **required** parameter on both writers — it cannot be omitted, only
-  got wrong.
+  `update_work_data` takes. **This tool accepts either the internal name or the display
+  label** — it resolves the name against the work's own step tree (depth-first,
+  case-insensitive, first match wins), trying internal names `name` / `taskName` /
+  `stepName` first, then labels `displayName` / `taskDisplayName` / `stepDisplayName`.
+  Internal names go first deliberately, so a label that collides with another task's
+  internal name cannot win. That makes the `get_flow_step` round-trip below optional here:
+  a `taskDisplayName` straight from `get_flow_steps` resolves. `update_work_data` has no
+  such leniency — it passes the value to the v3 endpoint as-is.
+
+  The resolved task id is what the v4 endpoint authorises against, so a name matching no
+  task fails with code `section_not_found` and the real task names listed under `tasks`,
+  rather than as an opaque backend 403. It is a **required** parameter on both writers — it
+  cannot be omitted, only got wrong.
 - `response_format` — `"summary"` (default), or `"full"` to add the raw API response under
   `result`.
 
