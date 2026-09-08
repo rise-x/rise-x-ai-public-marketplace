@@ -1,0 +1,172 @@
+name: kit-release
+
+# Builds and publishes rise-x-kit for a tag matching kit-v<semver> (e.g.
+# kit-v0.1.0). macOS notarization only runs once the APPLE_CERT_P12 secret is
+# set; until then the mac binary is ad-hoc signed so Gatekeeper doesn't block
+# it outright.
+#
+# If enterprise policy turns out to forbid Actions from creating releases,
+# publish by hand instead:
+#   gh release create <tag> artifacts/* kit/install.sh kit/install.ps1 \
+#     --repo rise-x/rise-x-ai-public-marketplace --generate-notes
+
+on:
+  push:
+    tags:
+      - 'kit-v*'
+
+permissions:
+  contents: read
+
+env:
+  GO_MODULE: github.com/rise-x/rise-x-ai-public-marketplace/kit
+
+jobs:
+  build-mac:
+    runs-on: macos-14
+    env:
+      # `secrets` isn't a legal context in a step `if:`, so the Apple secrets
+      # are mirrored into job-level env and every gate below reads env instead.
+      APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    defaults:
+      run:
+        working-directory: kit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: kit/go.mod
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Compute version
+        run: echo "VERSION=${GITHUB_REF_NAME#kit-}" >> "$GITHUB_ENV"
+
+      - name: Build darwin/arm64
+        env:
+          CGO_ENABLED: 0
+          GOOS: darwin
+          GOARCH: arm64
+        run: go build -trimpath -ldflags "-s -w -X ${GO_MODULE}/internal/buildinfo.Version=${VERSION} -X ${GO_MODULE}/internal/buildinfo.Commit=${GITHUB_SHA}" -o dist/rise-x-kit-arm64 ./cmd/rise-x-kit
+
+      - name: Build darwin/amd64
+        env:
+          CGO_ENABLED: 0
+          GOOS: darwin
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w -X ${GO_MODULE}/internal/buildinfo.Version=${VERSION} -X ${GO_MODULE}/internal/buildinfo.Commit=${GITHUB_SHA}" -o dist/rise-x-kit-amd64 ./cmd/rise-x-kit
+
+      - name: Create universal binary
+        run: lipo -create -output dist/rise-x-kit dist/rise-x-kit-arm64 dist/rise-x-kit-amd64
+
+      - name: Sign (macOS)
+        run: codesign -s - --force dist/rise-x-kit
+
+      # Everything below is hardened but inactive until an Apple Developer ID
+      # certificate exists -- APPLE_CERT_P12 gates the whole path.
+      - name: Import Developer ID certificate
+        if: env.APPLE_CERT_P12 != ''
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/kit-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          echo "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" "$(security list-keychains -d user | tr -d '"[:space:]')"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Sign with Developer ID
+        if: env.APPLE_CERT_P12 != ''
+        run: |
+          set -euo pipefail
+          identity="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Developer ID Application' | head -n1 | sed -E 's/.*"(.+)"/\1/')"
+          codesign --force --options runtime --timestamp -s "$identity" --keychain "$KEYCHAIN_PATH" dist/rise-x-kit
+
+      - name: Notarize
+        if: env.APPLE_CERT_P12 != ''
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent dist/rise-x-kit "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+
+      - name: Package
+        run: |
+          mkdir -p out
+          tar -C dist -czf "out/rise-x-kit_${VERSION}_darwin_universal.tar.gz" rise-x-kit
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-universal
+          path: kit/out/*
+
+  build-windows:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: kit/go.mod
+
+      - name: Compute version
+        run: echo "VERSION=${GITHUB_REF_NAME#kit-}" >> "$GITHUB_ENV"
+
+      - name: Build windows/amd64
+        env:
+          CGO_ENABLED: 0
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w -X ${GO_MODULE}/internal/buildinfo.Version=${VERSION} -X ${GO_MODULE}/internal/buildinfo.Commit=${GITHUB_SHA}" -o dist/rise-x-kit.exe ./cmd/rise-x-kit
+
+      # Azure Trusted Signing lands once the org has a signing cert; nothing
+      # to do here today.
+      - name: Sign (Windows)
+        run: echo "no-op (unsigned) until Azure Trusted Signing is wired up"
+
+      - name: Package
+        run: |
+          mkdir -p out
+          (cd dist && zip -j "../out/rise-x-kit_${VERSION}_windows_amd64.zip" rise-x-kit.exe)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64
+          path: kit/out/*
+
+  release:
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: artifacts
+        run: sha256sum * > checksums.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/*
+            kit/install.sh
+            kit/install.ps1

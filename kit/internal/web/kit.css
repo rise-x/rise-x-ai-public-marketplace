@@ -1,0 +1,186 @@
+/* kit.css — the only rules Rise-X Kit adds on top of the design system.
+   rise-x-ui.css is a compiled Tailwind build, so it ships only the utilities the
+   Shell happened to use. Everything here is either a layout helper that build
+   omitted, or the invariant base of a component whose variant classes stay
+   inline in the markup. No colours are invented: all of them are theme tokens.
+
+   The component bases sit in @layer components on purpose: Tailwind v4 emits its
+   utilities into @layer utilities, and an unlayered rule outranks every layered
+   one whatever the source order, so an unlayered base would silently beat the
+   variant classes in the markup. */
+
+[hidden] {
+  display: none !important;
+}
+
+/* Layout helpers the compiled build does not contain */
+.kit-shell {
+  margin-inline: auto;
+  max-width: 1120px;
+  padding-inline: 24px;
+}
+.kit-stack > * + * {
+  margin-top: 18px;
+}
+.kit-substack > * + * {
+  margin-top: 10px;
+}
+.kit-2col {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.kit-end {
+  justify-content: flex-end;
+}
+/* The compiled build has no whitespace-normal, and two cells here sit inside a
+   nowrap table cell or a shrink-0 flex row. */
+.kit-wrap {
+  white-space: normal;
+}
+
+@layer components {
+  /* Button — base lifted from data-slot="button"; variant and size classes stay
+     inline so a reviewer can match them against demo.html. */
+  .ds-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    outline: none;
+    transition:
+      background-color 0.15s var(--ease),
+      border-color 0.15s var(--ease),
+      color 0.15s var(--ease),
+      transform 0.15s var(--ease);
+  }
+  .ds-btn:active {
+    transform: scale(0.975);
+  }
+  .ds-btn:focus-visible {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring-control) 35%, transparent);
+  }
+  .ds-btn:disabled {
+    pointer-events: none;
+    opacity: 0.45;
+  }
+  .ds-btn > svg {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+  }
+
+  /* Badge — base lifted from data-slot="badge" */
+  .ds-badge {
+    display: inline-flex;
+    width: fit-content;
+    height: 20px;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    overflow: hidden;
+    border: 0;
+    border-radius: calc(var(--radius) - 4px);
+    padding-inline: 7px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .ds-badge > svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+  }
+}
+
+/* The compiled build only ships spinner sizing as an inline style (see
+   demo.html); this is the one size app.js needs, pulled out so the CSP can
+   drop style-src 'unsafe-inline'. */
+.kit-spinner-sm {
+  width: 13px;
+  height: 13px;
+  border-width: 1.5px;
+}
+
+/* Streamed job output. Monospace, scrolls on its own so the page never does. */
+.kit-log {
+  max-height: 108px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+/* Tooltip shown from a data-tip attribute. demo.html has no open tooltip/hover-card
+   markup to copy (Radix only renders that content while open, and the static
+   snapshot is closed), so this is CSS-only: content comes from data-tip via
+   attr(), the visible description; a sr-only span near the trigger is what a
+   screen reader gets, via aria-describedby. Applies to any [data-tip] element —
+   the Skills-table info icon (.kit-info-trigger) and the disabled autoupdate
+   choice-row both use it — so there is one tooltip implementation. */
+[data-tip] {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  z-index: 50;
+  width: max-content;
+  max-width: 32ch;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.16);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+[data-tip]:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring-control) 35%, transparent);
+  border-radius: 2px;
+}
+/* The Skills-table trigger is a span wrapping the icon svg, not the svg itself —
+   svg defaults to overflow:hidden and clips its own generated content regardless
+   of an overflow override. This class only supplies its icon sizing/color. */
+.kit-info-trigger {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+/* Review-only chrome: the mock state switcher. Not part of the product.
+   Sits above the collapsed activity strip so it never covers a real row. */
+.kit-dock {
+  position: fixed;
+  right: 16px;
+  bottom: 58px;
+  z-index: 60;
+  width: 232px;
+}
+.kit-dock-body {
+  max-height: 64vh;
+  overflow-y: auto;
+}

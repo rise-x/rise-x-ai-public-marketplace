@@ -1,0 +1,72 @@
+name: kit-ci
+
+on:
+  pull_request:
+    paths:
+      - 'kit/**'
+      - '.github/workflows/kit-*.yml'
+  push:
+    # GitHub ignores `paths` for tag pushes (it only gates branch pushes), so
+    # listing `kit-v*` here is enough on its own to make a release tag always
+    # run CI; `branches` must stay explicit too, since naming `tags` without
+    # it would otherwise drop ordinary branch pushes from this trigger.
+    branches:
+      - '**'
+    tags:
+      - 'kit-v*'
+    paths:
+      - 'kit/**'
+      - '.github/workflows/kit-*.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: kit/go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            echo "::error::gofmt -l found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -race -count=1 ./...
+
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kit
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: kit/go.mod
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build ./...

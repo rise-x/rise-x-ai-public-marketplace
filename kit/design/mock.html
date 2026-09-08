@@ -1,0 +1,673 @@
+<!doctype html>
+<!--
+  Rise-X Kit — static design mock.
+
+  Every colour, radius, control height and type size comes from the vendored
+  design system at ../internal/web/rise-x-ui.css. Ground-truth markup for each
+  component is in ./reference/demo.html (grep data-slot="<name>").
+
+  kit.css carries the invariant bases of Button and Badge in @layer components,
+  so the design-system utility classes in the markup always win over them.
+
+  The only script is the review-time state switcher docked bottom-right.
+-->
+<html lang="en" data-cli="found" data-skills="update" data-conn="connected" data-catalog="current" data-banner="off" data-jobs="closed" data-autoupdate="default">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rise-X Kit</title>
+    <link rel="icon" href="../internal/web/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../internal/web/favicons/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../internal/web/favicons/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="../internal/web/favicons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="../internal/web/rise-x-ui.css" />
+    <link rel="stylesheet" href="../internal/web/kit.css" />
+  </head>
+
+  <body class="bg-background text-foreground">
+    <!-- ================= App header ================= -->
+    <header
+      data-slot="page-header"
+      data-variant="card"
+      class="border-b border-border sticky top-0 z-20 bg-background/85 backdrop-blur-md backdrop-saturate-150"
+    >
+      <div class="kit-shell">
+        <div data-slot="page-header-row" class="flex items-center gap-3 py-3">
+          <svg width="21" height="20" viewBox="0 0 170 161" fill="none" aria-hidden="true" class="shrink-0">
+            <path
+              d="M23.007 161C20.0433 161 17.0496 160.425 14.1867 159.24C5.56789 155.672 0 147.336 0 138.007V0.580078H109.462C123.708 0.580078 135.945 8.75757 141.398 21.92C146.849 35.0824 143.978 49.517 133.904 59.5904L110.091 83.4037L165.955 138.827C170.224 143.062 170.251 149.96 166.015 154.228C161.779 158.502 154.879 158.524 150.613 154.291L79.2252 83.4664L118.503 44.1888C124.109 38.5828 122.041 32.1078 121.276 30.2528C120.508 28.4032 117.391 22.3613 109.462 22.3613H21.7812V138.007C21.7812 138.306 21.7812 138.81 22.5222 139.118C23.2631 139.42 23.6199 139.069 23.8351 138.856L53.7475 108.944C58.0024 104.689 64.8969 104.689 69.1491 108.944C73.4013 113.196 73.4013 120.093 69.1491 124.346L39.2367 154.258C34.8265 158.666 28.9753 161 23.007 161Z"
+              fill="#23cf4e"
+            />
+          </svg>
+
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <h1 data-slot="page-header-title" class="text-ui font-medium tracking-[-0.01em]">Rise-X Kit</h1>
+              <span data-slot="badge" data-variant="outline" class="ds-badge border border-border text-muted-foreground">v0.1.0</span>
+            </div>
+            <p data-slot="page-header-subtitle" class="mt-0.5 text-micro text-subtle">
+              Keeps your Rise-X skills and connection ready in Claude Code Desktop.
+            </p>
+          </div>
+
+          <div data-slot="page-header-actions" class="flex items-center gap-2">
+            <button data-slot="button" data-variant="outline" data-size="sm" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-sm rounded-md px-2.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+              Refresh
+            </button>
+            <button data-slot="button" data-variant="ghost" data-size="sm" class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground h-control-sm rounded-md px-2.5">
+              Quit
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="kit-shell py-6 kit-stack">
+      <!-- ================= Restart banner (state: after-change) ================= -->
+      <div data-when="banner:on" data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs border-info/25 bg-info/8 items-start">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mt-0.5 size-3.5 shrink-0 text-info-text" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+        <div class="min-w-0 flex-1">
+          <div data-slot="alert-title" class="mb-px text-ui font-medium">Your changes are ready to load</div>
+          <div data-slot="alert-description" class="text-xs text-muted-foreground">
+            Restart Claude Code Desktop, or type
+            <kbd data-slot="kbd" class="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-sm bg-fill-2 px-1 font-sans text-[10px] font-medium text-current select-none">/reload-plugins</kbd>
+            in a session, to load the changes.
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          data-slot="button"
+          data-variant="ghost"
+          data-size="icon-xs"
+          class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground size-control-xs rounded-md px-0"
+          onclick="document.documentElement.dataset.banner='off';kitApply()"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" class="size-3"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- ================= Claude Code ================= -->
+      <section data-slot="card" class="rounded-xl border-0 bg-card text-card-foreground shadow-card">
+        <div data-slot="card-header" class="flex items-start gap-3 px-4 pt-3.5 pb-3">
+          <div class="min-w-0 flex-1">
+            <div data-slot="card-title" class="text-ui leading-tight font-medium">Claude Code</div>
+            <div data-slot="card-description" class="mt-0.5 text-xs text-muted-foreground">
+              The command-line tool Kit uses to install and update your skills.
+            </div>
+          </div>
+          <span data-when="cli:found" data-slot="badge" data-variant="success" class="ds-badge bg-success/13 text-success-text">Ready</span>
+        </div>
+
+        <!-- (a) found -->
+        <div data-when="cli:found" data-slot="card-content" class="px-4 pb-4">
+          <div data-slot="list" class="flex flex-col rounded-lg border border-border-subtle">
+            <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+              <div data-slot="list-main" class="min-w-0 flex-1">
+                <span data-slot="list-name" class="flex items-center gap-2 text-ui">Location</span>
+              </div>
+              <span data-slot="list-value" class="shrink-0 text-ui text-muted-foreground font-mono text-xs">~/.local/bin/claude</span>
+            </div>
+            <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5">
+              <div data-slot="list-main" class="min-w-0 flex-1">
+                <span data-slot="list-name" class="flex items-center gap-2 text-ui">Version</span>
+              </div>
+              <span data-slot="list-value" class="shrink-0 text-ui tabular-nums">2.1.260</span>
+            </div>
+            <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5">
+              <div data-slot="list-main" class="min-w-0 flex-1">
+                <span data-slot="list-name" class="flex items-center gap-2 text-ui">Found in</span>
+              </div>
+              <span data-slot="badge" data-variant="default" class="ds-badge bg-fill-1 text-muted-foreground">Desktop app bundle</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- (b) missing -->
+        <div data-when="cli:missing" data-slot="card-content" class="px-4 pb-4">
+          <div data-slot="empty-state" class="flex flex-col items-center gap-[3px] px-4 text-center py-14 rounded-lg bg-fill-0">
+            <span data-slot="empty-state-glyph" class="mb-[5px] grid size-8 place-items-center rounded-lg bg-muted text-subtle">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-[15px]" aria-hidden="true"><path d="m9 9 3 3-3 3M14 15h4"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
+            </span>
+            <div data-slot="empty-state-title" class="text-ui font-medium">Claude Code command-line tool not found</div>
+            <div data-slot="empty-state-description" class="max-w-[42ch] text-xs text-muted-foreground">
+              Kit needs it to manage your skills. Installing takes about a minute and does not change anything else on your machine.
+            </div>
+            <div data-slot="empty-state-actions" class="mt-3 flex items-center gap-2">
+              <button data-slot="button" data-variant="default" data-size="sm" class="ds-btn bg-primary text-primary-foreground hover:bg-primary/85 h-control-sm rounded-md px-2.5">Install Claude Code</button>
+              <button data-slot="button" data-variant="outline" data-size="sm" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-sm rounded-md px-2.5">Rescan</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= Skills ================= -->
+      <section data-slot="card" class="rounded-xl border-0 bg-card text-card-foreground shadow-card">
+        <div data-slot="card-header" class="flex items-start gap-3 px-4 pt-3.5 pb-3">
+          <div class="min-w-0 flex-1">
+            <div data-slot="card-title" class="text-ui leading-tight font-medium">Skills</div>
+            <div data-slot="card-description" class="mt-0.5 text-xs text-muted-foreground">
+              What Claude can do for you on Rise-X. Install the ones you need; Kit keeps the rest out of the way.
+            </div>
+          </div>
+        </div>
+
+        <div data-slot="table-container" class="relative w-full overflow-x-auto">
+          <table data-slot="table" class="w-full caption-bottom border-separate border-spacing-0 text-ui">
+            <thead data-slot="table-header">
+              <tr>
+                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] text-muted-foreground">Skill</th>
+                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Installed</th>
+                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Public</th>
+                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Status</th>
+                <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-right align-middle text-xs font-medium tracking-[0.01em] whitespace-nowrap text-muted-foreground">Actions</th>
+              </tr>
+            </thead>
+            <tbody data-slot="table-body">
+              <!-- Rise-X -->
+              <tr data-slot="table-row" class="transition-colors duration-150 ease-decelerate hover:bg-fill-0">
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle">
+                  <div data-slot="table-cell-stack" class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-ui font-medium">Rise-X</span>
+                      <span class="text-micro text-subtle font-mono">rise-x-mcp</span>
+                      <span
+                        class="kit-info-trigger"
+                        tabindex="0"
+                        role="img"
+                        aria-label="About this skill"
+                        aria-describedby="skill-desc-rise-x-mcp"
+                        data-tip="Configure workflows, layouts and dashboards, query data, and manage work items on the Rise-X platform."
+                      >
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
+                        </svg>
+                      </span>
+                      <span id="skill-desc-rise-x-mcp" class="sr-only">
+                        Configure workflows, layouts and dashboards, query data, and manage work items on the Rise-X platform.
+                      </span>
+                    </div>
+                  </div>
+                </td>
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap tabular-nums">
+                  <span data-when="skills:update">1.3.1</span>
+                  <span data-when="skills:uptodate">1.5.0</span>
+                  <span data-when="skills:disabled">1.5.0</span>
+                  <span data-when="skills:unknown" class="text-subtle">Unknown</span>
+                </td>
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap tabular-nums">1.5.0</td>
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap">
+                  <span data-when="skills:update" data-slot="badge" data-variant="warning" class="ds-badge bg-warning/15 text-warning-text">Update available</span>
+                  <span data-when="skills:uptodate" data-slot="badge" data-variant="success" class="ds-badge bg-success/13 text-success-text">Up to date</span>
+                  <span data-when="skills:unknown" data-slot="badge" data-variant="default" class="ds-badge bg-fill-1 text-muted-foreground">Version unknown</span>
+                  <span data-when="skills:disabled" data-slot="badge" data-variant="outline" class="ds-badge border border-border text-muted-foreground">Disabled</span>
+                </td>
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap">
+                  <div class="flex items-center gap-1.5 kit-end">
+                    <button data-when="skills:update" data-slot="button" data-variant="default" data-size="xs" class="ds-btn bg-primary text-primary-foreground hover:bg-primary/85 h-control-xs gap-1 rounded-md px-2 text-xs">Update</button>
+                    <button data-when="skills:unknown" data-slot="button" data-variant="outline" data-size="xs" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-xs gap-1 rounded-md px-2 text-xs">Reinstall</button>
+                    <button data-when="skills:disabled" data-slot="button" data-variant="outline" data-size="xs" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-xs gap-1 rounded-md px-2 text-xs">Enable</button>
+                    <button data-slot="button" data-variant="destructive" data-size="xs" class="ds-btn text-error-text hover:bg-error/10 h-control-xs gap-1 rounded-md px-2 text-xs">Remove</button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Rise-X Apps -->
+              <tr data-slot="table-row" class="transition-colors duration-150 ease-decelerate hover:bg-fill-0">
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle">
+                  <div data-slot="table-cell-stack" class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-ui font-medium">Rise-X Apps</span>
+                      <span class="text-micro text-subtle font-mono">rise-x-apps</span>
+                      <span
+                        class="kit-info-trigger"
+                        tabindex="0"
+                        role="img"
+                        aria-label="About this skill"
+                        aria-describedby="skill-desc-rise-x-apps"
+                        data-tip="Design, build, and deploy federated apps for the Rise-X platform."
+                      >
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
+                        </svg>
+                      </span>
+                      <span id="skill-desc-rise-x-apps" class="sr-only">
+                        Design, build, and deploy federated apps for the Rise-X platform.
+                      </span>
+                    </div>
+                  </div>
+                </td>
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap text-subtle">&mdash;</td>
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap tabular-nums">0.4.2</td>
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap">
+                  <span data-slot="badge" data-variant="outline" class="ds-badge border border-border text-muted-foreground">Not installed</span>
+                </td>
+                <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap">
+                  <div class="flex items-center gap-1.5 kit-end">
+                    <button data-slot="button" data-variant="default" data-size="xs" class="ds-btn bg-primary text-primary-foreground hover:bg-primary/85 h-control-xs gap-1 rounded-md px-2 text-xs">Install</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div data-slot="card-footer" class="mx-4 flex items-center gap-3 border-t border-border-subtle py-3 text-xs text-muted-foreground">
+          <div class="min-w-0 flex-1">
+            <span data-when="catalog:current" class="inline-flex items-center gap-1.5">
+              <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-success"></span>
+              Catalog: current <span class="font-mono text-micro text-subtle">(abc1234)</span>
+            </span>
+            <span data-when="catalog:behind" class="inline-flex items-center gap-2">
+              <span class="inline-flex items-center gap-1.5">
+                <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning"></span>
+                Catalog is 3 days behind
+              </span>
+              <button data-slot="button" data-variant="outline" data-size="xs" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-xs gap-1 rounded-md px-2 text-xs">Update catalog</button>
+            </span>
+          </div>
+
+          <div data-when="autoupdate:default" data-slot="choice-row" class="flex items-start gap-2.5 shrink-0">
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked="true"
+              data-state="checked"
+              id="kit-autoupdate"
+              data-slot="checkbox"
+              class="peer size-[15px] mt-0.5 shrink-0 rounded-[4px] border border-input bg-card transition-colors duration-100 outline-none focus-visible:ring-3 focus-visible:ring-ring-control/35 disabled:cursor-not-allowed disabled:opacity-45 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground flex items-center justify-center"
+              data-checked
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" class="size-3" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            </button>
+            <div class="min-w-0">
+              <label for="kit-autoupdate" data-slot="label" class="block text-ui font-medium text-foreground select-none">Keep Rise-X skills up to date automatically</label>
+              <span class="mt-0.5 block text-micro text-subtle">Claude Code refreshes the catalog and updates installed skills after each session starts.</span>
+            </div>
+          </div>
+
+          <!-- org-managed: every catalog skill comes from the organisation, so the
+               public marketplace's autoUpdate flag has nothing to control here. -->
+          <div data-when="autoupdate:org" data-slot="choice-row" class="flex items-start gap-2.5 shrink-0" data-tip="Your organisation installs and updates Rise-X skills through its own marketplace, so this setting is not used on this machine." title="Your organisation installs and updates Rise-X skills through its own marketplace, so this setting is not used on this machine." hidden>
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked="false"
+              data-state="unchecked"
+              disabled
+              data-disabled=""
+              aria-disabled="true"
+              aria-describedby="autoupdate-org-tip"
+              id="kit-autoupdate-org"
+              data-slot="checkbox"
+              class="peer size-[15px] mt-0.5 shrink-0 rounded-[4px] border border-input bg-card transition-colors duration-100 outline-none focus-visible:ring-3 focus-visible:ring-ring-control/35 disabled:cursor-not-allowed disabled:opacity-45 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground flex items-center justify-center"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" class="size-3" aria-hidden="true" hidden><path d="M20 6 9 17l-5-5"/></svg>
+            </button>
+            <div class="min-w-0 peer-disabled:cursor-not-allowed peer-disabled:opacity-50">
+              <div class="flex items-center gap-1.5">
+                <label for="kit-autoupdate-org" data-slot="label" class="text-ui font-medium text-foreground select-none">Keep Rise-X skills up to date automatically</label>
+                <span id="autoupdate-org-tip" class="sr-only">Your organisation installs and updates Rise-X skills through its own marketplace, so this setting is not used on this machine.</span>
+              </div>
+              <span class="mt-0.5 block text-micro text-subtle">Managed by your organisation.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= Rise-X connection ================= -->
+      <section data-slot="card" class="rounded-xl border-0 bg-card text-card-foreground shadow-card">
+        <div data-slot="card-header" class="flex items-start gap-3 px-4 pt-3.5 pb-3">
+          <div class="min-w-0 flex-1">
+            <div data-slot="card-title" class="text-ui leading-tight font-medium">Rise-X connection</div>
+            <div data-slot="card-description" class="mt-0.5 text-xs text-muted-foreground">
+              Lets Claude read and change your Rise-X data on your behalf.
+            </div>
+          </div>
+          <span data-when="conn:connected" data-slot="badge" data-variant="success" class="ds-badge bg-success/13 text-success-text">Connected</span>
+          <span data-when="conn:signin" data-slot="badge" data-variant="warning" class="ds-badge bg-warning/15 text-warning-text">Sign-in needed</span>
+          <span data-when="conn:notinstalled" data-slot="badge" data-variant="error" class="ds-badge bg-error/12 text-error-text">Not installed</span>
+          <span data-when="conn:unknown" data-slot="badge" data-variant="default" class="ds-badge bg-fill-1 text-muted-foreground">Unknown</span>
+        </div>
+
+        <div data-slot="card-content" class="px-4 pb-4 kit-substack">
+          <!-- servers -->
+          <div data-slot="list" class="flex flex-col rounded-lg border border-border-subtle">
+            <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+              <div data-slot="list-main" class="min-w-0 flex-1">
+                <span data-slot="list-name" class="flex items-center gap-2 text-ui">rise-x</span>
+                <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">Your live Rise-X environment</span>
+              </div>
+              <span class="shrink-0 font-mono text-xs text-muted-foreground">https://mcp.rise-x.io/mcp</span>
+              <button
+                data-slot="button" data-variant="ghost" data-size="icon-sm"
+                aria-label="Copy https://mcp.rise-x.io/mcp"
+                class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground size-control-sm rounded-md px-0"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              </button>
+            </div>
+            <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5">
+              <div data-slot="list-main" class="min-w-0 flex-1">
+                <span data-slot="list-name" class="flex items-center gap-2 text-ui">rise-x-test</span>
+                <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">A safe copy for trying things out</span>
+              </div>
+              <span class="shrink-0 font-mono text-xs text-muted-foreground">https://mcp-test.rise-x.io/mcp</span>
+              <button
+                data-slot="button" data-variant="ghost" data-size="icon-sm"
+                aria-label="Copy https://mcp-test.rise-x.io/mcp"
+                class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground size-control-sm rounded-md px-0"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- three-step guide -->
+          <div class="rounded-lg bg-fill-0 p-3.5">
+            <div class="text-xs font-medium text-foreground">Add it in Claude Code Desktop</div>
+            <ol class="mt-2.5 flex flex-col gap-2">
+              <li class="flex items-start gap-2.5">
+                <span class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-fill-2 text-micro font-medium text-muted-foreground tabular-nums">1</span>
+                <span class="text-xs text-muted-foreground">Open <strong class="font-medium text-foreground">Claude Code Desktop</strong> &rsaquo; <strong class="font-medium text-foreground">Settings</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> &rsaquo; <strong class="font-medium text-foreground">Add custom connector</strong>.</span>
+              </li>
+              <li class="flex items-start gap-2.5">
+                <span class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-fill-2 text-micro font-medium text-muted-foreground tabular-nums">2</span>
+                <span class="text-xs text-muted-foreground">Paste the name and URL from the rows above. Leave the headers empty.</span>
+              </li>
+              <li class="flex items-start gap-2.5">
+                <span class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-fill-2 text-micro font-medium text-muted-foreground tabular-nums">3</span>
+                <span class="text-xs text-muted-foreground">Sign in when the browser opens, then come back here and press <strong class="font-medium text-foreground">Recheck</strong>.</span>
+              </li>
+            </ol>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button data-slot="button" data-variant="outline" data-size="sm" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-sm rounded-md px-2.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+              Recheck
+            </button>
+            <button data-slot="button" data-variant="ghost" data-size="sm" class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground h-control-sm rounded-md px-2.5">Try sign-in from here</button>
+            <span data-slot="badge" data-variant="outline" class="ds-badge border border-border text-subtle">Experimental</span>
+          </div>
+
+          <details data-slot="collapsible">
+            <summary
+              data-slot="collapsible-trigger"
+              class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground h-control-sm w-fit rounded-md px-2.5 list-none"
+            >
+              Show raw check output
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <div data-slot="collapsible-content" class="mt-2 rounded-lg bg-fill-0 px-3.5 py-3">
+              <pre class="kit-log text-muted-foreground">$ claude mcp list
+rise-x        https://mcp.rise-x.io/mcp        connected (oauth, expires in 27d)
+rise-x-test   https://mcp-test.rise-x.io/mcp   connected (oauth, expires in 27d)
+
+handshake  ok   protocol 2025-06-18
+tools      ok   94 exposed
+latency    ok   142 ms</pre>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- ================= Doctor ================= -->
+      <section data-slot="card" class="rounded-xl border-0 bg-card text-card-foreground shadow-card">
+        <div data-slot="card-header" class="flex items-start gap-3 px-4 pt-3.5 pb-3">
+          <div class="min-w-0 flex-1">
+            <div data-slot="card-title" class="text-ui leading-tight font-medium">Doctor</div>
+            <div data-slot="card-description" class="mt-0.5 text-xs text-muted-foreground">
+              Eight checks, run just now. Anything that needs you has a button next to it.
+            </div>
+          </div>
+          <button data-slot="button" data-variant="outline" data-size="sm" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-sm rounded-md px-2.5">Run again</button>
+        </div>
+
+        <div data-slot="list" class="flex flex-col border-t border-border-subtle">
+          <!-- ok -->
+          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+            <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-success" title="Passed"></span>
+            <div data-slot="list-main" class="min-w-0 flex-1">
+              <span data-slot="list-name" class="flex items-center gap-2 text-ui">Claude Code</span>
+              <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">Version 2.1.260, from the desktop app bundle.</span>
+            </div>
+          </div>
+          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+            <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-success" title="Passed"></span>
+            <div data-slot="list-main" class="min-w-0 flex-1">
+              <span data-slot="list-name" class="flex items-center gap-2 text-ui">Rise-X marketplace</span>
+              <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">Claude knows where to find Rise-X skills.</span>
+            </div>
+          </div>
+          <!-- warn + fix -->
+          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+            <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning" title="Needs attention"></span>
+            <div data-slot="list-main" class="min-w-0 flex-1">
+              <span data-slot="list-name" class="flex items-center gap-2 text-ui">Automatic updates</span>
+              <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">Turned off, so new skill versions will not arrive on their own.</span>
+            </div>
+            <button data-slot="button" data-variant="outline" data-size="xs" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-xs gap-1 rounded-md px-2 text-xs shrink-0">Fix</button>
+          </div>
+          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+            <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning" title="Needs attention"></span>
+            <div data-slot="list-main" class="min-w-0 flex-1">
+              <span data-slot="list-name" class="flex items-center gap-2 text-ui">Skill versions</span>
+              <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">Rise-X <span class="tabular-nums">1.3.1</span> &rarr; <span class="tabular-nums">1.5.0</span>.</span>
+            </div>
+            <button data-slot="button" data-variant="outline" data-size="xs" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-xs gap-1 rounded-md px-2 text-xs shrink-0">Fix</button>
+          </div>
+          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+            <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-success" title="Passed"></span>
+            <div data-slot="list-main" class="min-w-0 flex-1">
+              <span data-slot="list-name" class="flex items-center gap-2 text-ui">Skill catalog</span>
+              <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">Last refreshed 20 minutes ago.</span>
+            </div>
+          </div>
+          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+            <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning" title="Needs attention"></span>
+            <div data-slot="list-main" class="min-w-0 flex-1">
+              <span data-slot="list-name" class="flex items-center gap-2 text-ui">Node.js</span>
+              <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">Not found. Needed only for Rise-X Apps.</span>
+            </div>
+            <button data-slot="button" data-variant="ghost" data-size="xs" class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground h-control-xs gap-1 rounded-md px-2 text-xs shrink-0">
+              How to install
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="size-3"><path d="M7 17 17 7M8 7h9v9"/></svg>
+            </button>
+          </div>
+          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+            <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning" title="Needs attention"></span>
+            <div data-slot="list-main" class="min-w-0 flex-1">
+              <span data-slot="list-name" class="flex items-center gap-2 text-ui">npm configuration</span>
+              <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">2 lines from the old private Rise-X registry in <span class="font-mono">~/.npmrc</span>.</span>
+            </div>
+            <button data-slot="button" data-variant="outline" data-size="xs" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-xs gap-1 rounded-md px-2 text-xs shrink-0">Fix</button>
+          </div>
+          <!-- skipped -->
+          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+            <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-fill-3" title="Skipped"></span>
+            <div data-slot="list-main" class="min-w-0 flex-1">
+              <span data-slot="list-name" class="flex items-center gap-2 text-ui text-muted-foreground">Git for Windows</span>
+              <span data-slot="list-description" class="mt-0.5 block text-xs text-subtle">Skipped on macOS.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="py-6"></div>
+    </main>
+
+    <!-- ================= Activity drawer ================= -->
+    <aside class="sticky bottom-0 z-30 border-t border-border bg-card backdrop-blur-md">
+      <div class="kit-shell">
+        <button
+          type="button"
+          aria-expanded="false"
+          id="kit-jobs-toggle"
+          class="ds-btn flex w-full items-center gap-2.5 px-0 py-2.5 text-muted-foreground hover:text-foreground"
+          onclick="kitToggleJobs()"
+        >
+          <span data-when="jobs:open" data-slot="spinner" role="status" aria-label="Working" style="width: 13px; height: 13px; border-width: 1.5px" class="inline-block shrink-0 rounded-full border-border border-t-muted-foreground motion-safe:animate-spin"></span>
+          <span data-when="jobs:closed" data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-success"></span>
+          <span class="text-ui font-medium text-foreground">Activity</span>
+          <span data-when="jobs:open" class="text-xs text-muted-foreground">Updating Rise-X&hellip;</span>
+          <span data-when="jobs:closed" class="text-xs text-muted-foreground">2 finished</span>
+          <span data-when="jobs:open" data-slot="badge" data-variant="count" class="ds-badge min-w-5 bg-fill-1 text-muted-foreground tabular-nums">2</span>
+          <span class="flex-1"></span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" id="kit-jobs-chevron"><path d="m18 15-6-6-6 6"/></svg>
+        </button>
+
+        <div data-when="jobs:open" class="pb-4 kit-substack">
+          <!-- running -->
+          <div data-slot="item" class="flex flex-col rounded-lg border border-border-subtle p-3.5">
+            <div class="flex items-center gap-2.5">
+              <span data-slot="spinner" role="status" aria-label="Working" style="width: 13px; height: 13px; border-width: 1.5px" class="inline-block shrink-0 rounded-full border-border border-t-muted-foreground motion-safe:animate-spin"></span>
+              <span data-slot="item-title" class="text-ui font-medium">Update Rise-X</span>
+              <span class="text-micro text-subtle font-mono">rise-x-mcp</span>
+              <span class="flex-1"></span>
+              <span class="text-xs text-muted-foreground tabular-nums">1.3.1 &rarr; 1.5.0</span>
+              <button data-slot="button" data-variant="ghost" data-size="xs" class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground h-control-xs gap-1 rounded-md px-2 text-xs">Stop</button>
+            </div>
+            <pre class="kit-log mt-2.5 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground">fetching rise-x-mcp@1.5.0 from rise-x-public
+  resolved  1.5.0  (2.4 MB)
+  verifying signature                 ok
+  unpacking  14 skills, 6 commands    ok
+writing ~/.claude/plugins/rise-x-mcp
+  linking skills</pre>
+          </div>
+
+          <!-- finished -->
+          <div data-slot="item" class="flex items-center gap-2.5 rounded-lg border border-border-subtle px-3.5 py-2.5">
+            <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-success"></span>
+            <span data-slot="item-title" class="text-ui">Install Rise-X Apps</span>
+            <span class="text-micro text-subtle font-mono">rise-x-apps</span>
+            <span class="flex-1"></span>
+            <span class="text-xs text-muted-foreground">Done in <span class="tabular-nums">12 s</span></span>
+            <button data-slot="button" data-variant="ghost" data-size="xs" class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground h-control-xs gap-1 rounded-md px-2 text-xs">Log</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ================= Review-only: mock state switcher ================= -->
+    <div class="kit-dock rounded-2xl bg-card shadow-card border border-border" data-slot="panel">
+      <div data-slot="panel-header" class="flex items-center gap-2 border-b border-border-subtle px-3.5 py-2.5">
+        <span data-slot="panel-title" class="text-ui font-medium">Mock states</span>
+        <span class="flex-1"></span>
+        <button
+          type="button" id="kit-dock-toggle" aria-expanded="false" aria-label="Show mock states"
+          class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground size-control-xs rounded-md px-0"
+          onclick="kitToggleDock()"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="size-3"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+      </div>
+      <div class="kit-dock-body p-3.5" id="kit-dock-body" hidden>
+        <div class="kit-substack" id="kit-dock-groups"></div>
+      </div>
+    </div>
+
+    <script>
+      // Review-time state switcher. Not part of the product.
+      const KIT_GROUPS = [
+        { key: 'theme', label: 'Theme', options: [['light', 'Light'], ['dark', 'Dark']] },
+        { key: 'cli', label: 'Claude Code', options: [['found', 'Found'], ['missing', 'Missing']] },
+        { key: 'skills', label: 'Rise-X skill', options: [['update', 'Update'], ['uptodate', 'Current'], ['unknown', 'Unknown'], ['disabled', 'Disabled']] },
+        { key: 'conn', label: 'Connection', options: [['connected', 'Connected'], ['signin', 'Sign-in'], ['notinstalled', 'Missing'], ['unknown', 'Unknown']] },
+        { key: 'catalog', label: 'Catalog', options: [['current', 'Current'], ['behind', 'Behind']] },
+        { key: 'autoupdate', label: 'Auto-update', options: [['default', 'Default'], ['org', 'Org-managed']] },
+        { key: 'banner', label: 'Restart banner', options: [['off', 'Hidden'], ['on', 'Shown']] },
+        { key: 'jobs', label: 'Activity drawer', options: [['closed', 'Closed'], ['open', 'Job running']] },
+      ];
+
+      const root = document.documentElement;
+      const SEG = 'inline-flex gap-0.5 rounded-lg border-0 bg-fill-1 p-0.5 flex-wrap';
+      const SEG_ITEM =
+        'inline-flex h-control-xs items-center rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground transition-colors duration-200 ease-decelerate outline-none cursor-pointer focus-visible:ring-3 focus-visible:ring-ring-control/35 aria-pressed:bg-card aria-pressed:font-medium aria-pressed:text-foreground';
+
+      function kitState(key) {
+        return key === 'theme' ? (root.classList.contains('dark') ? 'dark' : 'light') : root.dataset[key];
+      }
+
+      function kitApply() {
+        document.querySelectorAll('[data-when]').forEach((el) => {
+          el.hidden = !el.dataset.when
+            .trim()
+            .split(/\s+/)
+            .every((tok) => {
+              const [k, v] = tok.split(':');
+              return v.split('|').includes(kitState(k));
+            });
+        });
+        document.querySelectorAll('#kit-dock-groups [data-set]').forEach((b) => {
+          const [k, v] = b.dataset.set.split(':');
+          b.setAttribute('aria-pressed', String(kitState(k) === v));
+        });
+        const open = root.dataset.jobs === 'open';
+        document.getElementById('kit-jobs-toggle').setAttribute('aria-expanded', String(open));
+        document.getElementById('kit-jobs-chevron').innerHTML = open ? '<path d="m6 9 6 6 6-6"/>' : '<path d="m18 15-6-6-6 6"/>';
+      }
+
+      function kitSet(key, value) {
+        if (key === 'theme') root.classList.toggle('dark', value === 'dark');
+        else root.dataset[key] = value;
+        kitApply();
+      }
+
+      function kitToggleJobs() {
+        kitSet('jobs', root.dataset.jobs === 'open' ? 'closed' : 'open');
+      }
+
+      function kitToggleDock() {
+        const body = document.getElementById('kit-dock-body');
+        const btn = document.getElementById('kit-dock-toggle');
+        const open = body.hidden;
+        body.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+      }
+
+      document.getElementById('kit-dock-groups').innerHTML = KIT_GROUPS.map(
+        (g) =>
+          '<div><div class="mb-1.5 text-micro text-subtle">' +
+          g.label +
+          '</div><div data-slot="segmented" class="' +
+          SEG +
+          '" role="group" aria-label="' +
+          g.label +
+          '">' +
+          g.options
+            .map((o) => '<button type="button" data-slot="segmented-item" class="' + SEG_ITEM + '" data-set="' + g.key + ':' + o[0] + '">' + o[1] + '</button>')
+            .join('') +
+          '</div></div>'
+      ).join('');
+
+      document.getElementById('kit-dock-groups').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-set]');
+        if (b) kitSet(...b.dataset.set.split(':'));
+      });
+
+      // The auto-update checkbox is a real control, so let it toggle.
+      document.getElementById('kit-autoupdate').addEventListener('click', function () {
+        const on = this.getAttribute('aria-checked') !== 'true';
+        this.setAttribute('aria-checked', String(on));
+        this.dataset.state = on ? 'checked' : 'unchecked';
+        this.toggleAttribute('data-checked', on);
+        this.querySelector('svg').hidden = !on;
+      });
+
+      // Deep link for review: #dark,cli:missing,jobs:open
+      location.hash
+        .replace(/^#/, '')
+        .split(',')
+        .filter(Boolean)
+        .forEach((tok) => {
+          const [k, v] = tok.includes(':') ? tok.split(':') : ['theme', tok];
+          if (k === 'theme') root.classList.toggle('dark', v === 'dark');
+          else root.dataset[k] = v;
+        });
+
+      kitApply();
+    </script>
+  </body>
+</html>

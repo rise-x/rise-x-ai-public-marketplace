@@ -1,0 +1,1092 @@
+/*
+ * Rise-X Kit — browser page. Vanilla JS, no build step. index.html is the
+ * static shell; every region below a card header is rendered here.
+ *
+ * Every /api/* request carries header X-RiseX-Token: <token> (read from
+ * <meta name="risex-token">, injected by the server).
+ *
+ * GET /api/overview -> 200
+ *   { kitVersion, cli: { found, path?, version?,
+ *       source?: "path"|"local-bin"|"desktop-bundle"|"windows-probe" } | null,
+ *     marketplace?: { registered, installLocation?,
+ *       autoUpdate?: bool,   // absent = key not set in settings.json
+ *       autoUpdateMarketplace?: string, // absent = rise-x-public
+ *       headStale?: bool }, // absent = GitHub unreachable, skipped
+ *     plugins?: [{ name, description?, installed, enabled, localVersion?,
+ *       publicVersion?, versionUnknown?, offline?, publicCheckError?,
+ *       updateAvailable?,
+ *       installSource?: "public"|"marketplace"|"organisation", // absent = not installed
+ *       sourceName? }],      // the marketplace installSource came from
+ *     mcp?: { verdict: "connected"|"needs_auth"|"failed"|"pending"|"unknown"
+ *               |"not_installed"|"managed", // managed = the Desktop app owns them
+ *       servers?: [{ name, target, status }], configured?: [{ name, type?, url?, command?, args? }],
+ *       stale?: [{ name, scope: "user"|"local"|"desktop", projectPath?, url, suggestedUrl }],
+ *       raw?: string },      // full `claude mcp list` text
+ *     reloadHint: bool }
+ *
+ * GET /api/doctor -> 200
+ *   { checks: [{ id, status: "ok"|"warn"|"fail"|"skip", title, message,
+ *                detail?, fix?, fixArgs? }] }
+ *   fix is the action name to POST; detail is the newline-separated lines the
+ *   fix would change, shown behind "Show lines". npmrc.clean has no fixArgs
+ *   but the server demands {confirm:true}, so the page adds it.
+ *
+ * POST /api/actions/{name}  body: JSON (may be empty) -> 200 | 400 | 403 | 409
+ *   Sync actions respond immediately:
+ *     autoupdate.set {enabled, marketplace?} -> {backup}
+ *     npmrc.clean {confirm:true} -> {removed: [string], backup}
+ *     cli.rescan {} -> {found}  |  quit {} -> {ok: true}
+ *   Job actions respond {jobId} and stream their log via GET /api/jobs/{id}:
+ *     marketplace.add, marketplace.update, cli.install,
+ *     plugin.install / plugin.uninstall {name},
+ *     plugin.update {name, marketplace?}, mcp.login {server},
+ *     mcp.fix {name, scope, projectPath?} - or {} for every fixable connection
+ *   403 = bad/missing token or Host. 409 = a job is already running.
+ *   Every error body is {error: string}, e.g. mcp.login 400 "unknown MCP server target".
+ *
+ * GET /api/jobs/{id}?since=N -> 200
+ *   { job: { id, action, status: "running"|"succeeded"|"failed", exitCode,
+ *            error?, startedAt, finishedAt? },  // error may read "<action> timed out after 10m0s"
+ *     log: [{ seq, text }] }
+ */
+
+/* This script is in <head>, so the theme lands before the body paints. */
+const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+const applyTheme = () =>
+  document.documentElement.classList.toggle("dark", darkQuery.matches);
+applyTheme();
+darkQuery.addEventListener("change", applyTheme);
+
+const token = document.querySelector('meta[name="risex-token"]').content;
+
+/* ------------------------------------------------------------------ helpers */
+
+const $ = (id) => document.getElementById(id);
+
+const ESCAPES = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+/** esc makes any server-provided value safe to drop into HTML. */
+function esc(value) {
+  return String(value == null ? "" : value).replace(
+    /[&<>"']/g,
+    (c) => ESCAPES[c],
+  );
+}
+
+function sentence(text) {
+  const s = String(text || "");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/* design-system class shorthands */
+
+const BTN_VARIANT = {
+  default: "bg-primary text-primary-foreground hover:bg-primary/85",
+  outline: "border-border-strong bg-card hover:bg-muted dark:bg-transparent",
+  ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
+  destructive: "text-error-text hover:bg-error/10",
+};
+
+const BTN_SIZE = {
+  sm: "h-control-sm rounded-md px-2.5",
+  xs: "h-control-xs gap-1 rounded-md px-2 text-xs",
+  "icon-sm": "size-control-sm rounded-md px-0",
+  "icon-xs": "size-control-xs rounded-md px-0",
+};
+
+const BADGE = {
+  default: "bg-fill-1 text-muted-foreground",
+  success: "bg-success/13 text-success-text",
+  warning: "bg-warning/15 text-warning-text",
+  error: "bg-error/12 text-error-text",
+  info: "bg-info/8 text-info-text",
+  outline: "border border-border text-muted-foreground",
+};
+
+/** btnClass is separate so the <a> and <summary> that look like buttons share it. */
+const btnClass = (variant, size) =>
+  `ds-btn ${BTN_VARIANT[variant]} ${BTN_SIZE[size]}`;
+
+const dataAttrs = (data) =>
+  Object.entries(data || {})
+    .map(([key, value]) => ` data-${key}="${esc(value)}"`)
+    .join("");
+
+/** btn derives the data-* annotation and the classes from one variant/size pair. */
+function btn(label, o) {
+  const variant = o.variant || "default";
+  const size = o.size || "xs";
+  return `<button type="button" data-act="${o.act}"${dataAttrs(o.data)}${o.aria ? ` aria-label="${esc(o.aria)}"` : ""}${o.title ? ` title="${esc(o.title)}"` : ""} data-slot="button" data-variant="${variant}" data-size="${size}" class="${btnClass(variant, size)}${o.cls ? ` ${o.cls}` : ""}"${o.disabled ? " disabled" : ""}>${label}</button>`;
+}
+
+/** badge does the same for badges: one key, one class, one annotation. */
+function badge(variant, text, o = {}) {
+  return `<span data-slot="badge" data-variant="${variant}" class="ds-badge ${BADGE[variant]}${o.cls ? ` ${o.cls}` : ""}"${o.title ? ` title="${esc(o.title)}"` : ""}>${esc(text)}</span>`;
+}
+
+const STROKE =
+  'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+
+const ICON = {
+  refresh: `<svg viewBox="0 0 24 24" ${STROKE}><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>`,
+  copy: `<svg viewBox="0 0 24 24" ${STROKE}><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" ${STROKE}><path d="M20 6 9 17l-5-5"/></svg>`,
+  close: `<svg viewBox="0 0 24 24" ${STROKE} class="size-3"><path d="M18 6 6 18M6 6l12 12"/></svg>`,
+  info: `<svg viewBox="0 0 24 24" ${STROKE} class="mt-0.5 size-3.5 shrink-0 text-info-text"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>`,
+  alert: `<svg viewBox="0 0 24 24" ${STROKE} class="mt-0.5 size-3.5 shrink-0 text-error-text"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>`,
+  terminal: `<svg viewBox="0 0 24 24" ${STROKE} class="size-[15px]"><path d="m9 9 3 3-3 3M14 15h4"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>`,
+  external: `<svg viewBox="0 0 24 24" ${STROKE} class="size-3"><path d="M7 17 17 7M8 7h9v9"/></svg>`,
+  chevronDown: '<path d="m6 9 6 6 6-6"/>',
+  chevronUp: '<path d="m18 15-6-6-6 6"/>',
+};
+
+const SPINNER =
+  '<span data-slot="spinner" role="status" aria-label="Working" class="kit-spinner-sm inline-block shrink-0 rounded-full border-border border-t-muted-foreground motion-safe:animate-spin"></span>';
+
+const dot = (cls, title) =>
+  `<span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full ${cls}" title="${esc(title)}"></span>`;
+
+/* copy */
+
+/** Product copy for the two Rise-X skills; the catalog's own text wins. */
+const SKILLS = {
+  "rise-x-mcp": {
+    label: "Rise-X",
+    description:
+      "Configure workflows, layouts and dashboards, query data, and manage work items on the Rise-X platform.",
+  },
+  "rise-x-apps": {
+    label: "Rise-X Apps",
+    description:
+      "Design, build, and deploy federated apps for the Rise-X platform.",
+  },
+};
+
+const skillLabel = (name) => (SKILLS[name] && SKILLS[name].label) || name;
+
+/** Where Locate found the claude binary; see claudecli.Source* in Go. */
+const CLI_SOURCE_LABELS = {
+  path: "On your PATH",
+  "local-bin": "Claude Code installer",
+  "desktop-bundle": "Claude Desktop app",
+  "windows-probe": "Found on this PC",
+};
+
+const CHECK_DOTS = {
+  ok: ["bg-success", "Passed"],
+  warn: ["bg-warning", "Needs attention"],
+  fail: ["bg-error", "Not working"],
+  skip: ["bg-fill-3", "Skipped"],
+};
+
+const CONNECTION = {
+  connected: ["Connected", "success"],
+  needs_auth: ["Sign-in needed", "warning"],
+  failed: ["Not working", "error"],
+  pending: ["Starting up", "default"],
+  not_installed: ["Not installed", "outline"],
+  managed: ["Managed in Claude Desktop", "info"],
+  unknown: ["Unknown", "default"],
+};
+
+/** Where a skill came from, for the Status column's badge. */
+const SOURCE_BADGE = {
+  organisation: () => "Installed by your organisation",
+  marketplace: (plugin) =>
+    `Installed from ${plugin.sourceName || "another marketplace"}`,
+};
+
+const SCOPE_LABELS = {
+  user: "everywhere",
+  local: "one project",
+  desktop: "Claude Desktop",
+};
+
+/* api */
+
+async function api(path, options) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { ...(options && options.headers), "X-RiseX-Token": token },
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = new Error((body && body.error) || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+
+/* state */
+
+let overview = null;
+let checks = null;
+const jobs = []; // newest first
+let drawerOpen = false;
+let poller = null;
+
+function notice(kind, text) {
+  const info = kind === "info";
+  $("kit-notice").innerHTML = `
+    <div data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start ${info ? "border-info/25 bg-info/8" : "border-error/25 bg-error/8"}">
+      ${info ? ICON.info : ICON.alert}
+      <div data-slot="alert-description" class="min-w-0 flex-1 text-xs text-muted-foreground">${esc(text)}</div>
+      ${btn(ICON.close, { act: "notice-dismiss", variant: "ghost", size: "icon-xs", aria: "Dismiss" })}
+    </div>`;
+}
+
+const clearNotice = () => {
+  $("kit-notice").innerHTML = "";
+};
+
+/* actions */
+
+const JOB_TITLES = {
+  "marketplace.add": () => "Add the Rise-X catalog",
+  "marketplace.update": () => "Update the skill catalog",
+  "plugin.install": (b) => `Install ${skillLabel(b.name)}`,
+  "plugin.update": (b) => `Update ${skillLabel(b.name)}`,
+  "plugin.uninstall": (b) => `Remove ${skillLabel(b.name)}`,
+  "cli.install": () => "Install Claude Code",
+  "mcp.login": () => "Sign in to Rise-X",
+  "mcp.fix": (b) =>
+    b.name ? `Update the address for ${b.name}` : "Update old Rise-X addresses",
+};
+
+/**
+ * runAction posts one action. A job action opens the activity drawer and
+ * starts polling; a sync action returns its result for the caller to report.
+ */
+async function runAction(name, body, button) {
+  const payload = body || {};
+  if (button) button.disabled = true;
+  clearNotice();
+  try {
+    const result = await api(`/api/actions/${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (result && result.jobId) {
+      jobs.unshift({
+        id: result.jobId,
+        title: (JOB_TITLES[name] || (() => name))(payload),
+        subtitle: payload.name || "",
+        lines: [],
+        since: 0,
+        status: "running",
+        startedAt: new Date().toISOString(),
+      });
+      drawerOpen = true;
+      renderJobs();
+      startPolling(jobs[0]);
+    }
+    return result;
+  } catch (err) {
+    notice(
+      "error",
+      err.status === 409 ? "Another change is still running." : err.message,
+    );
+    throw err;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function startPolling(job) {
+  clearInterval(poller);
+  poller = setInterval(async () => {
+    let snap;
+    try {
+      snap = await api(
+        `/api/jobs/${encodeURIComponent(job.id)}?since=${job.since}`,
+      );
+    } catch (err) {
+      clearInterval(poller);
+      poller = null;
+      job.status = "failed";
+      job.error = err.message;
+      renderJobs();
+      notice("error", err.message);
+      return;
+    }
+    for (const line of snap.log || []) {
+      job.lines.push(line.text);
+      job.since = line.seq;
+    }
+    job.status = snap.job.status;
+    job.startedAt = snap.job.startedAt;
+    job.finishedAt = snap.job.finishedAt;
+    job.error = snap.job.error || "";
+    renderJobs();
+    if (snap.job.status === "running") return; // still going: keep polling
+    clearInterval(poller);
+    poller = null;
+    if (job.status === "failed")
+      notice("error", job.error || `${job.title} did not finish.`);
+    refresh();
+  }, 500);
+}
+
+/* render */
+
+function renderVersion() {
+  const badge = $("kit-version");
+  badge.textContent = overview.kitVersion || "";
+  badge.hidden = !overview.kitVersion;
+}
+
+function renderBanner() {
+  $("kit-banner").innerHTML = overview.reloadHint
+    ? `<div data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs border-info/25 bg-info/8 items-start">
+        ${ICON.info}
+        <div class="min-w-0 flex-1">
+          <div data-slot="alert-title" class="mb-px text-ui font-medium">Your changes are ready to load</div>
+          <div data-slot="alert-description" class="text-xs text-muted-foreground">
+            Restart Claude Code Desktop, or type
+            <kbd data-slot="kbd" class="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-sm bg-fill-2 px-1 font-sans text-[10px] font-medium text-current select-none">/reload-plugins</kbd>
+            in a session, to load the changes.
+          </div>
+        </div>
+        ${btn(ICON.close, { act: "banner-dismiss", variant: "ghost", size: "icon-xs", aria: "Dismiss" })}
+      </div>`
+    : "";
+}
+
+/**
+ * listItem renders one row of a bordered list. The CLI facts, the connection
+ * targets and the doctor checks all use it, so they cannot drift apart.
+ */
+function listItem({ dot, name, code, description, detail, trailing, muted }) {
+  return `
+    <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+      ${dot || ""}
+      <div data-slot="list-main" class="min-w-0 flex-1">
+        <span data-slot="list-name" class="flex items-center gap-2 text-ui${muted ? " text-muted-foreground" : ""}">${esc(name)}${code ? `<span class="text-micro text-subtle font-mono">${esc(code)}</span>` : ""}</span>
+        ${description ? `<span data-slot="list-description" class="mt-0.5 block text-xs ${muted ? "text-subtle" : "text-muted-foreground"}">${esc(description)}</span>` : ""}
+        ${detail ? lines(detail) : ""}
+      </div>
+      ${trailing || ""}
+    </div>`;
+}
+
+/** lines shows the exact entries a fix would change, collapsed by default. */
+function lines(detail) {
+  return `
+    <details data-slot="collapsible" class="mt-1">
+      <summary data-slot="collapsible-trigger" class="${btnClass("ghost", "xs")} w-fit list-none px-1">
+        Show lines
+        <svg viewBox="0 0 24 24" ${STROKE}>${ICON.chevronDown}</svg>
+      </summary>
+      <pre data-slot="collapsible-content" class="kit-log mt-1.5 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground">${esc(detail)}</pre>
+    </details>`;
+}
+
+function renderCli() {
+  const cli = overview.cli;
+
+  if (cli && cli.found) {
+    const sourceLabel = CLI_SOURCE_LABELS[cli.source];
+    $("kit-cli-badge").innerHTML = badge("success", "Ready");
+    $("kit-cli-body").innerHTML = `
+      <div data-slot="list" class="flex flex-col rounded-lg border border-border-subtle">
+        ${listItem({ name: "Location", trailing: `<span data-slot="list-value" class="shrink-0 text-ui text-muted-foreground font-mono text-xs">${esc(cli.path)}</span>` })}
+        ${listItem({ name: "Version", trailing: `<span data-slot="list-value" class="shrink-0 text-ui tabular-nums">${esc(cli.version)}</span>` })}
+        ${sourceLabel ? listItem({ name: "Found in", trailing: badge("default", sourceLabel) }) : ""}
+      </div>`;
+    return;
+  }
+
+  $("kit-cli-badge").innerHTML = badge("error", "Not found");
+  $("kit-cli-body").innerHTML = `
+    <div data-slot="empty-state" class="flex flex-col items-center gap-[3px] px-4 text-center py-14 rounded-lg bg-fill-0">
+      <span data-slot="empty-state-glyph" class="mb-[5px] grid size-8 place-items-center rounded-lg bg-muted text-subtle">${ICON.terminal}</span>
+      <div data-slot="empty-state-title" class="text-ui font-medium">Claude Code command-line tool not found</div>
+      <div data-slot="empty-state-description" class="max-w-[42ch] text-xs text-muted-foreground">
+        Kit needs it to manage your skills. Installing takes about a minute and does not change anything else on your machine.
+      </div>
+      <div data-slot="empty-state-actions" class="mt-3 flex items-center gap-2">
+        ${btn("Install Claude Code", { act: "cli-install", size: "sm" })}
+        ${btn("Rescan", { act: "cli-rescan", variant: "outline", size: "sm" })}
+      </div>
+    </div>`;
+}
+
+const CELL =
+  "border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap";
+
+function skillStatus(plugin) {
+  const skillBtn = (label, op, variant, data) =>
+    btn(label, {
+      act: "skill",
+      variant,
+      data: { op, name: plugin.name, ...data },
+    });
+  const remove = skillBtn("Remove", "uninstall", "destructive");
+
+  if (!plugin.installed) {
+    return {
+      badge: badge("outline", "Not installed"),
+      actions: skillBtn("Install", "install", "default"),
+    };
+  }
+
+  if (!plugin.enabled) {
+    // Removing a copy that came from elsewhere is not this page's to offer.
+    return {
+      badge: badge("outline", "Turned off"),
+      actions: plugin.installSource === "public" ? remove : "",
+    };
+  }
+
+  // A copy from the organisation or another marketplace must not be installed,
+  // updated or removed from the public one: that would leave two copies.
+  const sourceLabel = SOURCE_BADGE[plugin.installSource];
+  if (sourceLabel) {
+    const behind = plugin.updateAvailable
+      ? plugin.installSource === "organisation"
+        ? `Your organisation's copy is ${plugin.localVersion}; public is ${plugin.publicVersion}`
+        : `This copy is ${plugin.localVersion}; public is ${plugin.publicVersion}`
+      : "";
+    return {
+      badge: badge("info", sourceLabel(plugin)),
+      note: behind,
+      actions:
+        plugin.installSource === "marketplace" && plugin.updateAvailable
+          ? skillBtn("Update", "update", "default", {
+              marketplace: plugin.sourceName || "",
+            })
+          : "",
+    };
+  }
+
+  if (plugin.versionUnknown || !plugin.localVersion) {
+    return {
+      badge: badge("default", "Version unknown"),
+      actions: `${skillBtn("Reinstall", "update", "outline")}${remove}`,
+    };
+  }
+
+  const canUpdate = !!plugin.updateAvailable;
+  const actions = canUpdate
+    ? `${skillBtn("Update", "update", "default")}${remove}`
+    : remove;
+
+  // The public version is unverified in both branches below, so neither may
+  // claim "Up to date": the comparison only means something once it is.
+  if (plugin.publicCheckError) {
+    return {
+      badge: badge("warning", "Check failed", {
+        title: plugin.publicCheckError,
+      }),
+      actions,
+    };
+  }
+  if (plugin.offline) {
+    return { badge: badge("default", "Not checked"), actions };
+  }
+  if (canUpdate) {
+    return { badge: badge("warning", "Update available"), actions };
+  }
+  return { badge: badge("success", "Up to date"), actions };
+}
+
+function renderSkills() {
+  const plugins = overview.plugins || [];
+
+  $("kit-skills-body").innerHTML = plugins.length
+    ? plugins.map(skillRow).join("")
+    : `<tr><td colspan="5" class="px-4 py-10 text-center text-xs text-muted-foreground">${
+        overview.cli && overview.cli.found
+          ? "No Rise-X skills in the catalog yet."
+          : "Install Claude Code to see your Rise-X skills."
+      }</td></tr>`;
+
+  renderSkillsFooter();
+}
+
+function skillRow(plugin, i) {
+  const { badge, note, actions } = skillStatus(plugin);
+  const description =
+    plugin.description ||
+    (SKILLS[plugin.name] && SKILLS[plugin.name].description) ||
+    "";
+  const installed = !plugin.installed
+    ? '<span class="text-subtle">&mdash;</span>'
+    : plugin.localVersion
+      ? `<span class="tabular-nums">${esc(plugin.localVersion)}</span>`
+      : '<span class="text-subtle">Unknown</span>';
+  const published = plugin.publicVersion
+    ? `<span class="tabular-nums">${esc(plugin.publicVersion)}</span>${plugin.offline ? ' <span class="text-micro text-subtle">from your copy</span>' : ""}`
+    : '<span class="text-subtle">&mdash;</span>';
+  const descId = `skill-desc-${i}`;
+
+  return `
+    <tr data-slot="table-row" class="transition-colors duration-150 ease-decelerate hover:bg-fill-0">
+      <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle">
+        <div data-slot="table-cell-stack" class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="text-ui font-medium">${esc(skillLabel(plugin.name))}</span>
+            <span class="text-micro text-subtle font-mono">${esc(plugin.name)}</span>
+            ${
+              description
+                ? `<span class="kit-info-trigger" tabindex="0" role="img" aria-label="About this skill" aria-describedby="${descId}" data-tip="${esc(description)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></span>
+                   <span id="${descId}" class="sr-only">${esc(description)}</span>`
+                : ""
+            }
+          </div>
+        </div>
+      </td>
+      <td data-slot="table-cell" class="${CELL} tabular-nums">${installed}</td>
+      <td data-slot="table-cell" class="${CELL} tabular-nums">${published}</td>
+      <td data-slot="table-cell" class="${CELL}">
+        <div class="flex flex-col items-start gap-1">
+          ${badge}
+          ${note ? `<span class="kit-wrap max-w-[42ch] text-micro text-muted-foreground">${esc(note)}</span>` : ""}
+        </div>
+      </td>
+      <td data-slot="table-cell" class="${CELL}"><div class="flex items-center gap-1.5 kit-end">${actions}</div></td>
+    </tr>`;
+}
+
+function catalogStatus(marketplace) {
+  const update = btn("Update catalog", {
+    act: "catalog-update",
+    variant: "outline",
+  });
+
+  if (!marketplace.registered) {
+    return `<span class="inline-flex items-center gap-2">
+      <span class="inline-flex items-center gap-1.5">${dot("bg-error", "Not set up")} The Rise-X catalog is not set up yet</span>
+      ${btn("Set it up", { act: "marketplace-add" })}
+    </span>`;
+  }
+  if (marketplace.headStale === true) {
+    return `<span class="inline-flex items-center gap-2">
+      <span class="inline-flex items-center gap-1.5">${dot("bg-warning", "Behind")} A newer catalog is available</span>
+      ${update}
+    </span>`;
+  }
+  if (marketplace.headStale === false) {
+    return `<span class="inline-flex items-center gap-1.5">${dot("bg-success", "Current")} Catalog: current</span>`;
+  }
+  return `<span class="inline-flex items-center gap-2">
+    <span class="inline-flex items-center gap-1.5">${dot("bg-fill-3", "Not checked")} Kit could not reach GitHub to check the catalog</span>
+    ${update}
+  </span>`;
+}
+
+/** True once every catalog plugin comes from the organisation: nothing on this
+ * machine reads the public marketplace's autoUpdate flag, so the checkbox
+ * that controls it has nothing to do. Mirrors doctor.allFromOrg. */
+function isOrgManaged(ov) {
+  const plugins = ov.plugins || [];
+  return (
+    plugins.length > 0 &&
+    plugins.every((p) => p.installSource === "organisation")
+  );
+}
+
+const ORG_MANAGED_TIP =
+  "Your organisation installs and updates Rise-X skills through its own marketplace, so this setting is not used on this machine.";
+
+function renderSkillsFooter() {
+  const marketplace = overview.marketplace || {};
+  const on = marketplace.autoUpdate === true;
+  const disabled = isOrgManaged(overview);
+
+  $("kit-skills-footer").innerHTML = `
+    <div class="min-w-0 flex-1">${catalogStatus(marketplace)}</div>
+    <div data-slot="choice-row" class="flex items-start gap-2.5 shrink-0"${disabled ? ` data-tip="${esc(ORG_MANAGED_TIP)}" title="${esc(ORG_MANAGED_TIP)}"` : ""}>
+      <button
+        type="button" role="checkbox" data-act="autoupdate" id="kit-autoupdate"
+        aria-checked="${on}" data-state="${on ? "checked" : "unchecked"}" ${on ? "data-checked" : ""}
+        ${disabled ? 'disabled data-disabled="" aria-disabled="true" aria-describedby="autoupdate-tip"' : ""}
+        data-slot="checkbox"
+        class="peer size-[15px] mt-0.5 shrink-0 rounded-[4px] border border-input bg-card transition-colors duration-100 outline-none focus-visible:ring-3 focus-visible:ring-ring-control/35 disabled:cursor-not-allowed disabled:opacity-45 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground flex items-center justify-center"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" class="size-3" aria-hidden="true" ${on ? "" : "hidden"}><path d="M20 6 9 17l-5-5"/></svg>
+      </button>
+      <div class="min-w-0 peer-disabled:cursor-not-allowed peer-disabled:opacity-50">
+        <div class="flex items-center gap-1.5">
+          <label for="kit-autoupdate" data-slot="label" class="text-ui font-medium text-foreground select-none">Keep Rise-X skills up to date automatically</label>
+          ${disabled ? `<span id="autoupdate-tip" class="sr-only">${esc(ORG_MANAGED_TIP)}</span>` : ""}
+        </div>
+        <span class="mt-0.5 block text-micro text-subtle">${disabled ? "Managed by your organisation." : "Claude Code refreshes the catalog and updates installed skills after each session starts."}</span>
+      </div>
+    </div>`;
+}
+
+/** MOVED_NOTE explains a connector that predates the mcp.rise-x.io addresses. */
+const MOVED_NOTE =
+  'Connectors added in Claude Desktop before the move to mcp.rise-x.io still point at the old address; remove them in <strong class="font-medium text-foreground">Settings</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> and add the new one.';
+
+const GUIDE_STEPS = [
+  'Open <strong class="font-medium text-foreground">Claude Code Desktop</strong> &rsaquo; <strong class="font-medium text-foreground">Settings</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> &rsaquo; <strong class="font-medium text-foreground">Add custom connector</strong>.',
+  "Paste the name and address from the rows above. Leave the headers empty.",
+  'Sign in when the browser opens, then come back here and press <strong class="font-medium text-foreground">Recheck</strong>.',
+];
+
+function connectionRows(mcp) {
+  const configured = mcp.configured || [];
+  const rows = configured.length
+    ? configured.map((s) => ({ name: s.name, target: s.url || s.command }))
+    : (mcp.servers || []).map((s) => ({ name: s.name, target: s.target }));
+
+  return rows
+    .map((row) =>
+      listItem({
+        name: row.name,
+        description: /test/i.test(row.name)
+          ? "A safe copy for trying things out"
+          : "Your live Rise-X environment",
+        trailing:
+          `<span class="shrink-0 font-mono text-xs text-muted-foreground">${esc(row.target)}</span>` +
+          btn(ICON.copy, {
+            act: "copy",
+            variant: "ghost",
+            size: "icon-sm",
+            data: { copy: row.target },
+            aria: `Copy ${row.target}`,
+          }),
+      }),
+    )
+    .join("");
+}
+
+/** staleRows lists each connection still on an old Rise-X address. */
+function staleRows(stale) {
+  return stale
+    .map((entry) =>
+      listItem({
+        dot: dot("bg-warning", "Old address"),
+        name: entry.name,
+        code: SCOPE_LABELS[entry.scope] || entry.scope,
+        description: `${entry.url} → ${entry.suggestedUrl}`,
+        trailing:
+          entry.scope === "desktop"
+            ? '<span class="kit-wrap max-w-[42ch] shrink-0 text-right text-xs text-muted-foreground">Update this one in Claude Desktop &rsaquo; Settings &rsaquo; Connectors.</span>'
+            : btn("Fix", {
+                act: "mcp-fix",
+                variant: "outline",
+                cls: "shrink-0",
+                data: {
+                  name: entry.name,
+                  scope: entry.scope,
+                  project: entry.projectPath || "",
+                },
+              }),
+      }),
+    )
+    .join("");
+}
+
+function renderConnection() {
+  const mcp = overview.mcp || { verdict: "unknown" };
+  const [label, variant] = CONNECTION[mcp.verdict] || CONNECTION.unknown;
+  $("kit-conn-badge").innerHTML = badge(variant, label);
+
+  const rows = connectionRows(mcp);
+  const managed = mcp.verdict === "managed";
+  // The bare .mcp.json name is what the server accepts; mcp.servers holds the
+  // prefixed session names (plugin:rise-x-mcp:...), which it rejects.
+  const signIn = managed
+    ? ""
+    : (mcp.configured || []).map((s) => s.name).filter(Boolean)[0];
+
+  const guide = managed
+    ? `<div class="rounded-lg bg-fill-0 p-3.5">
+         <div class="text-xs font-medium text-foreground">Managed in Claude Desktop</div>
+         <div class="mt-1 text-xs text-muted-foreground">
+           Claude Desktop set these up from your account, so Kit cannot check them from here.
+           Open <strong class="font-medium text-foreground">Settings</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> to see whether they are signed in.
+         </div>
+       </div>`
+    : `<div class="rounded-lg bg-fill-0 p-3.5">
+         <div class="text-xs font-medium text-foreground">Add it in Claude Code Desktop</div>
+         <ol class="mt-2.5 flex flex-col gap-2">${GUIDE_STEPS.map(
+           (step, i) => `<li class="flex items-start gap-2.5">
+             <span class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-fill-2 text-micro font-medium text-muted-foreground tabular-nums">${i + 1}</span>
+             <span class="text-xs text-muted-foreground">${step}</span>
+           </li>`,
+         ).join("")}</ol>
+         <div class="mt-2.5 text-xs text-muted-foreground">${MOVED_NOTE}</div>
+       </div>`;
+
+  const stale = mcp.stale || [];
+  const staleBlock = stale.length
+    ? `<div data-slot="list" class="flex flex-col rounded-lg border border-warning/30">
+         <div class="border-b border-border-subtle px-3.5 py-2.5 text-xs font-medium text-foreground">Old Rise-X addresses</div>
+         ${staleRows(stale)}
+       </div>`
+    : "";
+
+  const body = rows
+    ? `<div data-slot="list" class="flex flex-col rounded-lg border border-border-subtle">${rows}</div>
+       ${staleBlock}
+       ${guide}`
+    : `${staleBlock}
+       <div class="rounded-lg bg-fill-0 px-3.5 py-3 text-xs text-muted-foreground">
+         Install the Rise-X skill above, then its connection details appear here.
+       </div>`;
+
+  $("kit-conn-body").innerHTML = `
+    ${body}
+    <div class="flex items-center gap-2">
+      ${btn(`${ICON.refresh}Recheck`, { act: "recheck", variant: "outline", size: "sm" })}
+      ${btn("Try sign-in from here", {
+        act: "mcp-login",
+        variant: "ghost",
+        size: "sm",
+        data: { server: signIn || "" },
+        disabled: !signIn,
+        title: signIn
+          ? ""
+          : managed
+            ? "Claude Desktop manages these connections."
+            : "Install the Rise-X skill first.",
+      })}
+      ${badge("outline", "Experimental", { cls: "text-subtle" })}
+    </div>
+    ${
+      mcp.raw
+        ? `<details data-slot="collapsible">
+             <summary data-slot="collapsible-trigger" class="${btnClass("ghost", "sm")} w-fit list-none">
+               Show raw check output
+               <svg viewBox="0 0 24 24" ${STROKE}>${ICON.chevronDown}</svg>
+             </summary>
+             <div data-slot="collapsible-content" class="mt-2 rounded-lg bg-fill-0 px-3.5 py-3">
+               <pre class="kit-log text-muted-foreground">${esc(mcp.raw.trim())}</pre>
+             </div>
+           </details>`
+        : ""
+    }`;
+}
+
+function checkAction(check) {
+  if (check.fix) {
+    return btn("Fix", {
+      act: "fix",
+      variant: "outline",
+      cls: "shrink-0",
+      data: {
+        fix: check.fix,
+        args: JSON.stringify(check.fixArgs || {}),
+        detail: check.detail || "",
+      },
+    });
+  }
+  if (check.id === "node" && check.status !== "ok") {
+    return `<a href="https://nodejs.org/en/download" target="_blank" rel="noreferrer noopener" data-slot="button" data-variant="ghost" data-size="xs" class="${btnClass("ghost", "xs")} shrink-0">How to install${ICON.external}</a>`;
+  }
+  return "";
+}
+
+function renderDoctor() {
+  $("kit-doctor-desc").textContent =
+    `${checks.length} checks, run just now. Anything that needs you has a button next to it.`;
+
+  $("kit-doctor-list").innerHTML = checks
+    .map((check) => {
+      const [dotClass, dotTitle] = CHECK_DOTS[check.status] || CHECK_DOTS.skip;
+      const isSkill = check.id.startsWith("plugin.");
+      return listItem({
+        dot: dot(dotClass, dotTitle),
+        name: check.title,
+        code: isSkill ? check.id.slice("plugin.".length) : "",
+        description: sentence(check.message),
+        detail: check.detail,
+        trailing: checkAction(check),
+        muted: check.status === "skip",
+      });
+    })
+    .join("");
+}
+
+function seconds(job) {
+  if (!job.startedAt || !job.finishedAt) return "";
+  const ms = new Date(job.finishedAt) - new Date(job.startedAt);
+  return `${Math.max(1, Math.round(ms / 1000))} s`;
+}
+
+function jobItem(job) {
+  const failed = job.status === "failed";
+  const running = job.status === "running";
+  const glyph = running
+    ? SPINNER
+    : dot(failed ? "bg-error" : "bg-success", failed ? "Failed" : "Done");
+  const right = running
+    ? ""
+    : failed
+      ? '<span class="text-xs text-error-text">Failed</span>'
+      : `<span class="text-xs text-muted-foreground">Done in <span class="tabular-nums">${seconds(job)}</span></span>`;
+
+  return `
+    <div data-slot="item" class="flex flex-col rounded-lg border border-border-subtle p-3.5">
+      <div class="flex items-center gap-2.5">
+        ${glyph}
+        <span data-slot="item-title" class="text-ui font-medium">${esc(job.title)}</span>
+        ${job.subtitle ? `<span class="text-micro text-subtle font-mono">${esc(job.subtitle)}</span>` : ""}
+        <span class="flex-1"></span>
+        ${right}
+      </div>
+      ${failed && job.error ? `<div class="mt-1.5 text-xs text-error-text">${esc(job.error)}</div>` : ""}
+      ${job.lines.length ? `<pre class="kit-log mt-2.5 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground" data-job-log="${esc(job.id)}">${esc(job.lines.join("\n"))}</pre>` : ""}
+    </div>`;
+}
+
+function renderJobs() {
+  const running = jobs.find((job) => job.status === "running");
+  const finished = jobs.length - (running ? 1 : 0);
+
+  $("kit-jobs-glyph").innerHTML = running
+    ? SPINNER
+    : dot(finished ? "bg-success" : "bg-fill-3", finished ? "Done" : "Idle");
+  $("kit-jobs-summary").textContent = running
+    ? `${running.title}…`
+    : finished
+      ? `${finished} finished`
+      : "Nothing yet";
+
+  const badge = $("kit-jobs-badge");
+  badge.hidden = !running || !finished;
+  badge.textContent = String(finished);
+
+  $("kit-jobs-toggle").setAttribute("aria-expanded", String(drawerOpen));
+  $("kit-jobs-chevron").innerHTML = drawerOpen
+    ? ICON.chevronDown
+    : ICON.chevronUp;
+
+  const panel = $("kit-jobs-panel");
+  panel.hidden = !drawerOpen;
+  if (!drawerOpen) return;
+
+  panel.innerHTML = jobs.length
+    ? jobs.map(jobItem).join("")
+    : '<div class="rounded-lg border border-border-subtle px-3.5 py-2.5 text-xs text-muted-foreground">Nothing has run yet in this session.</div>';
+
+  if (running) {
+    const log = panel.querySelector(
+      `[data-job-log="${CSS.escape(running.id)}"]`,
+    );
+    if (log) log.scrollTop = log.scrollHeight;
+  }
+}
+
+/* load */
+
+async function loadOverview() {
+  overview = await api("/api/overview");
+  renderVersion();
+  renderBanner();
+  renderCli();
+  renderSkills();
+  renderConnection();
+}
+
+async function loadDoctor() {
+  checks = (await api("/api/doctor")).checks || [];
+  renderDoctor();
+}
+
+async function refresh() {
+  try {
+    await Promise.all([loadOverview(), loadDoctor()]);
+  } catch (err) {
+    notice("error", `Could not read this machine: ${err.message}`);
+  }
+}
+
+/* clipboard */
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand("copy");
+    area.remove();
+    return copied;
+  }
+}
+
+async function flashCopied(button, text) {
+  if (!(await copyText(text))) {
+    notice("error", "Could not copy. Select the address and copy it by hand.");
+    return;
+  }
+  const original = button.innerHTML;
+  button.innerHTML = ICON.check;
+  setTimeout(() => {
+    button.innerHTML = original;
+  }, 1200);
+}
+
+/* interactions */
+
+function paintCheckbox(button, on) {
+  button.setAttribute("aria-checked", String(on));
+  button.dataset.state = on ? "checked" : "unchecked";
+  button.toggleAttribute("data-checked", on);
+  button.querySelector("svg").hidden = !on;
+}
+
+function toggleAutoUpdate(button) {
+  const next = button.getAttribute("aria-checked") !== "true";
+  paintCheckbox(button, next);
+  button.disabled = true;
+  const marketplace = (overview.marketplace || {}).autoUpdateMarketplace;
+  return runAction("autoupdate.set", { enabled: next, marketplace })
+    .then((result) => {
+      notice(
+        "info",
+        `Automatic updates are ${next ? "on" : "off"}. Your previous settings file is saved at ${result.backup}.`,
+      );
+      return refresh();
+    })
+    .catch(() => paintCheckbox(button, !next))
+    .finally(() => {
+      button.disabled = false;
+    });
+}
+
+function stopped() {
+  clearInterval(poller);
+  document.querySelector("header").hidden = true;
+  $("kit-activity").hidden = true;
+  $("kit-main").innerHTML = `
+    <div data-slot="empty-state" class="flex flex-col items-center gap-[3px] px-4 text-center py-14 rounded-xl bg-card shadow-card">
+      <div data-slot="empty-state-title" class="text-ui font-medium">Rise-X Kit has stopped</div>
+      <div data-slot="empty-state-description" class="text-xs text-muted-foreground">You can close this tab.</div>
+    </div>`;
+}
+
+function runFix(button) {
+  const name = button.dataset.fix;
+  const args = JSON.parse(button.dataset.args || "{}");
+  if (name === "npmrc.clean") {
+    const detail = button.dataset.detail;
+    const question = detail
+      ? `Remove these lines from ~/.npmrc?\n\n${detail}`
+      : "Remove the old Rise-X registry lines from ~/.npmrc?";
+    if (!confirm(question)) return undefined;
+    args.confirm = true;
+  }
+  return runAction(name, args, button).then((result) => {
+    if (!result || result.jobId) return undefined;
+    if (name === "autoupdate.set") {
+      notice(
+        "info",
+        `Automatic updates are on. Your previous settings file is saved at ${result.backup}.`,
+      );
+    } else if (name === "npmrc.clean") {
+      const removed = result.removed || [];
+      notice(
+        "info",
+        `Removed ${removed.length} line(s) from ~/.npmrc. Your previous file is saved at ${result.backup}.`,
+      );
+      // npmrc.clean is synchronous (no jobId), so the drawer entry is built
+      // here instead of via startPolling, to show the masked removed lines.
+      jobs.unshift({
+        id: `local-${Date.now()}`,
+        title: "Clean up ~/.npmrc",
+        subtitle: "",
+        lines: removed.length ? ["Removed:", ...removed] : [],
+        since: 0,
+        status: "succeeded",
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      });
+      drawerOpen = true;
+      renderJobs();
+    }
+    return refresh();
+  });
+}
+
+/** simple wraps an action that posts nothing but an empty body. */
+const simple = (action) => (button) => runAction(action, {}, button);
+
+const ACTIONS = {
+  refresh: () => refresh(),
+  recheck: () => refresh(),
+  "doctor-again": () => loadDoctor(),
+  "notice-dismiss": () => clearNotice(),
+  "banner-dismiss": () => {
+    overview.reloadHint = false;
+    renderBanner();
+  },
+  "jobs-toggle": () => {
+    drawerOpen = !drawerOpen;
+    renderJobs();
+  },
+  quit: (button) => runAction("quit", {}, button).then(stopped),
+  "cli-install": simple("cli.install"),
+  "cli-rescan": (button) =>
+    runAction("cli.rescan", {}, button).then((result) => {
+      notice(
+        "info",
+        result.found
+          ? "Found Claude Code."
+          : "Still cannot find Claude Code on this machine.",
+      );
+      return refresh();
+    }),
+  "catalog-update": simple("marketplace.update"),
+  "marketplace-add": simple("marketplace.add"),
+  "mcp-login": (button) =>
+    runAction("mcp.login", { server: button.dataset.server }, button),
+  "mcp-fix": (button) => {
+    const { name, scope, project } = button.dataset;
+    return runAction(
+      "mcp.fix",
+      { name, scope, projectPath: project || undefined },
+      button,
+    );
+  },
+  autoupdate: (button) => toggleAutoUpdate(button),
+  copy: (button) => flashCopied(button, button.dataset.copy),
+  skill: (button) => {
+    const { op, name, marketplace } = button.dataset;
+    if (
+      op === "uninstall" &&
+      !confirm(
+        `Remove ${skillLabel(name)}? Claude Code will no longer have its skills.`,
+      )
+    ) {
+      return undefined;
+    }
+    return runAction(`plugin.${op}`, { name, marketplace }, button);
+  },
+  fix: runFix,
+};
+
+function onClick(event) {
+  const button = event.target.closest("[data-act]");
+  if (!button) return;
+  const handler = ACTIONS[button.dataset.act];
+  if (!handler) return;
+  const result = handler(button);
+  // runAction rethrows so callers can chain; the notice is already shown.
+  if (result && result.catch) result.catch(() => {});
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("click", onClick);
+  renderJobs();
+  refresh();
+});
