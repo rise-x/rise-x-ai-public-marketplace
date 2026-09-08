@@ -1,19 +1,17 @@
 name: kit-ci
 
 on:
+  # No `branches` filter on purpose: kit PRs target the open release-kit/*
+  # branch, and the release PR from it targets main, so both have to run.
   pull_request:
     paths:
       - 'kit/**'
       - '.github/workflows/kit-*.yml'
   push:
-    # GitHub ignores `paths` for tag pushes (it only gates branch pushes), so
-    # listing `kit-v*` here is enough on its own to make a release tag always
-    # run CI; `branches` must stay explicit too, since naming `tags` without
-    # it would otherwise drop ordinary branch pushes from this trigger.
+    # Release tags are created by kit-release.yml through the API, which
+    # starts no workflows, so there is nothing to gain from a tags filter.
     branches:
       - '**'
-    tags:
-      - 'kit-v*'
     paths:
       - 'kit/**'
       - '.github/workflows/kit-*.yml'
@@ -29,9 +27,22 @@ jobs:
         working-directory: kit
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Full history: the version check below diffs against the PR base.
+          fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: kit/go.mod
+      # Only a PR into main ships anything: merging one is what makes
+      # kit-release cut kit-v<version>. A PR into the open release-kit/*
+      # branch is collecting work for a release that has not happened, so it
+      # needs no bump and this step skips.
+      - name: Check kit version bump
+        if: github.base_ref == 'main'
+        working-directory: ${{ github.workspace }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bash scripts/check-kit-version.sh "origin/$BASE_REF"
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"

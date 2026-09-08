@@ -1,19 +1,37 @@
 name: kit-release
 
-# Builds and publishes rise-x-kit for a tag matching kit-v<semver> (e.g.
-# kit-v0.1.0). macOS notarization only runs once the APPLE_CERT_P12 secret is
-# set; until then the mac binary is ad-hoc signed so Gatekeeper doesn't block
-# it outright.
+# Builds, signs and publishes rise-x-kit. Merging a release-kit/* branch into
+# main IS the kit release: this fires when kit/VERSION changes on main, reads
+# the version out of that file, and cuts the kit-v<version> tag and the GitHub
+# Release itself. Nobody pushes a tag by hand, and there is no separate
+# approval gate here -- the merge into main already carried the release PR's
+# code-owner review.
 #
-# If enterprise policy turns out to forbid Actions from creating releases,
-# publish by hand instead:
-#   gh release create <tag> artifacts/* kit/install.sh kit/install.ps1 \
+# macOS notarization only runs once the APPLE_CERT_P12 secret is set; until
+# then the mac binary is ad-hoc signed so Gatekeeper doesn't block it
+# outright.
+#
+# UNVERIFIED: this enterprise forbids Actions from creating pull requests, and
+# whether the same policy stops Actions from creating tags or releases has not
+# been tested. If the publish step fails on permissions, do it by hand from the
+# merge commit:
+#   v="$(tr -d '[:space:]' < kit/VERSION)"
+#   git tag "kit-v${v}" <merge-sha> && git push origin "kit-v${v}"
+#   gh release create "kit-v${v}" artifacts/* kit/install.sh kit/install.ps1 \
 #     --repo rise-x/rise-x-ai-public-marketplace --generate-notes
+# The kit-tags ruleset (.github/rulesets/kit-tags.json) restricts who may
+# create a kit-v* tag and bypasses the GitHub Actions app for this workflow, so
+# a hand-pushed tag needs a maintainer with bypass rights.
 
 on:
   push:
-    tags:
-      - 'kit-v*'
+    branches:
+      - main
+    paths:
+      - kit/VERSION
+  # Run by hand on main to retry a failed publish, or to ship a version whose
+  # merge predates this workflow. It refuses to run anywhere but main.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,25 +40,46 @@ env:
   GO_MODULE: github.com/rise-x/rise-x-ai-public-marketplace/kit
 
 jobs:
-  guard:
-    # A tag push bypasses the PR-review branch protection on main, since
-    # there is no tag ruleset yet restricting who can push a `kit-v*` tag
-    # (see kit/README.md "For maintainers" for the one-time repo setting that
-    # closes this gap). Refuse to build unless the tagged commit is already
-    # on main.
+  version:
+    # kit/VERSION is the single source of truth for the tag, the release, the
+    # asset names and the binary's own version output. Reading it once, here,
+    # keeps those four from disagreeing.
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # v-prefixed, the way the assets and buildinfo have always spelled it.
+      version: ${{ steps.read.outputs.version }}
+      tag: ${{ steps.read.outputs.tag }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          fetch-depth: 0
-      - name: Verify tag is on main
+
+      - name: Read kit/VERSION and check the tag is free
+        id: read
         run: |
           set -euo pipefail
-          git fetch origin main
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "::error::kit-release publishes from main only, not '${GITHUB_REF_NAME}'"
+            exit 1
+          fi
+          raw="$(tr -d '[:space:]' < kit/VERSION)"
+          if ! [[ "$raw" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::kit/VERSION '${raw}' is not valid semver (expected X.Y.Z, no leading v)"
+            exit 1
+          fi
+          tag="kit-v${raw}"
+          # A re-run, or a merge that set kit/VERSION back to a shipped value,
+          # would otherwise rebuild everything and fail at publish time with
+          # artifacts already uploaded. Refuse up front instead.
+          if [[ -n "$(git ls-remote --tags origin "refs/tags/${tag}")" ]]; then
+            echo "::error::tag ${tag} already exists; raise kit/VERSION for a new kit release"
+            exit 1
+          fi
+          echo "version=v${raw}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${tag} from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
 
   build-mac:
-    needs: guard
+    needs: version
     runs-on: macos-14
     env:
       # `secrets` isn't a legal context in a step `if:`, and the Apple secret
@@ -48,6 +87,7 @@ jobs:
       # test`/`go build`'s environment) -- this boolean is safe at job level;
       # the real values are step-level env on only the steps that need them.
       APPLE_SIGNING: ${{ secrets.APPLE_CERT_P12 != '' }}
+      VERSION: ${{ needs.version.outputs.version }}
     defaults:
       run:
         working-directory: kit
@@ -59,9 +99,6 @@ jobs:
 
       - name: Test
         run: go test -race -count=1 ./...
-
-      - name: Compute version
-        run: echo "VERSION=${GITHUB_REF_NAME#kit-}" >> "$GITHUB_ENV"
 
       - name: Build darwin/arm64
         env:
@@ -140,8 +177,10 @@ jobs:
           path: kit/out/*
 
   build-windows:
-    needs: guard
+    needs: version
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     defaults:
       run:
         working-directory: kit
@@ -150,9 +189,6 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: kit/go.mod
-
-      - name: Compute version
-        run: echo "VERSION=${GITHUB_REF_NAME#kit-}" >> "$GITHUB_ENV"
 
       - name: Build windows/amd64
         env:
@@ -177,9 +213,11 @@ jobs:
           path: kit/out/*
 
   release:
-    needs: [build-mac, build-windows]
+    needs: [version, build-mac, build-windows]
     runs-on: ubuntu-latest
     permissions:
+      # write, because this job creates the tag and the release, not just the
+      # assets.
       contents: write
       id-token: write
       attestations: write
@@ -202,10 +240,19 @@ jobs:
             artifacts/*_darwin_universal.tar.gz
             artifacts/*_windows_amd64.zip
 
+      # action-gh-release creates tag_name at target_commitish when that tag
+      # does not exist, which is how the tag gets cut with nobody pushing one.
+      # It goes through the releases API rather than a git push, so the
+      # kit-tags ruleset sees the GitHub Actions app as the actor.
+      #
+      # Asset names are unchanged from the tag-driven version of this workflow:
+      # kit/install.sh and install.ps1 look for rise-x-kit_<version>_* and
+      # checksums.txt by name.
       - name: Publish release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: |
             artifacts/*

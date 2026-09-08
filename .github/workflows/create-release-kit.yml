@@ -1,0 +1,96 @@
+name: create-release-kit
+
+# Cuts the integration branch for the next kit release.
+#
+# The kit ships on its own track. kit/VERSION is its version source, and
+# merging a release-kit/* branch into main is the release: kit-release.yml
+# sees kit/VERSION change on main and cuts the kit-v<version> tag itself.
+# Unreleased kit work therefore collects on release-kit/<name>, cut here from
+# main, and kit PRs target that branch. Someone opens the draft PR from it
+# into main by hand, once, using the command this workflow prints: the
+# enterprise forbids Actions from creating pull requests. release-kit-pr.yml
+# then refreshes that PR's body on every push.
+#
+# One kit release is open at a time: this refuses to cut while any
+# release-kit/* branch exists, so PR authors never have to guess the target.
+# It says nothing about release/*, which is the plugin track and moves
+# independently — both may be open at once.
+#
+# The branch is pushed with GITHUB_TOKEN, which does not start other
+# workflows (GitHub anti-recursion). That is fine here: a freshly cut branch
+# is level with main, so release-kit-pr.yml would have nothing to report
+# anyway.
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Kit release name; the branch becomes release-kit/<name> (for example 2026-09). Up to 64 characters; letters, digits, dots, dashes, underscores, starting with a letter or digit.'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: create-release-kit
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    name: Cut release-kit/${{ inputs.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$NAME" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'; then
+            echo "::error::name '$NAME' must start with a letter or digit, then up to 63 more letters, digits, dots, dashes, or underscores (for example 2026-09)"
+            exit 1
+          fi
+          # The regex above still admits names git rejects (a.., x.lock, y.),
+          # which would otherwise surface as a raw refspec error mid-push.
+          if ! git check-ref-format "refs/heads/release-kit/${NAME}"; then
+            echo "::error::'release-kit/${NAME}' is not a valid git branch name"
+            exit 1
+          fi
+          open="$(git ls-remote --heads origin 'release-kit/*' | awk '{ sub("refs/heads/", "", $2); print $2 }')"
+          if [[ -n "$open" ]]; then
+            echo "::error::a kit release is already open: ${open//$'\n'/, }. Merge or delete it before cutting another."
+            exit 1
+          fi
+
+      - name: Create and push the release-kit branch
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          branch="release-kit/${NAME}"
+          git push origin "HEAD:refs/heads/${branch}"
+          sha="$(git rev-parse HEAD)"
+          echo "Pushed ${branch} at ${sha}"
+          {
+            echo "## Cut \`${branch}\` at \`${sha}\`"
+            echo
+            echo "1. Open kit PRs against \`${branch}\`, not \`main\`."
+            echo "2. Once it is ahead of \`main\`, open the release PR. Actions may not"
+            echo "   create pull requests in this enterprise, so run this once:"
+            echo
+            echo '```'
+            echo "gh pr create --repo ${GITHUB_REPOSITORY} --base main --head ${branch} --draft --title 'release-kit: ${NAME}'"
+            echo '```'
+            echo
+            echo "   Every later push to \`${branch}\` refreshes that PR's changelog body."
+            echo "3. To release: raise \`kit/VERSION\` on the branch (kit-ci requires it),"
+            echo "   merge \`main\` in if it moved, mark the PR ready for review, get the"
+            echo "   code-owner approval, and merge it with a merge commit. The merge is"
+            echo "   the release: kit-release cuts \`kit-v<version>\` from it."
+            echo "4. Delete \`${branch}\` afterwards so the next cut can run."
+          } >> "$GITHUB_STEP_SUMMARY"

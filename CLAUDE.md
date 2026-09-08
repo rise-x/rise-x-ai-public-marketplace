@@ -173,11 +173,42 @@ Rise-X MCP connection, and run a setup doctor without a terminal. It carries
 no plugin version, is not listed in `marketplace.json`, and never reaches the
 private marketplace.
 
-It releases on its own `kit-v<semver>` tags, which `kit-release.yml` builds
-and publishes; `kit-ci.yml` gates every PR touching `kit/**`. Only a tag ships
-a new kit binary, but merging to `main` still matters here: partners `curl`
-`install.sh` from `main`, so a merge changes the installer they run
-immediately, ahead of the next kit release.
+It has its own release track, independent of `release/*`: a PR touches
+`plugins/**` or `kit/**`, never both.
+
+1. **Cut.** Run the `create-release-kit.yml` workflow (Actions, **Run
+   workflow**). It pushes `release-kit/<name>` from `main`. Only one
+   `release-kit/*` branch may exist at a time; the workflow refuses otherwise.
+2. **Collect.** Open kit PRs against the open `release-kit/<name>` branch.
+   `kit-ci.yml` gates every PR into it.
+3. **Release.** `kit/VERSION` is the single version source for the kit. The
+   PR from `release-kit/*` to `main` must raise it, in strict semver, above
+   the value already on `main`; `kit-ci.yml` enforces that for any PR into
+   `main` by running `scripts/check-kit-version.sh`. Merging that PR with a
+   **merge commit** is the release: the merge pushes the changed
+   `kit/VERSION` to `main`, which triggers `kit-release.yml` to build, sign,
+   tag the commit `kit-v<VERSION>`, and publish the GitHub Release. Nobody
+   pushes a `kit-v*` tag by hand. `install.sh` and `install.ps1` ship from
+   `main` at the same moment, so partners' installers and the new release go
+   live together. `release-kit-pr.yml` keeps that PR's body current, with a
+   heading such as `## rise-x-kit <old> -> <new>`, or `(NOT BUMPED)` while the
+   version hasn't moved yet.
+
+A fix that can't wait for the next kit release goes on a `hotfix/*` branch
+and PRs into `main` directly, the same as for plugins; it still needs to
+raise `kit/VERSION`.
+
+**GitHub settings to import once**, from `.github/rulesets/`:
+`protect-release-kit.json` (pull request, code-owner approval, a passing
+`kit-ci.yml`, no force-push) on `release-kit/*`, and `kit-tags.json` (only
+GitHub Actions can create a `kit-v*` tag). Do not make `kit-ci.yml` a
+required check on `main`: it runs only when a PR touches `kit/**`, and a
+required check that never reports leaves every plugin release PR pending.
+The version bump is enforced by `kit-ci.yml` running on the PR itself.
+Unconfirmed: whether the enterprise policy lets GitHub
+Actions create tags and releases at all. If it doesn't, the fallback is one
+maintainer running `gh release create` by hand, and `kit-tags.json` should
+list maintainers as the allowed tag creators instead.
 
 ## Validate before any PR
 

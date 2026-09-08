@@ -176,28 +176,43 @@ its sha256 no longer matches. Only a maintainer runs either mode, after a
 deliberate `@rise-x/apps-sdk` version bump. The static design mock this UI was
 built from lives at `kit/design/mock.html`.
 
-**Release:** push a tag matching `kit-v<semver>` (for example `kit-v0.1.0`) on
-`main`. `kit-release.yml`'s `guard` job first checks that the tagged commit is
-already on `main`, since there is no tag ruleset yet blocking who can push a
-`kit-v*` tag directly — see "Tag protection" following for the one-time setting
-that closes that gap. The workflow then builds a universal macOS binary (arm64
-and amd64 combined with `lipo`) and a windows/amd64 binary, computes
-`checksums.txt`, attests build provenance for both archives, and publishes the
-binaries, `checksums.txt`, and `install.sh`/`install.ps1` as release assets —
-the same assets the install commands above download. The macOS binary is
-ad-hoc signed today; Developer ID signing and notarization activate once the
-Apple signing secrets are set on the repo. The Windows binary is unsigned until
-Azure Trusted Signing is wired up.
+**Release:** kit changes collect on a `release-kit/<name>` branch, cut from
+`main` by the `create-release-kit.yml` workflow; only one such branch exists
+at a time. When the branch is ready to ship, open a PR from
+`release-kit/<name>` into `main` and raise `kit/VERSION`, in strict semver,
+above the value already on `main`. `kit-ci.yml` blocks the PR otherwise, by
+running `scripts/check-kit-version.sh`, and `release-kit-pr.yml` keeps the
+PR's body current. Merging that PR with a **merge commit**, after the
+required code-owner approval, is the release: `kit-release.yml` runs on the
+`main` push that changed `kit/VERSION`, builds a universal macOS binary
+(arm64 and amd64 combined with `lipo`) and a windows/amd64 binary, computes
+`checksums.txt`, attests build provenance for both archives, tags the commit
+`kit-v<VERSION>`, and publishes the binaries, `checksums.txt`, and
+`install.sh`/`install.ps1` as a GitHub Release. Nobody pushes a `kit-v*` tag
+by hand, and `install.sh`/`install.ps1` on `main` update at the same moment as
+the release. The macOS binary is ad-hoc signed today; Developer ID signing
+and notarization activate once the Apple signing secrets are set on the repo.
+The Windows binary is unsigned until Azure Trusted Signing is wired up.
 
-**Tag protection (one-time GitHub setting):** create a tag ruleset that
-restricts who can push a `kit-v*` tag to maintainers — **Settings** > **Rules**
-> **Rulesets** > **New ruleset** > **New tag ruleset**, target the `kit-v*`
-pattern, and restrict tag creation to the maintainers team. `kit-release.yml`'s
-`guard` job only catches a tag pushed at an unreviewed commit after the fact;
-this setting is what stops the tag push itself.
+**Tag protection (one-time GitHub setting):**
+`.github/rulesets/kit-tags.json` restricts who can create a `kit-v*` tag to
+GitHub Actions, so `kit-release.yml` stays the only path to a new tag. Import
+it once, under **Settings** > **Rules** > **Rulesets** > **New ruleset** >
+**New tag ruleset**. `.github/rulesets/protect-release-kit.json` is the
+matching branch ruleset for `release-kit/*`: pull request, code-owner
+approval, a passing `kit-ci.yml`, no force-push. Whether the enterprise
+policy lets GitHub Actions create tags and releases at all is unconfirmed. If
+it doesn't, the fallback is one maintainer running `gh release create` by
+hand, and the ruleset should list maintainers as the allowed tag creators
+instead.
 
-**Marketplace repo rules that apply here:** target the currently open release
-branch (`release/v1.5.0` at the time of writing) instead of `main`. Changes
-under `kit/` need no plugin version bump, since `scripts/check-version.sh` only
-checks `plugins/`. `claude plugin validate . --strict` must still pass with
-`kit/` present.
+**Hotfix:** a fix that can't wait for the next kit release goes on a
+`hotfix/*` branch and PRs into `main` directly, the same as for plugins; it
+still needs to raise `kit/VERSION`.
+
+**Marketplace repo rules that apply here:** kit PRs no longer target the
+plugin release branch: they have their own `release-kit/*` track (see
+"Release" preceding). Two plugin-repo rules still apply: changes under
+`kit/` need no plugin version bump, since `scripts/check-version.sh` only
+checks `plugins/`, and `claude plugin validate . --strict` must still pass
+with `kit/` present.
