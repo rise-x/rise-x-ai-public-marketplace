@@ -8,6 +8,8 @@ connection and see the exact steps to fix it; turn on automatic updates so skill
 fixes arrive on their own; and run a health check with buttons that fix what it
 finds.
 
+![Rise-X Kit showing the Claude Code, Skills, Rise-X connection and Doctor cards](design/screenshots/app-light.png)
+
 ## Install (partners)
 
 **macOS** — open Terminal and run:
@@ -125,7 +127,6 @@ setting; whether Claude Code honors that setting at user scope isn't confirmed
 yet. Signing in to Rise-X always happens in Claude and your browser, never
 inside Rise-X Kit.
 
-Screenshots: `kit/design/screenshots/`.
 
 ## For maintainers
 
