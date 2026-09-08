@@ -136,6 +136,40 @@ func TestHandler_McpFix_All(t *testing.T) {
 	}
 }
 
+// ~/.claude.json keeps an entry for every project ever opened, so a project
+// directory that is gone must not abort the connections after it.
+func TestHandler_McpFix_All_SkipsMissingProjectDir(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "deleted-project")
+	path := filepath.Join(t.TempDir(), ".claude.json")
+	body := []byte(strings.ReplaceAll(staleClaudeJSON, "PROJECT_PATH", projectPath))
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeCLI(pluginListFixture)
+	for _, args := range [][]string{
+		{"mcp", "remove", "rise-x", "-s", "user"},
+		{"mcp", "add", "--transport", "http", "rise-x", "https://mcp.rise-x.io/mcp", "-s", "user"},
+	} {
+		fake.Set(fakeCLIPath, args, runnertest.Result{Stdout: "ok\n"})
+	}
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath),
+		ClaudeJSONPath: path})
+
+	resp := post(t, baseURL+"/api/actions/mcp.fix", token, nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "succeeded" {
+		t.Fatalf("job status = %q, want succeeded despite the missing project", status)
+	}
+	findCall(t, fake, []string{"mcp", "add", "--transport", "http", "rise-x",
+		"https://mcp.rise-x.io/mcp", "-s", "user"})
+	if calledWith(fake, []string{"mcp", "remove", "rise-x-test", "-s", "local"}) {
+		t.Fatalf("ran in the deleted project: %+v", fake.Calls)
+	}
+}
+
 // Only a connection the scan found may reach the argv.
 func TestHandler_McpFix_UnknownTarget_400(t *testing.T) {
 	baseURL, token, _, _ := staleServer(t)

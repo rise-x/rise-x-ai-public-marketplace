@@ -59,6 +59,9 @@ func locateWindowsBundle(env Env) []string {
 // CLI but are cheap to check when they don't exist, bounded to depth <= 4 so
 // a huge Programs tree can't cause a slow scan, newest-looking path first.
 func locateWindowsProbes(env Env) []string {
+	if env.LocalAppData == "" {
+		return nil // Join would turn the empty root into a relative path
+	}
 	var out []string
 	out = append(out, walkForFile(env, filepath.Join(env.LocalAppData, "Programs", "Claude"), "claude.exe", 4)...)
 	out = append(out, walkForFile(env, filepath.Join(env.LocalAppData, "AnthropicClaude"), "claude.exe", 4)...)

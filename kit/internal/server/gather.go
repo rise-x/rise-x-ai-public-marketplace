@@ -70,7 +70,10 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 
 	// One read of settings.json per gather: both the autoUpdate flag and the
 	// env block come out of it.
-	set, _ := settings.Read(s.settingsPath())
+	set, err := settings.Read(s.settingsPath())
+	if err != nil {
+		facts.SettingsError = oneLine(err.Error())
+	}
 
 	if cli, found := s.cli(ctx); found {
 		overview.CLI = &CLIInfo{Found: true, Path: cli.Path, Version: cli.Version, Source: cli.Source}
@@ -78,6 +81,9 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 		s.gatherClaude(ctx, claudecli.New(cli.Path, s.runner), set, &overview, &facts)
 	} else {
 		overview.CLI = &CLIInfo{Found: false}
+		// Detecting stale addresses needs no CLI, so the connection card must
+		// still show them when there is none to gather the rest.
+		overview.Mcp = &McpInfo{Verdict: string(mcp.VerdictUnknown), Stale: s.staleMcp()}
 	}
 
 	node := s.nodeCache.get(func() nodeProbe {
@@ -113,7 +119,7 @@ func (s *Server) gatherClaude(ctx context.Context, client *claudecli.Client, set
 		mp = findMarketplace(marketplaces, claudecli.MarketplaceName)
 	}
 	facts.MarketplaceRegistered = mp != nil
-	overview.Marketplace = &MarketplaceInfo{Registered: mp != nil}
+	overview.Marketplace = &MarketplaceInfo{Registered: mp != nil, SettingsError: facts.SettingsError != ""}
 
 	plResult, plErr := client.PluginListAvailable(ctx)
 
@@ -212,13 +218,15 @@ func (s *Server) gatherPlugins(ctx context.Context, installLocation string, plRe
 			}
 		}
 
+		localVersion, localDescription, localErr := s.catalog.LocalVersion(installLocation, name)
+
 		v, err := s.catalog.RemoteVersion(ctx, name)
 		switch {
 		case err == nil:
 			pi.PublicVersion = v
 		case unreachable(err):
-			if lv, _, lerr := s.catalog.LocalVersion(installLocation, name); lerr == nil {
-				pi.PublicVersion, pi.Offline = lv, true
+			if localErr == nil {
+				pi.PublicVersion, pi.Offline = localVersion, true
 			}
 		default:
 			pi.PublicCheckError = checkErrorReason(err)
@@ -226,10 +234,8 @@ func (s *Server) gatherPlugins(ctx context.Context, installLocation string, plRe
 
 		// marketplace.json declares no descriptions for the Rise-X plugins, so
 		// fall back to the local clone's own plugin.json.
-		if pi.Description == "" {
-			if _, ld, lerr := s.catalog.LocalVersion(installLocation, name); lerr == nil {
-				pi.Description = ld
-			}
+		if pi.Description == "" && localErr == nil {
+			pi.Description = localDescription
 		}
 
 		pi.UpdateAvailable = pi.LocalVersion != "" && pi.PublicVersion != "" &&
@@ -319,19 +325,36 @@ func findMarketplace(list []claudecli.Marketplace, name string) *claudecli.Marke
 const riseXMcpPlugin = "rise-x-mcp"
 
 // riseXMcpConfig reads the installed rise-x-mcp plugin's bundled .mcp.json.
-// Any read or parse failure reads as "no configured servers".
+// The marketplace half of the ID is not pinned: the same plugin can be
+// installed from a mirror of the public one, and its servers are the same
+// servers. Any read or parse failure reads as "no configured servers".
 func riseXMcpConfig(installed []claudecli.InstalledPlugin) []mcp.ConfiguredServer {
-	for _, ip := range installed {
-		if ip.ID != riseXMcpPlugin+"@"+claudecli.MarketplaceName {
+	var fallback *claudecli.InstalledPlugin
+	for i := range installed {
+		ip := &installed[i]
+		id, market, ok := strings.Cut(ip.ID, "@")
+		if !ok || id != riseXMcpPlugin {
 			continue
 		}
-		cfg, err := mcp.ReadConfig(ip.InstallPath)
-		if err != nil {
-			return nil
+		if market == claudecli.MarketplaceName {
+			return readMcpConfig(ip.InstallPath)
 		}
-		return cfg
+		if fallback == nil {
+			fallback = ip
+		}
 	}
-	return nil
+	if fallback == nil {
+		return nil
+	}
+	return readMcpConfig(fallback.InstallPath)
+}
+
+func readMcpConfig(installPath string) []mcp.ConfiguredServer {
+	cfg, err := mcp.ReadConfig(installPath)
+	if err != nil {
+		return nil
+	}
+	return cfg
 }
 
 func (s *Server) gatherHead(ctx context.Context, mp *claudecli.Marketplace, overview *OverviewResponse, facts *doctor.Facts) {
@@ -412,4 +435,10 @@ func autoupdaterEnv(set settings.Settings) (disable, force bool) {
 func npmrcPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".npmrc")
+}
+
+// oneLine collapses an error message onto a single line, so a JSON syntax
+// error's own newlines don't break the doctor row it's folded into.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }

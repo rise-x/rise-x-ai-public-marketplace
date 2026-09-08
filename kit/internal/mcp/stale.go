@@ -18,11 +18,12 @@ const (
 
 var currentHosts = []string{"mcp.rise-x.io", "mcp-test.rise-x.io"}
 
-// oldHostSuffixes are the addresses Rise-X served MCP from before the move to
-// mcp.rise-x.io; this is the one place to add them. An entry starting with "."
-// is a whole domain other tenants share, so a server there is only reported
-// when its own name or URL also says rise-x. An exact hostname identifies a
-// Rise-X server on its own — see exactStaleHosts for the ones known exactly.
+// oldHostSuffixes are shared domains Rise-X has served MCP from before the
+// move to mcp.rise-x.io (each entry written with its leading "."), such as
+// ".azurecontainerapps.io"; this is the one place to add them. Other tenants
+// use these domains too, so a host ending in one is only a hint — see
+// retiredHost. A host known to be Rise-X's own, no hint needed, belongs in
+// exactStaleHosts instead.
 var oldHostSuffixes = []string{".azurecontainerapps.io"}
 
 // exactStaleHosts are old Rise-X MCP hosts known exactly, each mapped to the
@@ -113,7 +114,10 @@ func remoteEntry(e configuredEntry) bool {
 	}
 }
 
-// isStale reports whether a server points at an address Rise-X has moved off.
+// isStale reports whether a server points at an address Rise-X has moved off:
+// an exactly known Rise-X host, or a shared old-host domain whose name or URL
+// also hints at Rise-X. A partner's own Rise-X MCP server, hosted anywhere
+// else, is never stale.
 func isStale(name, rawURL string) bool {
 	host := hostOf(rawURL)
 	if host == "" || localHost(host) || slices.Contains(currentHosts, host) {
@@ -122,7 +126,7 @@ func isStale(name, rawURL string) bool {
 	if _, ok := exactStaleHosts[host]; ok {
 		return true
 	}
-	return retiredHost(host) || riseXHint(name) || riseXHint(rawURL)
+	return retiredHost(host) && (riseXHint(name) || riseXHint(rawURL))
 }
 
 // SuggestedURL is the current address a stale server should point at: the
@@ -148,13 +152,12 @@ func riseXHint(s string) bool {
 		strings.Contains(s, "rise_x")
 }
 
-// retiredHost reports whether host is one Rise-X itself has moved off.
+// retiredHost reports whether host lives on one of oldHostSuffixes' shared
+// domains. A match is a hint the host is old, not proof by itself — isStale
+// also requires a Rise-X name/URL hint before calling it stale.
 func retiredHost(host string) bool {
 	for _, suffix := range oldHostSuffixes {
-		if strings.HasPrefix(suffix, ".") {
-			continue // a shared domain never identifies a server on its own
-		}
-		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+		if strings.HasSuffix(host, suffix) {
 			return true
 		}
 	}

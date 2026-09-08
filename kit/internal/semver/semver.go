@@ -8,6 +8,16 @@ import (
 	"strings"
 )
 
+// Short keeps the version number and drops anything the binary appends after a
+// space, so "2.1.258 (Claude Code)" reads as "2.1.258".
+func Short(v string) string {
+	v = strings.TrimSpace(v)
+	if first, _, ok := strings.Cut(v, " "); ok {
+		return first
+	}
+	return v
+}
+
 // VersionParts splits v into its numeric segments, ignoring a leading "v" and
 // anything after the first space ("2.1.258 (Claude Code)"). A non-numeric
 // segment counts as 0.

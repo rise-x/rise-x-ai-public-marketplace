@@ -88,6 +88,21 @@ func TestRun_AutoUpdateMissing(t *testing.T) {
 	}
 }
 
+// An unreadable settings.json can't tell present from absent, so the row must
+// warn about the file rather than claim automatic updates are off.
+func TestRun_AutoUpdate_SettingsError(t *testing.T) {
+	f := baseFacts()
+	f.AutoUpdatePresent, f.AutoUpdateEnabled = false, false
+	f.SettingsError = "invalid character 'n' looking for beginning of object key string"
+	c := findCheck(t, Run(f), "marketplace.autoupdate")
+	if c.Status != StatusWarn || c.Fix != "" {
+		t.Fatalf("autoupdate check = %+v", c)
+	}
+	if c.Message != SettingsUnreadableMessage {
+		t.Fatalf("message = %q", c.Message)
+	}
+}
+
 func TestRun_PluginStates(t *testing.T) {
 	cases := []struct {
 		name       string

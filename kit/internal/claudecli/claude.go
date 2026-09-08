@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/semver"
 )
 
 // defaultReadTimeout bounds the read-only --json commands, which should
@@ -51,13 +52,7 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 
 // ShortVersion keeps the number and drops the product name the CLI appends,
 // so "2.1.258 (Claude Code)" reads as "2.1.258".
-func ShortVersion(v string) string {
-	v = strings.TrimSpace(v)
-	if first, _, ok := strings.Cut(v, " "); ok {
-		return first
-	}
-	return v
-}
+func ShortVersion(v string) string { return semver.Short(v) }
 
 // MarketplaceList runs `claude plugin marketplace list --json`.
 func (c *Client) MarketplaceList(ctx context.Context) ([]Marketplace, error) {

@@ -126,6 +126,35 @@ func TestGather_PublicVersion404_IsNotOffline(t *testing.T) {
 	}
 }
 
+// A settings.json that isn't valid JSON can't be read for the autoUpdate key,
+// so the row must say the file is unreadable rather than claim updates are
+// off, and the overview must flag it for the page's tooltip.
+func TestGather_SettingsJSONInvalid(t *testing.T) {
+	claudeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseURL, token := newServer(t, Config{
+		Runner:    newFakeCLI(pluginListFixture),
+		LocateEnv: locateAt(fakeCLIPath),
+		ClaudeDir: claudeDir,
+	})
+
+	c := doctorCheck(t, baseURL, token, "marketplace.autoupdate")
+	if c.Status != doctor.StatusWarn || c.Fix != "" {
+		t.Fatalf("marketplace.autoupdate = %+v", c)
+	}
+	if c.Message != doctor.SettingsUnreadableMessage {
+		t.Fatalf("message = %q", c.Message)
+	}
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if got.Marketplace == nil || !got.Marketplace.SettingsError {
+		t.Fatalf("Marketplace = %+v, want settingsError true", got.Marketplace)
+	}
+}
+
 // A clone with no .git is a local problem, not an unreachable GitHub.
 func TestGather_CloneWithoutGit_ReportsLocalError(t *testing.T) {
 	baseURL, token := serverWithClone(t, marketplaceClone(t, false), fixtureCatalog(t))

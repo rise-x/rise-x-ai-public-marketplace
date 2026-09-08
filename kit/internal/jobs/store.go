@@ -140,6 +140,13 @@ func (s *Store) Start(action string, timeout time.Duration, fn Func) (string, er
 		}
 		done := make(chan result, 1)
 		go func() {
+			// The kit is a long-lived desktop helper, so a panic in one action
+			// must fail that job, not take the process down with it.
+			defer func() {
+				if r := recover(); r != nil {
+					done <- result{-1, fmt.Errorf("%s panicked: %v", action, r)}
+				}
+			}()
 			code, err := fn(ctx, j.appendLine)
 			done <- result{code, err}
 		}()

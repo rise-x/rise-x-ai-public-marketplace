@@ -82,6 +82,10 @@ type Facts struct {
 	// AutoUpdateMarketplace is the marketplace the two flags above were read
 	// for: rise-x-public, unless the skills come from a mirror of it.
 	AutoUpdateMarketplace string
+	// SettingsError is ~/.claude/settings.json's parse error, sanitised to one
+	// line, when the file could not be read as JSON. AutoUpdatePresent and
+	// AutoUpdateEnabled are meaningless while this is set.
+	SettingsError string
 
 	Plugins []PluginFact
 
@@ -133,6 +137,11 @@ const waitingForMarketplace = "Waiting until the Rise-X marketplace is registere
 
 const installCLIFirst = "Install Claude Code first."
 
+// SettingsUnreadableMessage is shown wherever ~/.claude/settings.json cannot
+// be parsed as JSON: the doctor row here, and the autoupdate.set action's
+// refusal in the server package.
+const SettingsUnreadableMessage = "Could not read ~/.claude/settings.json, so this setting cannot be checked or changed. Fix the file first."
+
 func cliCheck(f Facts) Check {
 	if f.CLIFound {
 		return Check{ID: "cli", Status: StatusOK, Title: "Claude Code",
@@ -140,15 +149,6 @@ func cliCheck(f Facts) Check {
 	}
 	return Check{ID: "cli", Status: StatusFail, Title: "Claude Code",
 		Message: "Not found. Install it to manage skills.", Fix: "cli.install"}
-}
-
-// shortVersion keeps the number and drops anything the binary appends after a
-// space.
-func shortVersion(v string) string {
-	if first, _, ok := strings.Cut(strings.TrimSpace(v), " "); ok {
-		return first
-	}
-	return strings.TrimSpace(v)
 }
 
 func marketplaceRegisteredCheck(f Facts) Check {
@@ -175,6 +175,9 @@ func autoUpdateCheck(f Facts) Check {
 	}
 	if !f.MarketplaceRegistered {
 		return Check{ID: id, Status: StatusSkip, Title: "Automatic updates", Message: waitingForMarketplace}
+	}
+	if f.SettingsError != "" {
+		return Check{ID: id, Status: StatusWarn, Title: "Automatic updates", Message: SettingsUnreadableMessage}
 	}
 	from := ""
 	if f.AutoUpdateMarketplace != "" && f.AutoUpdateMarketplace != defaultMarketplace {
@@ -333,7 +336,7 @@ func nodeCheck(f Facts) Check {
 		return Check{ID: id, Status: StatusWarn, Title: "Node.js",
 			Message: "Not found. Needed only for Rise-X Apps."}
 	}
-	version := shortVersion(strings.TrimPrefix(strings.TrimSpace(f.NodeVersion), "v"))
+	version := semver.Short(strings.TrimPrefix(strings.TrimSpace(f.NodeVersion), "v"))
 	major, minor := parseNodeVersion(f.NodeVersion)
 	switch {
 	case major >= prefNodeMajor:

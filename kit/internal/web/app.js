@@ -11,7 +11,8 @@
  *     marketplace?: { registered, installLocation?,
  *       autoUpdate?: bool,   // absent = key not set in settings.json
  *       autoUpdateMarketplace?: string, // absent = rise-x-public
- *       headStale?: bool }, // absent = GitHub unreachable, skipped
+ *       headStale?: bool,   // absent = GitHub unreachable, skipped
+ *       settingsError?: bool }, // true = settings.json is not valid JSON
  *     plugins?: [{ name, description?, installed, enabled, localVersion?,
  *       publicVersion?, versionUnknown?, offline?, publicCheckError?,
  *       updateAvailable?,
@@ -532,9 +533,8 @@ function skillRow(plugin, i) {
     <tr data-slot="table-row" class="transition-colors duration-150 ease-decelerate hover:bg-fill-0">
       <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle">
         <div data-slot="table-cell-stack" class="min-w-0">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 whitespace-nowrap">
             <span class="text-ui font-medium">${esc(skillLabel(plugin.name))}</span>
-            <span class="text-micro text-subtle font-mono">${esc(plugin.name)}</span>
             ${
               description
                 ? `<span class="kit-info-trigger" tabindex="0" role="img" aria-label="About this skill" aria-describedby="${descId}" data-tip="${esc(description)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></span>
@@ -542,6 +542,7 @@ function skillRow(plugin, i) {
                 : ""
             }
           </div>
+          <span class="text-micro text-subtle font-mono whitespace-nowrap">${esc(plugin.name)}</span>
         </div>
       </td>
       <td data-slot="table-cell" class="${CELL} tabular-nums">${installed}</td>
@@ -597,14 +598,25 @@ function isOrgManaged(ov) {
 const ORG_MANAGED_TIP =
   "Your organisation installs and updates Rise-X skills through its own marketplace, so this setting is not used on this machine.";
 
+const SETTINGS_ERROR_TIP =
+  "Could not read ~/.claude/settings.json, so this setting cannot be checked or changed. Fix the file first.";
+
 function renderSkillsFooter() {
   const marketplace = overview.marketplace || {};
   const on = marketplace.autoUpdate === true;
-  const disabled = isOrgManaged(overview);
+  const orgManaged = isOrgManaged(overview);
+  const settingsError = marketplace.settingsError === true;
+  const disabled = orgManaged || settingsError;
+  const tip = orgManaged ? ORG_MANAGED_TIP : SETTINGS_ERROR_TIP;
+  const caption = orgManaged
+    ? "Managed by your organisation."
+    : settingsError
+      ? "Fix ~/.claude/settings.json to check this setting."
+      : "Claude Code refreshes the catalog and updates installed skills after each session starts.";
 
   $("kit-skills-footer").innerHTML = `
     <div class="min-w-0 flex-1">${catalogStatus(marketplace)}</div>
-    <div data-slot="choice-row" class="flex items-start gap-2.5 shrink-0"${disabled ? ` data-tip="${esc(ORG_MANAGED_TIP)}" title="${esc(ORG_MANAGED_TIP)}"` : ""}>
+    <div data-slot="choice-row" class="flex items-start gap-2.5 shrink-0"${disabled ? ` data-tip="${esc(tip)}" title="${esc(tip)}"` : ""}>
       <button
         type="button" role="checkbox" data-act="autoupdate" id="kit-autoupdate"
         aria-checked="${on}" data-state="${on ? "checked" : "unchecked"}" ${on ? "data-checked" : ""}
@@ -617,9 +629,9 @@ function renderSkillsFooter() {
       <div class="min-w-0 peer-disabled:cursor-not-allowed peer-disabled:opacity-50">
         <div class="flex items-center gap-1.5">
           <label for="kit-autoupdate" data-slot="label" class="text-ui font-medium text-foreground select-none">Keep Rise-X skills up to date automatically</label>
-          ${disabled ? `<span id="autoupdate-tip" class="sr-only">${esc(ORG_MANAGED_TIP)}</span>` : ""}
+          ${disabled ? `<span id="autoupdate-tip" class="sr-only">${esc(tip)}</span>` : ""}
         </div>
-        <span class="mt-0.5 block text-micro text-subtle">${disabled ? "Managed by your organisation." : "Claude Code refreshes the catalog and updates installed skills after each session starts."}</span>
+        <span class="mt-0.5 block text-micro text-subtle">${caption}</span>
       </div>
     </div>`;
 }
@@ -938,6 +950,10 @@ async function flashCopied(button, text) {
 
 /* interactions */
 
+/** backupNote names the backup only when the server made one. */
+const backupNote = (backup) =>
+  backup ? ` Your previous file is saved at ${backup}.` : "";
+
 function paintCheckbox(button, on) {
   button.setAttribute("aria-checked", String(on));
   button.dataset.state = on ? "checked" : "unchecked";
@@ -954,7 +970,7 @@ function toggleAutoUpdate(button) {
     .then((result) => {
       notice(
         "info",
-        `Automatic updates are ${next ? "on" : "off"}. Your previous settings file is saved at ${result.backup}.`,
+        `Automatic updates are ${next ? "on" : "off"}.${backupNote(result.backup)}`,
       );
       return refresh();
     })
@@ -985,19 +1001,22 @@ function runFix(button) {
       : "Remove the old Rise-X registry lines from ~/.npmrc?";
     if (!confirm(question)) return undefined;
     args.confirm = true;
+  } else if (name === "mcp.fix") {
+    const detail = button.dataset.detail;
+    const question = detail
+      ? `Update these Rise-X connections to their current address?\n\n${detail}`
+      : "Update old Rise-X addresses to their current address?";
+    if (!confirm(question)) return undefined;
   }
   return runAction(name, args, button).then((result) => {
     if (!result || result.jobId) return undefined;
     if (name === "autoupdate.set") {
-      notice(
-        "info",
-        `Automatic updates are on. Your previous settings file is saved at ${result.backup}.`,
-      );
+      notice("info", `Automatic updates are on.${backupNote(result.backup)}`);
     } else if (name === "npmrc.clean") {
       const removed = result.removed || [];
       notice(
         "info",
-        `Removed ${removed.length} line(s) from ~/.npmrc. Your previous file is saved at ${result.backup}.`,
+        `Removed ${removed.length} line(s) from ~/.npmrc.${backupNote(result.backup)}`,
       );
       // npmrc.clean is synchronous (no jobId), so the drawer entry is built
       // here instead of via startPolling, to show the masked removed lines.

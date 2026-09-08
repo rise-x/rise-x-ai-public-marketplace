@@ -174,6 +174,17 @@ func (s *Server) invalidateGather() {
 	s.gatherMu.Unlock()
 }
 
+// invalidateClaudeProbes drops every cache whose answer a claude CLI job can
+// change. The node and npmrc probes read the machine rather than Claude Code,
+// so they are not in it.
+func (s *Server) invalidateClaudeProbes() {
+	s.mcpCache.invalidate()
+	s.syncedCache.invalidate()
+	s.staleCache.invalidate()
+	s.installLocCache.invalidate()
+	s.invalidateGather()
+}
+
 // Quit is closed when the "quit" action runs, so main can shut the process
 // down.
 func (s *Server) Quit() <-chan struct{} { return s.quitRequested }

@@ -34,6 +34,46 @@ func mcpPluginList(t *testing.T) string {
 }`
 }
 
+// A mirror of the public marketplace installs the same plugin under its own
+// name, and its bundled servers are the same servers.
+func TestRiseXMcpConfig_MirrorMarketplace(t *testing.T) {
+	installPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(installPath, ".mcp.json"), []byte(riseXMcpJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := riseXMcpConfig([]claudecli.InstalledPlugin{
+		{ID: "other-plugin@rise-x-public", InstallPath: t.TempDir()},
+		{ID: "rise-x-mcp@acme-mirror", InstallPath: installPath},
+	})
+	names := make([]string, len(got))
+	for i, cs := range got {
+		names[i] = cs.Name
+	}
+	if len(names) != 2 || names[0] != "rise-x" || names[1] != "rise-x-test" {
+		t.Fatalf("configured = %v, want the mirror's two servers", names)
+	}
+}
+
+// With both installed, the public copy is the one the rest of the kit acts on.
+func TestRiseXMcpConfig_PrefersPublicMarketplace(t *testing.T) {
+	public := t.TempDir()
+	if err := os.WriteFile(filepath.Join(public, ".mcp.json"),
+		[]byte(`{"mcpServers":{"from-public":{"type":"http","url":"https://mcp.rise-x.io/mcp"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mirror := t.TempDir()
+	if err := os.WriteFile(filepath.Join(mirror, ".mcp.json"), []byte(riseXMcpJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := riseXMcpConfig([]claudecli.InstalledPlugin{
+		{ID: "rise-x-mcp@acme-mirror", InstallPath: mirror},
+		{ID: "rise-x-mcp@rise-x-public", InstallPath: public},
+	})
+	if len(got) != 1 || got[0].Name != "from-public" {
+		t.Fatalf("configured = %+v, want the public copy's server", got)
+	}
+}
+
 func errorMessage(t *testing.T, resp *http.Response) string {
 	t.Helper()
 	defer resp.Body.Close()

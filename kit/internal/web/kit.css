@@ -38,6 +38,11 @@
 .kit-wrap {
   white-space: normal;
 }
+/* The compiled build has no min-w-[640px]. Keeps the Skills table's columns
+   from squeezing below ~800px so table-container scrolls instead. */
+.kit-skills-table {
+  min-width: 640px;
+}
 
 @layer components {
   /* Button — base lifted from data-slot="button"; variant and size classes stay

@@ -4,10 +4,14 @@ This is the `rise-x-public` Claude Code / Cowork plugin marketplace. It ships
 Rise-X plugins — currently one, `rise-x-mcp` (skills plus two bundled HTTP
 MCP servers), with more expected to follow. A plugin's implementation may
 live partly outside this repo (e.g. rise-x-mcp's MCP server code is private)
-— this repo only ships what Claude Code actually installs: plugin manifests,
-skills, and reference docs. That makes this repo itself the shipped product:
-every skill/reference edit lands verbatim in a customer's Claude session, so
-review it like production code, not internal notes.
+— under `plugins/` this repo only ships what Claude Code actually installs:
+plugin manifests, skills, and reference docs. That makes this repo itself the
+shipped product: every skill/reference edit lands verbatim in a customer's
+Claude session, so review it like production code, not internal notes.
+
+The repo also holds `kit/`, the `rise-x-kit` desktop helper (see "The kit").
+It is a separate product on a separate release track, and none of the
+versioning or release rules below apply to it.
 
 ## Versioning
 
@@ -161,6 +165,19 @@ re-runs it or triggers a manual dispatch.
 - A plugin with no `git-subdir` entry in the private marketplace is skipped
   with a warning, not an error — check the run log when adding plugins.
 
+## The kit
+
+`kit/` is a Go program, `rise-x-kit`: a single static binary that opens a
+local web page for partners to install and update these plugins, check the
+Rise-X MCP connection, and run a setup doctor without a terminal. It carries
+no plugin version, is not listed in `marketplace.json`, and never reaches the
+private marketplace.
+
+It releases on its own `kit-v<semver>` tags, which `kit-release.yml` builds
+and publishes; `kit-ci.yml` gates every PR touching `kit/**`. A tag is the
+only way a partner receives a new kit, so merging to `main` releases nothing
+here.
+
 ## Validate before any PR
 
 ```
@@ -170,6 +187,16 @@ claude plugin validate ./plugins/<name>   # for every plugin directory
 
 All must pass. Also run each with `--strict` — it should pass too.
 
+A PR touching `kit/**` must also pass what `kit-ci.yml` runs, from `kit/`:
+
+```
+gofmt -l . && go vet ./... && go test -race -count=1 ./...
+```
+
+`gofmt -l` must print nothing. The module needs the Go version in
+`kit/go.mod`; an older toolchain cannot parse the generics in
+`internal/server`.
+
 ## Public-repo scrub rules (repo-wide)
 
 Never commit, in any plugin: internal ecosystem/tenant IDs, personal names
@@ -178,8 +205,10 @@ or emails, internal hostnames.
 Known-benign, expected hits: the `localhost_public_url` warning documented in
 `plugins/rise-x-mcp/skills/rise-x-mcp/references/managing-apps.md`, generic
 "feedback" wording in
-`plugins/rise-x-mcp/skills/rise-x-mcp/references/validation.md`, and this
-file (it quotes the pattern above). Anything else is a real hit — fix it.
+`plugins/rise-x-mcp/skills/rise-x-mcp/references/validation.md`,
+`kit/internal/mcp/stale.go`'s two retired Azure Container Apps hostnames
+(public MCP endpoints partners connected to, kept for the reconnect fix), and
+this file (it quotes the pattern above). Anything else is a real hit — fix it.
 Future known-benign hits specific to one plugin belong in that plugin's own
 "Per-plugin rules" section above, not here.
 

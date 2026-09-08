@@ -34,6 +34,9 @@ type MarketplaceInfo struct {
 	// AutoUpdateMarketplace names the marketplace AutoUpdate was read for, so
 	// the page's switch writes back to the same one.
 	AutoUpdateMarketplace string `json:"autoUpdateMarketplace,omitempty"`
+	// SettingsError is true when ~/.claude/settings.json could not be parsed,
+	// so AutoUpdate could not be read and the switch must not be trusted.
+	SettingsError bool `json:"settingsError,omitempty"`
 }
 
 // PluginInfo is one row of overview.plugins. It embeds the doctor's fact so

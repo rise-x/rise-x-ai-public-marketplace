@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/jobs"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/npmrc"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/settings"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/web"
 )
 
@@ -187,10 +189,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		cli, _ := s.relocate(r.Context())
 		s.nodeCache.invalidate()
 		s.npmrcCache.invalidate()
-		s.installLocCache.invalidate()
-		s.syncedCache.invalidate()
-		s.staleCache.invalidate()
-		s.invalidateGather()
+		s.invalidateClaudeProbes()
 		writeJSON(w, map[string]any{"found": cli != nil})
 	case "quit":
 		writeJSON(w, map[string]any{"ok": true})
@@ -307,11 +306,16 @@ func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action
 		if !ok {
 			return -1, claudecli.ErrNotFound
 		}
-		defer s.staleCache.invalidate()
 		for _, st := range fixable {
 			dir := ""
 			if st.Scope == mcp.ScopeLocal {
 				dir = st.ProjectPath // -s local writes to whichever project it runs in
+				// ~/.claude.json keeps an entry for every project ever opened,
+				// so a directory that is gone must not abort the rest.
+				if _, err := os.Stat(dir); err != nil {
+					onLine(fmt.Sprintf("skipping %s: %s no longer exists", st.Name, dir))
+					continue
+				}
 			}
 			// A remove that exits non-zero has nothing to remove, which is no
 			// reason to skip the add.
@@ -379,6 +383,13 @@ func (s *Server) marketplaceRegistered(ctx context.Context) bool {
 }
 
 func (s *Server) handleAutoUpdateSet(w http.ResponseWriter, ctx context.Context, body map[string]any) {
+	// settings.Read fails only when the file itself isn't valid JSON - the
+	// same case the doctor row reports as SettingsError - and the write below
+	// would refuse it anyway, just with a less friendly message.
+	if _, err := settings.Read(s.settingsPath()); err != nil {
+		httpError(w, http.StatusConflict, doctor.SettingsUnreadableMessage)
+		return
+	}
 	enabled, _ := body["enabled"].(bool)
 	name, repo := claudecli.MarketplaceName, claudecli.MarketplaceRepo
 	// Skills can come from a mirror of the public marketplace, and it is that
@@ -440,7 +451,7 @@ func (s *Server) startJob(w http.ResponseWriter, ctx context.Context, action str
 		if err == nil && code == 0 {
 			s.setReloadHint()
 		}
-		s.invalidateGather()
+		s.invalidateClaudeProbes()
 		return code, err
 	})
 	if err != nil {

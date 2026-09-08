@@ -154,7 +154,7 @@
         </div>
 
         <div data-slot="table-container" class="relative w-full overflow-x-auto">
-          <table data-slot="table" class="w-full caption-bottom border-separate border-spacing-0 text-ui">
+          <table data-slot="table" class="kit-skills-table w-full caption-bottom border-separate border-spacing-0 text-ui">
             <thead data-slot="table-header">
               <tr>
                 <th data-slot="table-head" class="h-11 border-b border-border bg-card px-4 text-left align-middle text-xs font-medium tracking-[0.01em] text-muted-foreground">Skill</th>
@@ -169,9 +169,8 @@
               <tr data-slot="table-row" class="transition-colors duration-150 ease-decelerate hover:bg-fill-0">
                 <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle">
                   <div data-slot="table-cell-stack" class="min-w-0">
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-2 whitespace-nowrap">
                       <span class="text-ui font-medium">Rise-X</span>
-                      <span class="text-micro text-subtle font-mono">rise-x-mcp</span>
                       <span
                         class="kit-info-trigger"
                         tabindex="0"
@@ -188,6 +187,7 @@
                         Configure workflows, layouts and dashboards, query data, and manage work items on the Rise-X platform.
                       </span>
                     </div>
+                    <span class="text-micro text-subtle font-mono whitespace-nowrap">rise-x-mcp</span>
                   </div>
                 </td>
                 <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap tabular-nums">
@@ -217,9 +217,8 @@
               <tr data-slot="table-row" class="transition-colors duration-150 ease-decelerate hover:bg-fill-0">
                 <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle">
                   <div data-slot="table-cell-stack" class="min-w-0">
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-2 whitespace-nowrap">
                       <span class="text-ui font-medium">Rise-X Apps</span>
-                      <span class="text-micro text-subtle font-mono">rise-x-apps</span>
                       <span
                         class="kit-info-trigger"
                         tabindex="0"
@@ -236,6 +235,7 @@
                         Design, build, and deploy federated apps for the Rise-X platform.
                       </span>
                     </div>
+                    <span class="text-micro text-subtle font-mono whitespace-nowrap">rise-x-apps</span>
                   </div>
                 </td>
                 <td data-slot="table-cell" class="border-b border-border-subtle px-4 py-3.5 align-middle whitespace-nowrap text-subtle">&mdash;</td>

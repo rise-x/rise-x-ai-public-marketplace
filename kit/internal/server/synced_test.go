@@ -282,6 +282,29 @@ func TestHandler_AutoUpdateSet_OtherMarketplace(t *testing.T) {
 	}
 }
 
+// An unparsable settings.json must refuse the write outright rather than
+// leave the writer to fail after already deciding to touch the file.
+func TestHandler_AutoUpdateSet_InvalidSettingsJSON_409(t *testing.T) {
+	claudeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseURL, token := newServer(t, Config{
+		Runner:    newFakeCLI(pluginListFixture),
+		LocateEnv: locateAt(fakeCLIPath),
+		ClaudeDir: claudeDir,
+	})
+
+	resp := post(t, baseURL+"/api/actions/autoupdate.set", token, map[string]any{"enabled": true})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	if got := errorMessage(t, resp); got != doctor.SettingsUnreadableMessage {
+		t.Fatalf("error = %q", got)
+	}
+}
+
 func calledWith(fake *runnertest.Fake, args []string) bool {
 	return callIndex(fake, args) >= 0
 }

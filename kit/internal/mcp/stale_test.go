@@ -117,9 +117,15 @@ func TestIsStale(t *testing.T) {
 		{"rise-x", "https://mcp.rise-x.io/mcp", false},
 		{"rise-x-test", "https://mcp-test.rise-x.io/mcp", false},
 		{"rise-x", "https://mcp.rise-x.io:443/mcp", false},
-		{"rise-x", "https://anything.example.com/mcp", true},
-		{"anything", "https://risex.example.com/mcp", true},
+		// A partner's own Rise-X MCP, hosted anywhere but a known-retired
+		// domain, is not stale - only the domains in oldHostSuffixes are.
+		{"rise-x", "https://anything.example.com/mcp", false},
+		{"anything", "https://risex.example.com/mcp", false},
 		{"other", "https://example.com/mcp", false},
+		// The shared azurecontainerapps.io domain is only a hint: a hit there
+		// needs a Rise-X name or URL too.
+		{"billing-api", "https://billing-api.bluesea.eastus.azurecontainerapps.io/mcp", false},
+		{"rise-x", "https://mcp-server.bluesea.eastus.azurecontainerapps.io/mcp", true},
 		// A typo leaves no host to judge, and the kit must not guess.
 		{"rise-x-mcp-local", "https:/0.0.0.0:8080/mcp", false},
 		{"rise-x-mcp-local", "http://127.0.0.1:8080/mcp", false},
