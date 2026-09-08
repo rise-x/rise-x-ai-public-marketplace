@@ -35,7 +35,8 @@ Create a new work item by starting a published workflow.
 
 This is **Step 1** of the work creation pattern:
 1. `create_work(flow_id)` → get `workId`, `stepName`, `eventName`
-2. `update_work_data(workId, ...)` → set field values (repeat as needed)
+2. `update_work_data_bulk(workId, fields, section_name)` → set every field value in ONE call
+   (use `update_work_data` for a single field, or for `push` / `pull` / `rename`)
 3. `submit_work(workId, eventName, stepName)` → advance to the next step
 
 ### `get_work(id: str, format: str = "summary")`
@@ -100,6 +101,122 @@ await search_works(
 
 For dynamic `data.*` paths in the filter, call `get_flow_data_schema(flow_origin_id)` first to discover the valid paths for that flow.
 
+### `update_work_data_bulk(id, fields, section_name, response_format="summary")`
+Set **many** work-data fields in ONE request. Prefer this over repeated `update_work_data`
+calls whenever writing more than one field — it wraps the v4 batch endpoint
+(`PATCH /api/v4/work/{id}/data/batch`), where every entry of `fields` is its own `set` op and
+all of them are applied together. The request count is **constant, not always literally one**:
+the first write to a brand-new work item costs two (see below), every other call costs one.
+Either way it never costs N.
+
+**Not every server has this release.** The tool arrives with the v4 batch endpoint, and
+environments upgrade independently of marketplace releases. If the server reports no such
+tool, read that as *not supported here* — not as a bad id or a permissions problem — and fall
+back to per-field `update_work_data` calls, run sequentially.
+
+**Parameters:**
+- `id` — work item GUID
+- `fields` — `{json_path: value}`, one `set` op per entry, e.g.
+  `{"$.displayName": "MV Aurora", "$.capacityMt": 74000}`. Pass **leaf** paths:
+  `{"$.vessel.name": "Aurora", "$.vessel.imo": "9321483"}` sets two fields, whereas
+  `{"$.vessel": {"name": "Aurora"}}` is a full-value `set` of the whole `vessel` object and
+  **drops every sibling it omits**. For the same reason, never pass a parent path and one of
+  its own descendants in one call (`{"$.vessel": {…}, "$.vessel.name": "x"}`): the two ops
+  overlap, and nothing defines which wins. The ops leave the client in your `fields` order,
+  but the order the **backend applies** them is unspecified, so the outcome is not something
+  you can reason about from the call. One op per leaf path, always. An empty or non-dict `fields` fails with code
+  `validation`.
+- `section_name` — **required** — the task the data belongs to. Required on both writers, so
+  it cannot be omitted, only got wrong. The resolved task id is what the v4 endpoint
+  authorises against, so a name matching no task fails with code `section_not_found` and the
+  real task names listed under `tasks`, rather than as an opaque backend 403.
+- `response_format` — `"summary"` (default), or `"full"` to add the raw API response under
+  `result`.
+
+> **`section_name` is more forgiving here than on `update_work_data`.** This tool resolves the
+> name against the work's own step tree — depth-first, case-insensitive, first match wins —
+> trying the internal names `name` / `taskName` / `stepName` first, then the labels
+> `displayName` / `taskDisplayName` / `stepDisplayName`. Internal names go first deliberately,
+> so a label colliding with another task's internal name cannot win.
+>
+> **So either form works, and the `get_flow_step` round-trip is optional:** the
+> `taskDisplayName` that `get_flow_steps` already returns resolves, even though `taskName` is
+> projected out of that response. `section_not_found` lists both forms per task, so a wrong
+> name is recoverable without a second lookup.
+>
+> **`update_work_data` has none of this** — it forwards the value to the v3 endpoint verbatim
+> and needs the internal `taskName`, which does require `get_flow_step`.
+
+Other error codes it can return before writing anything: `origin_unresolved` (the work
+carries no `flowOriginId` — the usual cause is passing an **entity** id where a work id
+belongs, cf. pitfall #7) and `unexpected_response` (the pre-write read of the work came back
+as a non-object; retry). A failure at the write itself normally means **no** field was
+written — the error hint says so, and `get_work(id)` confirms it before you retry. An
+all-`set` batch is idempotent, so re-sending the identical call after a `transient` error is
+safe.
+
+**The one exception, on the very first write to a brand-new work item.** The batch endpoint
+cannot create a work item's data record — only write into one that exists — so on a work
+nothing has been written to yet, the tool seeds the record with the first field through the
+single-field endpoint and batches the remainder. That is **two** requests instead of one,
+and it happens once per work item; every later call is a single request. The call and the
+response are identical either way, so nothing about how you use the tool changes. The
+consequence worth knowing: on that first call alone, a failure can leave the seeded field
+written while the rest did not land — the error's hint says so, and it is the one case where
+`get_work(id)` can show partial data after a reported failure. Everywhere else the batch is
+all-or-nothing.
+
+`set` is the only operation the batch endpoint offers. For `push` / `pull` / `rename`, use
+`update_work_data`. That is why both tools exist — this one is not a replacement.
+
+**It reads the values back**, which `update_work_data` does not. When `changed` is present no
+follow-up `get_work` is needed to find out what persisted — when it is absent, one is the only
+way to know (see below):
+- `changed` — the paths confirmed stored with the requested value.
+- `counts` — `{requested, persisted}`.
+- `warnings[]` — `dropped_value` for each path the API accepted but did not store (check the
+  flow's data schema with `get_flow_data_schema` for the real path);
+  `unverified_writes` as a rollup whenever `persisted < requested`; `no_verification` when the
+  read-back itself failed. A path can also come back with the general echo-diff codes
+  `value_differs`, `dropped_property` or `dropped_item` when the stored value only partly
+  matches the request.
+- The envelope also carries `workId`, `sectionId` and `originId`.
+
+**A `value_differs` path counts as unpersisted here.** The verifier treats *any* diff as
+"did not land": the path is left out of `changed`, `counts.persisted` drops, and the
+`unverified_writes` rollup fires. That is deliberately stricter than the `SKILL.md` rule that
+`value_differs` is informational — a batch op is a full-value `Set`, so a stored value that
+differs is indistinguishable from one that was never applied. The comparison is already
+tolerant of harmless normalisation (`4` vs `4.0`, surrounding whitespace, GUID case), so a
+`value_differs` here means the server stored something genuinely different — a reformatted
+date, a rewritten list. The practical consequence: such a path lowers `counts.persisted` even
+though the write was not lost. Read the warning to tell the two apart — `value_differs` carries
+`requested` and `actual`, so you can see what the server chose, whereas `dropped_value` means
+the old value is still sitting there.
+
+**What to do with each**, since `SKILL.md` rule 1 otherwise reads as "any warning means
+failure":
+
+| Warning | What it means | What to do |
+|---|---|---|
+| `value_differs` | The write reached the field, but the stored value is not the one you sent | **Compare `requested` against `actual`.** Cosmetic difference (formatting, ordering that carries no meaning) → accept it. Semantic difference — a date read as a different day, a list that came back reordered or short — → the **value or its type** is wrong, so fix the value. Either way, do not re-send the same value: it will be transformed identically |
+| `dropped_value` | The value is not there; the old one still is | Fix the **path**, not the call. Retrying the same path is equally futile |
+| `unverified_writes` | Rollup: `persisted < requested` | Read the per-path warnings above it; it adds no information of its own |
+| `no_verification` | The read-back failed; nothing is known | Call `get_work(id)` |
+
+A `persisted` below `requested` is therefore not, on its own, grounds for reporting failure —
+but it is never grounds for reporting success either. Look at what each warning names first: the
+verifier's tolerances mean a `value_differs` has already survived the harmless cases, so treat
+it as a real divergence until you have compared the two values and seen otherwise.
+
+**`changed` absent is not `changed: []`.** When the read-back fails, `changed` is **omitted**
+and `counts` carries `requested` only — verification did not run, so nothing is known about
+what landed. An empty `changed` is the opposite claim: verification ran and confirmed nothing
+persisted. Never read an absent `changed` as "nothing persisted".
+
+Verification is `set`-strict: clearing a field with `""` / `[]` / `{}` is confirmed only if the
+stored value really is empty, and a list must read back with the requested number of entries.
+
 ### `update_work_data(id, json_path, operation, value, section_name)`
 Update a field value on a work item.
 
@@ -112,9 +229,13 @@ Update a field value on a work item.
   - `"pull"` — remove the field
   - `"rename"` — rename the field (value = new name)
 - `value` — the value to set/push, or new name for rename
-- `section_name` — **required** — the task name scoping the data location (e.g. `"UntitledTask/Generated-..."` or the camelCase task name from `get_flow_steps`). Omitting it causes 500 errors.
+- `section_name` — **required** — the task name scoping the data location: the task's `taskName`, slash form like `"UntitledTask/Generated-<guid>"` or bare like `"Task_1"`. `get_flow_steps` projects `taskName` **out**, so fetch it with `get_flow_step` (see below). A name matching no task fails as a backend error here; `update_work_data_bulk` catches the same mistake client-side.
 
-Can be called multiple times for different fields before submitting. Must run **sequentially** — parallel calls cause connection errors.
+One field per call. Writing several fields this way costs one PATCH each, they must run
+**sequentially** (parallel calls answer with `Cannot connect to host`), and a drop mid-sequence
+leaves the work half-populated with no signal about which fields landed — so prefer
+`update_work_data_bulk` for more than one field. This tool remains the only way to `push`,
+`pull` or `rename`: the batch endpoint offers `set` alone.
 
 ### `submit_work(id, event_name, step_name, invitation=None)`
 Submit work to advance it to the next step in its workflow. Leave `invitation`
@@ -131,27 +252,31 @@ invitation stops the server deriving recipients from the flow config.
 
 ```
 1. create_work(flow_id)                      # start workflow → get workId, stepName, eventName
-2. update_work_data(workId, "$.task.field",  # fill in fields (repeat as needed, sequentially)
-     "set", "value", section_name)
+2. update_work_data_bulk(workId,             # fill in every field in ONE request
+     {"$.task.field": "value",
+      "$.task.other": 42}, section_name)
 3. submit_work(workId, eventName, stepName)  # advance to next step
 ```
 
-The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the flow creation step. The `section_name` for `update_work_data` is the task's `taskName` (slash form like `UntitledTask/Generated-<guid>` on v3-style flows, or bare like `Task_1` on v4 native flows). `get_flow_steps` projects `taskName` **out** of its response — fetch it via `get_flow_step(flow_id, step_id)` (pass the `id` field from `get_flow_steps` as `step_id`) and read `taskName` from the full step.
+The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the flow creation step. Both writers require a `section_name`, but they differ in what they accept: `update_work_data_bulk` resolves either the internal name or the display label (so `taskDisplayName` from `get_flow_steps` is enough), while `update_work_data` needs the internal `taskName` (slash form like `UntitledTask/Generated-<guid>` on v3-style flows, or bare like `Task_1` on v4 native flows). `get_flow_steps` projects `taskName` **out** of its response — fetch it via `get_flow_step(flow_id, step_id)` (pass the `id` field from `get_flow_steps` as `step_id`) and read `taskName` from the full step.
 
 ## Progressing an Existing Work Item
 
 ```
 1. list_work(flow_origin_id)                 # find items in a workflow (pass the ORIGIN id, not the published flow id)
 2. get_work(id)                              # inspect details, find stepName and actions
-3. update_work_data(id, "$.task.field",      # fill in fields (repeat as needed)
-     "set", "value", section_name)
+3. update_work_data_bulk(id,                 # fill in every field in ONE request
+     {"$.task.field": "value"}, section_name)
 4. submit_work(id, event_name, step_name)    # advance to next step
 ```
 
 ## Important Notes
 
-- `json_path` must start with `$` — e.g. `"$.reviewTask.approved"`, `"$.details.description"`
-- The path follows the pattern `$.{taskCamelCase}.{fieldCamelCase}`
+- Every path must start with `$` — `json_path` on `update_work_data`, and every key of
+  `fields` on `update_work_data_bulk`
+- Task-scoped fields follow `$.{taskCamelCase}.{fieldCamelCase}` — e.g.
+  `"$.reviewTask.approved"`, `"$.details.description"`. Root-level fields are one segment
+  (`"$.displayName"`), so the two-segment pattern is the common case, not the rule
 - `event_name` and `step_name` must match exactly what the flow expects — get them from `get_work` response
 - Submitting with wrong event/step names will fail
 
