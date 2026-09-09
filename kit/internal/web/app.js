@@ -1321,8 +1321,8 @@ function runFix(button) {
   if (name === "npmrc.clean") {
     const detail = button.dataset.detail;
     const question = detail
-      ? `Remove these lines from ~/.npmrc?\n\n${detail}`
-      : "Remove the old Rise-X registry lines from ~/.npmrc?";
+      ? `Point @rise-x at the public npm registry in ~/.npmrc?\n\n${detail}`
+      : "Point @rise-x at the public npm registry in ~/.npmrc?";
     if (!confirm(question)) return undefined;
     args.confirm = true;
   } else if (name === "node.install") {
@@ -1348,15 +1348,15 @@ function runFix(button) {
       const removed = result.removed || [];
       notice(
         "info",
-        `Removed ${removed.length} line(s) from ~/.npmrc.${backupNote(result.backup)}`,
+        `Updated ${removed.length} line(s) in ~/.npmrc.${backupNote(result.backup)}`,
       );
       // npmrc.clean is synchronous (no jobId), so the drawer entry is built
-      // here instead of via startPolling, to show the masked removed lines.
+      // here instead of via startPolling, to show the masked updated lines.
       jobs.unshift({
         id: `local-${Date.now()}`,
         title: "Clean up ~/.npmrc",
         subtitle: "",
-        lines: removed.length ? ["Removed:", ...removed] : [],
+        lines: removed.length ? ["Updated:", ...removed] : [],
         rendered: 0,
         since: 0,
         status: "succeeded",
