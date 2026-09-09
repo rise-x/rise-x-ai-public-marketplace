@@ -377,8 +377,8 @@ const remoteCatalogTimeout = 5 * time.Second
 
 // isKnownPlugin reports whether name is a plugin this marketplace ships. It
 // never runs a gather - an action handler must not wait on one - so it takes
-// the CLI's own "available" list when a gather has already filled it, then
-// the local marketplace clone, then the public catalog.
+// the catalog names a gather has already filled, then the local marketplace
+// clone, then the public catalog.
 func (s *Server) isKnownPlugin(ctx context.Context, name string) bool {
 	if name == "" {
 		return false

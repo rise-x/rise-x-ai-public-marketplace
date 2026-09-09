@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // installedByOrg is manifest.json's "installedBy" value for a plugin the
@@ -60,16 +61,23 @@ type pluginFile struct {
 	Version string `json:"version"`
 }
 
-// Read collects every plugin listed in the account manifests under
-// <desktopDataDir>/local-agent-mode-sessions/<org>/<account>/rpm. An entry
-// whose plugin directory is not on disk is skipped: the manifest names what
-// the account wants, the directory is what the machine actually has.
+// Read collects every plugin listed in the signed-in account's manifests under
+// <desktopDataDir>/local-agent-mode-sessions/<account>/<org>/rpm. Every
+// account that ever signed in on the machine leaves its manifests behind, and
+// only the current one's say what this account has: reading them all reported
+// a previous account's organisation pushes as this one's. An entry whose
+// plugin directory is not on disk is skipped: the manifest names what the
+// account wants, the directory is what the machine actually has.
 func Read(desktopDataDir string) ([]Plugin, error) {
 	if desktopDataDir == "" {
 		return nil, nil
 	}
+	account := signedInAccount(desktopDataDir)
+	if account == "" {
+		return nil, nil
+	}
 	paths, _ := filepath.Glob(filepath.Join(desktopDataDir,
-		"local-agent-mode-sessions", "*", "*", "rpm", "manifest.json"))
+		"local-agent-mode-sessions", account, "*", "rpm", "manifest.json"))
 
 	var out []Plugin
 	var errs []error
@@ -128,6 +136,31 @@ func ReadClaudeDir(claudeDir string) ([]Plugin, error) {
 		out = append(out, Plugin{Name: name, Version: version, Org: true, Dir: dir})
 	}
 	return out, nil
+}
+
+// configFile is the one key of the Desktop app's config.json read here.
+type configFile struct {
+	LastKnownAccountUUID string `json:"lastKnownAccountUuid"`
+}
+
+// signedInAccount reads which account the Desktop app is signed in as. Empty
+// when that cannot be read: no manifest can then be told apart from a
+// previous account's, so none is trusted.
+func signedInAccount(desktopDataDir string) string {
+	data, err := os.ReadFile(filepath.Join(desktopDataDir, "config.json"))
+	if err != nil {
+		return ""
+	}
+	var cfg configFile
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+	id := cfg.LastKnownAccountUUID
+	// It becomes one segment of the glob above, so it must be exactly that.
+	if id == "" || id == "." || id == ".." || id != filepath.Base(id) || strings.ContainsAny(id, `*?[\`) {
+		return ""
+	}
+	return id
 }
 
 func readVersion(dir string) string {

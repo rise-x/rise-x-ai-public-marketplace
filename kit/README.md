@@ -101,8 +101,10 @@ A skill can also arrive without you installing it: your organisation can push
 it to your Claude account, and Claude Desktop then sets it up for you. Rise-X
 Kit shows those rows as **Installed by your organisation**, with no buttons —
 installing the same skill from the public marketplace would leave you with two
-copies. A skill you installed from another marketplace that mirrors the public
-one reads **Installed from &lt;marketplace&gt;**, and updates from that same
+copies. Only the account currently signed in to Claude Desktop counts: what an
+earlier account received on the same machine is not shown as yours. A skill
+you installed from another marketplace that mirrors the public one reads
+**Installed from &lt;marketplace&gt;**, and updates from that same
 marketplace.
 
 **Rise-X connection** shows whether the two Rise-X MCP (Model Context Protocol,

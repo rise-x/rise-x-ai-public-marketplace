@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -244,16 +245,12 @@ func autoUpdateMarketplace(plugins []PluginInfo) string {
 }
 
 func (s *Server) gatherPlugins(ctx context.Context, installLocation string, plResult claudecli.PluginListResult, plErr error, overview *OverviewResponse, facts *doctor.Facts) {
-	var names []string
-	if plErr == nil {
-		for _, a := range plResult.Available {
-			if a.MarketplaceName == claudecli.MarketplaceName {
-				names = append(names, a.Name)
-			}
-		}
-	}
-	if len(names) == 0 {
-		names = s.marketplaceNames(ctx, installLocation)
+	// The catalog is marketplace.json, not the CLI's "available" list: that
+	// list leaves out whatever is installed, so a skill's row vanished the
+	// moment its Install finished.
+	names := s.marketplaceNames(ctx, installLocation)
+	if len(names) == 0 && plErr == nil {
+		names = publicPluginNames(plResult)
 	}
 	s.setCatalogNames(names)
 
@@ -330,6 +327,24 @@ func (s *Server) gatherPlugins(ctx context.Context, installLocation string, plRe
 		overview.Plugins = append(overview.Plugins, pi)
 		facts.Plugins = append(facts.Plugins, pi.PluginFact)
 	}
+}
+
+// publicPluginNames is every plugin the CLI lists from the public marketplace,
+// installed or not, for when marketplace.json itself cannot be read.
+func publicPluginNames(res claudecli.PluginListResult) []string {
+	var names []string
+	for _, a := range res.Available {
+		if a.MarketplaceName == claudecli.MarketplaceName {
+			names = append(names, a.Name)
+		}
+	}
+	for _, ip := range res.Installed {
+		id, market, ok := strings.Cut(ip.ID, "@")
+		if ok && market == claudecli.MarketplaceName && !slices.Contains(names, id) {
+			names = append(names, id)
+		}
+	}
+	return names
 }
 
 // findInstalled picks the CLI-installed copy of name and the marketplace it

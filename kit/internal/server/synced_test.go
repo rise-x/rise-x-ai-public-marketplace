@@ -25,16 +25,29 @@ const syncedManifest = `{"lastUpdated":1788855954758,"plugins":[
    "installedBy":"auto","installationPreference":"auto_install"}
 ]}`
 
+// signedInRoot builds the Desktop app's data directory with config.json
+// naming a signed-in account, and returns that account's
+// local-agent-mode-sessions/<account>/<org>/rpm.
+func signedInRoot(t *testing.T) (dataDir, root string) {
+	t.Helper()
+	dataDir = t.TempDir()
+	config := `{"lastKnownAccountUuid":"account-1"}`
+	if err := os.WriteFile(filepath.Join(dataDir, "config.json"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root = filepath.Join(dataDir, "local-agent-mode-sessions", "account-1", "org-1", "rpm")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dataDir, root
+}
+
 // syncedDesktopDir builds the Desktop app's data directory with both
 // rise-x-mcp entries materialised at version, each carrying the plugin's real
 // .mcp.json.
 func syncedDesktopDir(t *testing.T, version string) string {
 	t.Helper()
-	dataDir := t.TempDir()
-	root := filepath.Join(dataDir, "local-agent-mode-sessions", "org-1", "account-1", "rpm")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	dataDir, root := signedInRoot(t)
 	if err := os.WriteFile(filepath.Join(root, "manifest.json"), []byte(syncedManifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -325,8 +338,7 @@ func callIndex(fake *runnertest.Fake, args []string) int {
 // at version.
 func desktopSyncedDir(t *testing.T, version string) string {
 	t.Helper()
-	dataDir := t.TempDir()
-	root := filepath.Join(dataDir, "local-agent-mode-sessions", "org-1", "account-1", "rpm")
+	dataDir, root := signedInRoot(t)
 	dir := filepath.Join(root, "plugin_user")
 	if err := os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o755); err != nil {
 		t.Fatal(err)

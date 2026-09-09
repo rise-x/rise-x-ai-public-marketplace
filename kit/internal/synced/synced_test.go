@@ -14,11 +14,32 @@ type manifestEntry struct {
 	noDir bool
 }
 
-// writeManifest builds <dataDir>/local-agent-mode-sessions/<org>/<account>/rpm
-// with a manifest.json and one directory per entry.
+// currentAccount is the account the fixture's config.json names.
+const currentAccount = "account-1"
+
+// writeConfig writes the Desktop app's config.json naming account as the one
+// signed in.
+func writeConfig(t *testing.T, dataDir, account string) {
+	t.Helper()
+	body := `{"locale":"en-US","lastKnownAccountUuid":"` + account + `"}`
+	if err := os.WriteFile(filepath.Join(dataDir, "config.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeManifest builds the signed-in account's
+// <dataDir>/local-agent-mode-sessions/<account>/<org>/rpm with a manifest.json
+// and one directory per entry, and the config.json that names that account.
 func writeManifest(t *testing.T, dataDir string, entries ...manifestEntry) string {
 	t.Helper()
-	root := filepath.Join(dataDir, "local-agent-mode-sessions", "org-1", "account-1", "rpm")
+	writeConfig(t, dataDir, currentAccount)
+	return writeAccountManifest(t, dataDir, currentAccount, entries...)
+}
+
+// writeAccountManifest is writeManifest for one account, signed in or not.
+func writeAccountManifest(t *testing.T, dataDir, account string, entries ...manifestEntry) string {
+	t.Helper()
+	root := filepath.Join(dataDir, "local-agent-mode-sessions", account, "org-1", "rpm")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -128,10 +149,60 @@ func TestRead_NoDesktopData(t *testing.T) {
 	}
 }
 
+// Every account that ever signed in on the machine leaves its manifests
+// behind. Only the signed-in account's say what this account has: a previous
+// account's organisation push used to show as this one's.
+func TestRead_OnlySignedInAccount(t *testing.T) {
+	dataDir := t.TempDir()
+	writeManifest(t, dataDir,
+		manifestEntry{id: "plugin_apps", name: "rise-x-apps", marketplace: "rise-x-ai-public-marketplace",
+			installedBy: "user", version: "1.3.0"})
+	writeAccountManifest(t, dataDir, "account-2",
+		manifestEntry{id: "plugin_org", name: "rise-x-mcp", marketplace: "rise-x/rise-x-ai-marketplace",
+			installedBy: "auto", version: "0.7.0"})
+
+	got, err := Read(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "rise-x-apps" || got[0].Org {
+		t.Fatalf("read %+v, want only the signed-in account's rise-x-apps", got)
+	}
+}
+
+// With no signed-in account known, no manifest can be told apart from a
+// previous account's, so none counts.
+func TestRead_NoSignedInAccount(t *testing.T) {
+	for name, config := range map[string]string{
+		"missing":    "",
+		"no account": `{"locale":"en-US"}`,
+		"not a path": `{"lastKnownAccountUuid":"../account-1"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			writeManifest(t, dataDir,
+				manifestEntry{id: "plugin_org", name: "rise-x-mcp", marketplace: "m", installedBy: "auto", version: "1.3.4"})
+			path := filepath.Join(dataDir, "config.json")
+			if config == "" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if got, err := Read(dataDir); err != nil || got != nil {
+				t.Fatalf("Read = %+v, %v; want nil, nil", got, err)
+			}
+		})
+	}
+}
+
 // An invalid manifest is reported, and never mistaken for "nothing synced".
 func TestRead_InvalidManifest(t *testing.T) {
 	dataDir := t.TempDir()
-	root := filepath.Join(dataDir, "local-agent-mode-sessions", "org-1", "account-1", "rpm")
+	writeConfig(t, dataDir, currentAccount)
+	root := filepath.Join(dataDir, "local-agent-mode-sessions", currentAccount, "org-1", "rpm")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
