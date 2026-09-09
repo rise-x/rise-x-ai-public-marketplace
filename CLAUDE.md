@@ -4,10 +4,14 @@ This is the `rise-x-public` Claude Code / Cowork plugin marketplace. It ships
 Rise-X plugins — currently one, `rise-x-mcp` (skills plus two bundled HTTP
 MCP servers), with more expected to follow. A plugin's implementation may
 live partly outside this repo (e.g. rise-x-mcp's MCP server code is private)
-— this repo only ships what Claude Code actually installs: plugin manifests,
-skills, and reference docs. That makes this repo itself the shipped product:
-every skill/reference edit lands verbatim in a customer's Claude session, so
-review it like production code, not internal notes.
+— under `plugins/` this repo only ships what Claude Code actually installs:
+plugin manifests, skills, and reference docs. That makes this repo itself the
+shipped product: every skill/reference edit lands verbatim in a customer's
+Claude session, so review it like production code, not internal notes.
+
+The repo also holds `kit/`, the `rise-x-kit` desktop helper (see "The kit").
+It is a separate product on a separate release track, and none of the
+versioning or release rules below apply to it.
 
 ## Versioning
 
@@ -89,8 +93,8 @@ behind `<!-- notes -->` and `<!-- changelog -->` markers so release-notes
 tooling can parse it. Text inside the notes block is hand-written and survives
 regeneration; everything else is overwritten on every push.
 
-`main` accepts pull requests from `release/*` and `hotfix/*` only.
-`close-direct-prs` closes anything else and comments with the branch to
+`main` accepts pull requests from `release/*`, `release-kit/*` and `hotfix/*`
+only. `close-direct-prs` closes anything else and comments with the branch to
 retarget onto, so a feature cannot reach customers without going through a
 release. It is a guardrail rather than a gate, because a ruleset cannot
 restrict which head branch opens a PR; it reacts on open, reopen, a push, and
@@ -161,6 +165,55 @@ re-runs it or triggers a manual dispatch.
 - A plugin with no `git-subdir` entry in the private marketplace is skipped
   with a warning, not an error — check the run log when adding plugins.
 
+## The kit
+
+`kit/` is a Go program, `rise-x-kit`: a single static binary that opens a
+local web page for partners to install and update these plugins, check the
+Rise-X MCP connection, and run a setup doctor without a terminal. It carries
+no plugin version, is not listed in `marketplace.json`, and never reaches the
+private marketplace.
+
+It has its own release track, independent of `release/*`: a PR touches
+`plugins/**` or `kit/**`, never both.
+
+1. **Cut.** Run the `create-release-kit.yml` workflow (Actions, **Run
+   workflow**). It pushes `release-kit/<name>` from `main`. Only one
+   `release-kit/*` branch may exist at a time; the workflow refuses otherwise.
+2. **Collect.** Open kit PRs against the open `release-kit/<name>` branch.
+   `kit-ci.yml` gates every PR into it.
+3. **Release.** `kit/VERSION` is the single version source for the kit. The
+   PR from `release-kit/*` to `main` must raise it, in strict semver, above
+   the value already on `main`; `kit-ci.yml` enforces that for any PR into
+   `main` by running `scripts/check-kit-version.sh`. Merging that PR with a
+   **merge commit** is the release: the merge pushes the changed
+   `kit/VERSION` to `main`, which triggers `kit-release.yml` to build, sign,
+   tag the commit `kit-v<VERSION>`, and publish the GitHub Release. Nobody
+   pushes a `kit-v*` tag by hand. `install.sh` and `install.ps1` ship from
+   `main` at the same moment, so partners' installers and the new release go
+   live together. `release-kit-pr.yml` keeps that PR's body current, with a
+   heading such as `## rise-x-kit <old> -> <new>`, or `(NOT BUMPED)` while the
+   version hasn't moved yet.
+
+A fix that can't wait for the next kit release goes on a `hotfix/*` branch
+and PRs into `main` directly, the same as for plugins; it still needs to
+raise `kit/VERSION`.
+
+**GitHub settings to import once**, from `.github/rulesets/`:
+`protect-release-kit.json` (pull request, code-owner approval, a passing
+`kit-ci.yml`, no force-push) on `release-kit/*`, and `kit-tags.json`, which
+restricts creating, updating, and deleting `kit-v*` tags and ships in
+**Evaluate** with an empty bypass list. Import it, add the bypass in the UI
+(**GitHub Actions** if offered, otherwise the `rise-x-marketplace-approvers`
+team), then switch it to **Active** after the first release shows the tag was
+created. Do not make `kit-ci.yml` a
+required check on `main`: it runs only when a PR touches `kit/**`, and a
+required check that never reports leaves every plugin release PR pending.
+The version bump is enforced by `kit-ci.yml` running on the PR itself.
+Unconfirmed: whether the enterprise policy lets GitHub
+Actions create tags and releases at all. If it doesn't, the fallback is one
+maintainer running `gh release create` by hand, and `kit-tags.json` should
+list maintainers as the allowed tag creators instead.
+
 ## Validate before any PR
 
 ```
@@ -170,6 +223,18 @@ claude plugin validate ./plugins/<name>   # for every plugin directory
 
 All must pass. Also run each with `--strict` — it should pass too.
 
+A PR touching `kit/**` must also pass what `kit-ci.yml` runs, from `kit/`:
+
+```
+test -z "$(gofmt -l .)" && go vet ./... && go test -race -count=1 ./...
+```
+
+`gofmt -l` must print nothing — piping it straight into `&&` doesn't catch
+that, since `gofmt -l` still exits 0 even when it lists files. `kit-ci.yml`
+also cross-compiles `go build ./...` for darwin/arm64, darwin/amd64, and
+windows/amd64 in a separate matrix job; that job needs the Go version pinned
+in `kit/go.mod`.
+
 ## Public-repo scrub rules (repo-wide)
 
 Never commit, in any plugin: internal ecosystem/tenant IDs, personal names
@@ -178,18 +243,20 @@ or emails, internal hostnames.
 Known-benign, expected hits: the `localhost_public_url` warning documented in
 `plugins/rise-x-mcp/skills/rise-x-mcp/references/managing-apps.md`, generic
 "feedback" wording in
-`plugins/rise-x-mcp/skills/rise-x-mcp/references/validation.md`, and this
-file (it quotes the pattern above). Anything else is a real hit — fix it.
+`plugins/rise-x-mcp/skills/rise-x-mcp/references/validation.md`,
+`kit/internal/mcp/stale.go`'s two retired Azure Container Apps hostnames
+(public MCP endpoints partners connected to, kept for the reconnect fix), and
+this file (it quotes the pattern above). Anything else is a real hit — fix it.
 Future known-benign hits specific to one plugin belong in that plugin's own
 "Per-plugin rules" section above, not here.
 
 ## Process
 
 Use conventional commits standard. Never commit directly to `main` — a ruleset requires a PR, code-owner
-review, and a passing `validate` check. Only `release/*` and `hotfix/*` may
-open a PR into `main`; feature PRs target the open release branch, and
-anything else aimed at `main` is closed with a comment (see "Release
-process"). PRs opened from outside the org are
+review, and a passing `validate` check. Only `release/*`, `release-kit/*` and
+`hotfix/*` may open a PR into `main`; feature PRs target the open release
+branch for their track, and anything else aimed at `main` is closed with a
+comment (see "Release process"). PRs opened from outside the org are
 auto-closed by workflow; external input arrives via issues, not PRs.
 
 Two workflows close PRs, for different reasons. `close-outside-prs` handles

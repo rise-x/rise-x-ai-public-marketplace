@@ -1,0 +1,125 @@
+name: kit-ci
+
+on:
+  # No `branches` filter on purpose: kit PRs target the open release-kit/*
+  # branch, and the release PR from it targets main, so both have to run.
+  pull_request:
+    paths:
+      - 'kit/**'
+      - '.github/workflows/kit-*.yml'
+      # The scripts the kit track runs: a change to the version gate itself
+      # has to run through the gate.
+      - 'scripts/check-kit-version.sh'
+      - 'scripts/release-kit-pr-body.sh'
+  push:
+    # Release tags are created by kit-release.yml through the API, which
+    # starts no workflows, so there is nothing to gain from a tags filter.
+    branches:
+      - '**'
+    paths:
+      - 'kit/**'
+      - '.github/workflows/kit-*.yml'
+      - 'scripts/check-kit-version.sh'
+      - 'scripts/release-kit-pr-body.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # Windows and macOS run the tests too, not just a cross-compile: the
+    # single-instance lock, the process-tree kill, the no-follow open and the
+    # directory flush all have per-platform implementations, and until this
+    # matrix existed none of the Windows ones had ever executed anywhere.
+    # Only the ubuntu leg gates the version bump, so the check runs once.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: kit
+    steps:
+      # Before the checkout, so it governs it. Windows runners default to
+      # core.autocrlf=true, which rewrites every .go file to CRLF on the way
+      # out; gofmt then reports the whole tree as unformatted and the tests
+      # read content that is not what the repo holds.
+      - name: Check out with the repo's own line endings
+        if: runner.os == 'Windows'
+        # The default working directory is kit/, which the checkout below has
+        # not created yet.
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Full history: the version check below diffs against the PR base.
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: kit/go.mod
+      # Only a PR into main ships anything: merging one is what makes
+      # kit-release cut kit-v<version>. A PR into the open release-kit/*
+      # branch is collecting work for a release that has not happened, so it
+      # needs no bump and this step skips.
+      - name: Check kit version bump
+        if: github.base_ref == 'main' && matrix.os == 'ubuntu-latest'
+        working-directory: ${{ github.workspace }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bash scripts/check-kit-version.sh "origin/$BASE_REF"
+      # Formatting is not platform-specific, so one leg checks it.
+      - name: gofmt
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            echo "::error::gofmt -l found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -race -count=1 ./...
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: kit
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: kit/go.mod
+      # The `test` job's go vet only runs on ubuntu-latest for the host
+      # (linux) GOOS -- this is the one place windows-only files like
+      # procattr_windows.go get vetted at all.
+      - name: go vet windows/amd64
+        if: matrix.goos == 'windows'
+        env:
+          CGO_ENABLED: 0
+          GOOS: windows
+          GOARCH: amd64
+        run: go vet ./...
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build ./...

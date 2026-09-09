@@ -1,0 +1,25 @@
+{
+  "name": "kit-tags",
+  "target": "tag",
+  "enforcement": "evaluate",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/tags/kit-v*"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "creation"
+    },
+    {
+      "type": "update"
+    },
+    {
+      "type": "deletion"
+    }
+  ],
+  "bypass_actors": []
+}
