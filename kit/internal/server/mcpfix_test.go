@@ -211,7 +211,7 @@ func TestHandler_McpFix_DesktopEntry_400(t *testing.T) {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	if got := errorMessage(t, resp); got !=
-		"nothing the CLI can change; update this one in Claude Desktop under Settings, Connectors" {
+		"nothing the CLI can change; update this one in Claude Desktop under Customize, Connectors" {
 		t.Fatalf("error = %q", got)
 	}
 }

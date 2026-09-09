@@ -7,6 +7,10 @@ on:
     paths:
       - 'kit/**'
       - '.github/workflows/kit-*.yml'
+      # The scripts the kit track runs: a change to the version gate itself
+      # has to run through the gate.
+      - 'scripts/check-kit-version.sh'
+      - 'scripts/release-kit-pr-body.sh'
   push:
     # Release tags are created by kit-release.yml through the API, which
     # starts no workflows, so there is nothing to gain from a tags filter.
@@ -15,6 +19,8 @@ on:
     paths:
       - 'kit/**'
       - '.github/workflows/kit-*.yml'
+      - 'scripts/check-kit-version.sh'
+      - 'scripts/release-kit-pr-body.sh'
 
 permissions:
   contents: read

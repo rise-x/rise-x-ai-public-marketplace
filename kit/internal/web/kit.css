@@ -55,7 +55,49 @@
   background-color: color-mix(in srgb, var(--ring-control) 16%, transparent);
 }
 
+/* Skeleton — the shape of each card before /api/overview answers. Widths are
+   modifier classes, not inline styles: the page's CSP has no style-src, so
+   default-src 'self' blocks a style attribute. */
+@keyframes kit-skeleton-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 @layer components {
+  .kit-skeleton {
+    display: block;
+    height: 10px;
+    max-width: 100%;
+    border-radius: 4px;
+    animation: kit-skeleton-pulse 1.6s var(--ease) infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .kit-skeleton {
+      animation: none;
+    }
+  }
+  .kit-skeleton-xs {
+    width: 42px;
+  }
+  .kit-skeleton-sm {
+    width: 68px;
+  }
+  .kit-skeleton-md {
+    width: 118px;
+  }
+  .kit-skeleton-lg {
+    width: 196px;
+  }
+  .kit-skeleton-xl {
+    width: 264px;
+  }
+  .kit-skeleton-badge {
+    width: 62px;
+    height: 18px;
+    border-radius: 9999px;
+  }
+
   /* Button — base lifted from data-slot="button"; variant and size classes stay
      inline so a reviewer can match them against demo.html. */
   .ds-btn {

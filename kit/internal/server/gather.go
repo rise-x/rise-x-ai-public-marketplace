@@ -142,14 +142,14 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 	facts.NodeFound, facts.NodeVersion = node.found, node.version
 	facts.CanInstallNode = nodeinstall.CanInstall(s.nodeInstallEnv())
 
-	facts.NpmrcOffendingLines = s.npmrcCache.getOrFail(func() ([]string, bool) {
-		lines, err := npmrc.Analyze(s.npmrcPath)
+	report := s.npmrcCache.getOrFail(func() (npmrc.Report, bool) {
+		r, err := npmrc.Analyze(s.npmrcPath)
 		if err != nil {
-			return nil, true
+			return npmrc.Report{}, true
 		}
-		return lines, false
+		return r, false
 	})
-	facts.NpmrcOffendingHost, _ = npmrc.Host(s.npmrcPath)
+	facts.NpmrcOffendingLines, facts.NpmrcOffendingHost = report.Lines, report.Host
 
 	if runtime.GOOS == "windows" {
 		facts.GitFound = doctor.DetectGit(s.nodeEnv(s.runner))

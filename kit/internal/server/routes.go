@@ -374,7 +374,7 @@ func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action
 	}
 	if len(fixable) == 0 {
 		httpError(w, http.StatusBadRequest,
-			"nothing the CLI can change; update this one in Claude Desktop under Settings, Connectors")
+			"nothing the CLI can change; update this one in Claude Desktop under Customize, Connectors")
 		return
 	}
 

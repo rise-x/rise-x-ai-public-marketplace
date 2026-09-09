@@ -113,6 +113,10 @@ type Store struct {
 	// runningCancel cancels the running job's context. Only one job runs at a
 	// time, so one cancel func is the whole set.
 	runningCancel context.CancelFunc
+	// runningWork is closed when the last started job's fn actually returned.
+	// The slot is freed earlier than that on the cancel and timeout paths, so
+	// this is what a shutdown has to wait on.
+	runningWork <-chan struct{}
 }
 
 func NewStore() *Store {
@@ -133,9 +137,10 @@ func (s *Store) Start(action string, timeout time.Duration, fn Func) (string, er
 	}
 	id := newID()
 	j := &job{job: Job{ID: id, Action: action, Status: StatusRunning, StartedAt: time.Now()}}
+	work := make(chan struct{})
 	s.jobs[id] = j
 	s.runningID = id
-	s.runningCancel = cancel
+	s.runningCancel, s.runningWork = cancel, work
 	s.mu.Unlock()
 
 	go func() {
@@ -146,6 +151,9 @@ func (s *Store) Start(action string, timeout time.Duration, fn Func) (string, er
 		}
 		done := make(chan result, 1)
 		go func() {
+			// Registered first, so it runs last: whatever else happens, the
+			// close marks fn as no longer touching the machine.
+			defer close(work)
 			// The kit is a long-lived desktop helper, so a panic in one action
 			// must fail that job, not take the process down with it.
 			defer func() {
@@ -206,21 +214,24 @@ func (s *Store) CancelAll() {
 	}
 }
 
-// WaitIdle blocks until no job is running or timeout elapses, and reports
-// whether the store went idle.
+// WaitIdle blocks until the last job's fn has returned or timeout elapses, and
+// reports whether it returned. It waits on the work rather than on the running
+// slot: a cancelled job frees the slot at once, while its claude child is still
+// being killed, and a shutdown that stopped there would outlive nothing.
 func (s *Store) WaitIdle(timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for {
-		s.mu.Lock()
-		idle := s.runningID == ""
-		s.mu.Unlock()
-		if idle {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(2 * time.Millisecond)
+	s.mu.Lock()
+	work := s.runningWork
+	s.mu.Unlock()
+	if work == nil {
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-work:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 

@@ -501,16 +501,16 @@ func TestSetAutoUpdate_NoTmpFileLeftBehind(t *testing.T) {
 	}
 }
 
-// A failed rename must not leave a copy of settings.json behind: the tmp file
-// carries the same contents as the real one.
-func TestWriteAtomic_RenameFails_RemovesTmp(t *testing.T) {
+// A write that cannot land must not leave a copy of settings.json behind: the
+// tmp file carries the same contents as the real one.
+func TestWriteAtomic_CannotLand_RemovesTmp(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "settings.json")
 	if err := os.MkdirAll(filepath.Join(target, "in-the-way"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeAtomic(target, []byte(`{}`), 0o600, statStamp(target)); err == nil {
-		t.Fatal("expected the rename onto a non-empty directory to fail")
+	if err := writeAtomic(target, []byte(`{}`), 0o600, nil); err == nil {
+		t.Fatal("expected a write onto a non-empty directory to fail")
 	}
 	assertNoTmpFiles(t, dir)
 }

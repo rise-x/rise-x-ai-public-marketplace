@@ -155,14 +155,9 @@ func (w *Writer) SetAutoUpdate(name, repo string, enabled bool) (backupPath stri
 // setOnce is one read-modify-write attempt. It returns errChanged when the
 // file moved between the read and the write.
 func (w *Writer) setOnce(target, name, repo string, enabled bool) (backupPath string, err error) {
-	before := statStamp(target)
 	original, exists, err := readTarget(target)
 	if err != nil {
 		return "", err
-	}
-	read := statStamp(target)
-	if read != before {
-		return "", errChanged // the bytes just read may be half of two versions
 	}
 	if w.afterRead != nil {
 		w.afterRead()
@@ -186,7 +181,14 @@ func (w *Writer) setOnce(target, name, repo string, enabled bool) (backupPath st
 		}
 		w.backedUp = true
 	}
-	if err := writeAtomic(target, out, mode, read); err != nil {
+	if err := writeAtomic(target, out, mode, original); err != nil {
+		// This attempt installed nothing, so its backup describes a state the
+		// next one will back up again. Leaving it would strand a copy of
+		// settings.json nothing reports.
+		if backupPath != "" {
+			_ = os.Remove(backupPath)
+			w.backedUp = false
+		}
 		return "", err
 	}
 	return backupPath, nil
@@ -274,22 +276,6 @@ func readTarget(target string) (data []byte, exists bool, err error) {
 	return nil, false, err
 }
 
-// stamp is a file's size and modification time, the pair used to notice
-// another program writing settings.json. Compared only, never shown.
-type stamp struct {
-	exists bool
-	size   int64
-	mtime  int64
-}
-
-func statStamp(path string) stamp {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return stamp{}
-	}
-	return stamp{exists: true, size: fi.Size(), mtime: fi.ModTime().UnixNano()}
-}
-
 // resolve follows a symlinked settings.json to the real file, so a dotfiles
 // setup keeps its link and the change lands in the repo the partner tracks.
 func resolve(path string) string {
@@ -334,9 +320,11 @@ func readFile(path string) (data []byte, hadBOM bool, err error) {
 }
 
 // writeAtomic installs data at path via a uniquely named temp file in the same
-// directory, but only while path still matches expect: a rename over a file
-// another program has just rewritten would silently drop its change.
-func writeAtomic(path string, data []byte, mode os.FileMode, expect stamp) error {
+// directory, but only while path still holds exactly the bytes expect: a
+// rename over a file another program has just rewritten would silently drop
+// its change. The comparison is on content, not size and mtime, so a
+// same-length rewrite inside one filesystem timestamp tick is caught too.
+func writeAtomic(path string, data []byte, mode os.FileMode, expect []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
 	if err != nil {
 		return err
@@ -359,7 +347,11 @@ func writeAtomic(path string, data []byte, mode os.FileMode, expect stamp) error
 	if err := os.Chmod(name, mode); err != nil {
 		return err
 	}
-	if statStamp(path) != expect {
+	current, _, err := readTarget(path)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, expect) {
 		return errChanged
 	}
 	return os.Rename(name, path)

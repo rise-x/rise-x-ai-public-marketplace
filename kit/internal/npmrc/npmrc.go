@@ -33,46 +33,44 @@ type Result struct {
 	Backup string
 }
 
-// Analyze reports which lines Clean would rewrite (masked), without touching
-// the file.
-func Analyze(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	_, rewritten := clean(string(data))
-	return maskAll(rewritten), nil
+// Report is what one scan of the file found. Both fields come from the same
+// read, so the masked lines and the host can never describe different
+// versions of it.
+type Report struct {
+	// Lines are the @rise-x:registry lines Clean would rewrite, masked.
+	Lines []string
+	// Host is the registry host the first of them points at, unmasked: a
+	// registry host is not a credential, so the doctor can name it directly.
+	// "another registry" stands in for a value with no readable host.
+	Host string
 }
 
-// Host reports the host the leftover @rise-x:registry line in path points
-// at, or "" if none needs fixing. Unlike Analyze's masked lines, a registry
-// host is not a credential, so the doctor message can name it directly.
-func Host(path string) (string, error) {
+// Analyze reports what Clean would rewrite, without touching the file.
+func Analyze(path string) (Report, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil
+			return Report{}, nil
 		}
-		return "", err
+		return Report{}, err
 	}
-	for _, line := range strings.SplitAfter(string(data), "\n") {
-		text := strings.TrimRight(line, "\r\n")
-		m := registryLineRe.FindStringSubmatch(text)
-		if m == nil {
-			continue
-		}
-		if strings.EqualFold(hostOf(m[1]), npmjsHost) {
-			continue
-		}
-		if host := hostOf(m[1]); host != "" {
-			return host, nil
-		}
-		return "another registry", nil
+	_, rewritten := clean(string(data))
+	if len(rewritten) == 0 {
+		return Report{}, nil
 	}
-	return "", nil
+	return Report{Lines: maskAll(rewritten), Host: hostLabel(rewritten[0])}, nil
+}
+
+// hostLabel names the registry an offending line points at.
+func hostLabel(line string) string {
+	m := registryLineRe.FindStringSubmatch(line)
+	if m == nil {
+		return "another registry"
+	}
+	if host := hostOf(m[1]); host != "" {
+		return host
+	}
+	return "another registry"
 }
 
 // Clean rewrites Rise-X leftover @rise-x:registry lines in path to point at

@@ -250,8 +250,11 @@ func TestStore_CancelAll_FailsRunningJobAndFreesStore(t *testing.T) {
 	<-started
 
 	s.CancelAll()
-	if !s.WaitIdle(2 * time.Second) {
-		t.Fatal("store still busy after CancelAll")
+	// WaitIdle answers for the work, not the slot, so a job that ignores its
+	// context holds it out: that false is what makes main log "still running"
+	// instead of claiming a clean shutdown.
+	if s.WaitIdle(50 * time.Millisecond) {
+		t.Fatal("WaitIdle reported idle while the job body was still running")
 	}
 
 	waitFinished(t, s, id)
@@ -283,6 +286,10 @@ func TestStore_CancelAll_CancelsJobContext(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	s.CancelAll()
+	// A job that respects its context is what lets a shutdown say it waited.
+	if !s.WaitIdle(2 * time.Second) {
+		t.Fatal("WaitIdle did not see the cancelled job's body return")
+	}
 	waitFinished(t, s, id)
 	if snap, _ := s.Snapshot(id, 0); snap.Job.Status != StatusFailed {
 		t.Fatalf("status = %v, want failed", snap.Job.Status)

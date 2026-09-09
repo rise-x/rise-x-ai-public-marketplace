@@ -227,12 +227,20 @@ func TestAnalyze_MatchesClean(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lines, err := Analyze(path)
+	report, err := Analyze(path)
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if len(lines) != 1 {
-		t.Fatalf("Analyze lines = %v, want 1", lines)
+	if len(report.Lines) != 1 {
+		t.Fatalf("Analyze lines = %v, want 1", report.Lines)
+	}
+	// The masked line and the host come from the same scan, so a message built
+	// from one always describes the file the other was read from.
+	if report.Host != "rise-x.pkgs.visualstudio.com" {
+		t.Fatalf("Analyze host = %q", report.Host)
+	}
+	if want := "@rise-x:registry=…"; report.Lines[0] != want {
+		t.Fatalf("Analyze line = %q, want %q", report.Lines[0], want)
 	}
 	// Analyze must not touch the file.
 	after, err := os.ReadFile(path)
@@ -244,7 +252,7 @@ func TestAnalyze_MatchesClean(t *testing.T) {
 	}
 }
 
-func TestHost(t *testing.T) {
+func TestAnalyze_Host(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".npmrc")
 
@@ -256,17 +264,24 @@ func TestHost(t *testing.T) {
 	}
 
 	write("@rise-x:registry=https://npm.pkg.github.com\n")
-	if got, err := Host(path); err != nil || got != "npm.pkg.github.com" {
-		t.Fatalf("Host = %q, %v, want npm.pkg.github.com", got, err)
+	if got, err := Analyze(path); err != nil || got.Host != "npm.pkg.github.com" {
+		t.Fatalf("host = %q, %v, want npm.pkg.github.com", got.Host, err)
+	}
+
+	// A value with no readable host still needs fixing, and the message needs
+	// something to name.
+	write("@rise-x:registry=\n")
+	if got, err := Analyze(path); err != nil || got.Host != "another registry" || len(got.Lines) != 1 {
+		t.Fatalf("report = %+v, %v, want one line at \"another registry\"", got, err)
 	}
 
 	write("@rise-x:registry=https://registry.npmjs.org/\n")
-	if got, err := Host(path); err != nil || got != "" {
-		t.Fatalf("Host = %q, %v, want \"\"", got, err)
+	if got, err := Analyze(path); err != nil || got.Host != "" || got.Lines != nil {
+		t.Fatalf("report = %+v, %v, want empty", got, err)
 	}
 
-	if got, err := Host(filepath.Join(dir, "missing")); err != nil || got != "" {
-		t.Fatalf("Host(missing) = %q, %v, want \"\"", got, err)
+	if got, err := Analyze(filepath.Join(dir, "missing")); err != nil || got.Host != "" {
+		t.Fatalf("Analyze(missing) = %+v, %v, want empty", got, err)
 	}
 }
 

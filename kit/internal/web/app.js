@@ -817,10 +817,10 @@ function renderSkillsFooter() {
 
 /** MOVED_NOTE explains a connector that predates the mcp.rise-x.io addresses. */
 const MOVED_NOTE =
-  'Connectors added in Claude Desktop before the move to mcp.rise-x.io still point at the old address; remove them in <strong class="font-medium text-foreground">Settings</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> and add the new one.';
+  'Connectors added in Claude Desktop before the move to mcp.rise-x.io still point at the old address; remove them in <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> and add the new one.';
 
 const GUIDE_STEPS = [
-  'Open <strong class="font-medium text-foreground">Claude Code Desktop</strong> &rsaquo; <strong class="font-medium text-foreground">Settings</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> &rsaquo; <strong class="font-medium text-foreground">Add custom connector</strong>.',
+  'Open <strong class="font-medium text-foreground">Claude Desktop</strong> &rsaquo; <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong>, then press <strong class="font-medium text-foreground">Add</strong>.',
   "Paste the name and address from the rows above. Leave the headers empty.",
   'Sign in when the browser opens, then come back here and press <strong class="font-medium text-foreground">Recheck</strong>.',
 ];
@@ -863,7 +863,7 @@ function staleRows(stale) {
         description: `${entry.url} → ${entry.suggestedUrl}`,
         trailing:
           entry.scope === "desktop"
-            ? '<span class="kit-wrap max-w-[42ch] shrink-0 text-right text-xs text-muted-foreground">Update this one in Claude Desktop &rsaquo; Settings &rsaquo; Connectors.</span>'
+            ? '<span class="kit-wrap max-w-[42ch] shrink-0 text-right text-xs text-muted-foreground">Update this one in Claude Desktop &rsaquo; Customize &rsaquo; Connectors.</span>'
             : btn("Fix", {
                 act: "mcp-fix",
                 variant: "outline",
@@ -911,11 +911,11 @@ function renderConnection() {
          <div class="text-xs font-medium text-foreground">Managed in Claude Desktop</div>
          <div class="mt-1 text-xs text-muted-foreground">
            Claude Desktop set these up from your account, so Kit cannot check them from here.
-           Open <strong class="font-medium text-foreground">Settings</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> to see whether they are signed in.
+           Open <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> to see whether they are signed in.
          </div>
        </div>`
     : `<div class="rounded-lg bg-fill-0 p-3.5">
-         <div class="text-xs font-medium text-foreground">Add it in Claude Code Desktop</div>
+         <div class="text-xs font-medium text-foreground">Add it in Claude Desktop</div>
          <ol class="mt-2.5 flex flex-col gap-2">${GUIDE_STEPS.map(
            (step, i) => `<li class="flex items-start gap-2.5">
              <span class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-fill-2 text-micro font-medium text-muted-foreground tabular-nums">${i + 1}</span>
@@ -1007,6 +1007,15 @@ function checkAction(check) {
 }
 
 function renderDoctor() {
+  if (!checks) {
+    $("kit-doctor-desc").textContent = doctorError
+      ? "Could not check your setup."
+      : "Checking your setup…";
+    $("kit-doctor-list").innerHTML = doctorError
+      ? `<div class="px-3.5 py-2.5 text-xs text-muted-foreground">${esc(doctorError)}</div>`
+      : "";
+    return;
+  }
   $("kit-doctor-desc").textContent =
     `${checks.length} checks, checked just now. Anything that needs you has a button next to it.`;
 
@@ -1151,6 +1160,71 @@ function scrollLog(job) {
   if (log) log.scrollTop = log.scrollHeight;
 }
 
+/* skeletons */
+
+/**
+ * The first paint, before /api/overview answers. Each block mirrors the row
+ * count and height of the card it stands in for, so the real content lands in
+ * the same place and nothing jumps. Shown once, on startup: a later refresh
+ * keeps what is already on screen and reports itself through the pressed
+ * control's spinner instead.
+ */
+const bar = (size) =>
+  `<span class="kit-skeleton kit-skeleton-${size} bg-fill-2" aria-hidden="true"></span>`;
+
+const skelRow = (left, right) => `
+  <div class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+    <div class="min-w-0 flex-1">${bar(left)}</div>
+    ${right ? bar(right) : ""}
+  </div>`;
+
+const skelList = (...rows) =>
+  `<div class="flex flex-col rounded-lg border border-border-subtle">${rows.join("")}</div>`;
+
+const skelSkillRow = () => `
+  <tr>
+    <td class="border-b border-border-subtle px-4 py-3.5 align-middle">${bar("md")}</td>
+    <td class="${CELL}">${bar("xs")}</td>
+    <td class="${CELL}">${bar("xs")}</td>
+    <td class="${CELL}">${bar("sm")}</td>
+    <td class="${CELL}"><div class="flex kit-end">${bar("sm")}</div></td>
+  </tr>`;
+
+/** BUSY_REGIONS are the containers a skeleton fills. aria-busy tells a screen
+ * reader the content is still coming; the summary banner says so in words. */
+const BUSY_REGIONS = [
+  "kit-cli-badge",
+  "kit-cli-body",
+  "kit-conn-badge",
+  "kit-conn-body",
+  "kit-skills-body",
+  "kit-doctor-list",
+];
+
+function renderSkeletons() {
+  const fill = (id, html) => {
+    const el = $(id);
+    el.setAttribute("aria-busy", "true");
+    el.innerHTML = html;
+  };
+  fill("kit-cli-badge", bar("badge"));
+  fill(
+    "kit-cli-body",
+    skelList(skelRow("sm", "xl"), skelRow("sm", "xs"), skelRow("sm", "md")),
+  );
+  fill("kit-conn-badge", bar("badge"));
+  fill("kit-conn-body", skelList(skelRow("md", "lg"), skelRow("md", "lg")));
+  fill("kit-skills-body", skelSkillRow() + skelSkillRow());
+  fill(
+    "kit-doctor-list",
+    Array.from({ length: 6 }, () => skelRow("lg", "xs")).join(""),
+  );
+}
+
+function clearBusy() {
+  for (const id of BUSY_REGIONS) $(id).removeAttribute("aria-busy");
+}
+
 /* load */
 
 async function loadOverview(fresh) {
@@ -1160,26 +1234,29 @@ async function loadOverview(fresh) {
   renderCli();
   renderSkills();
   renderConnection();
+  syncRefreshControls();
 }
 
-async function loadDoctor(fresh) {
-  if (fresh) {
-    // A fresh check re-probes the machine, which takes seconds, so paint the
-    // loading state before asking rather than sitting on the old answer.
-    checks = null;
-    renderSummary();
-    $("kit-doctor-desc").textContent = "Checking your setup…";
-  }
+/** doctorLoading paints the "still working" state a fresh re-probe needs,
+ * since that takes seconds and the old answer must not stand meanwhile. */
+function doctorLoading() {
+  checks = null;
+  doctorError = "";
+  renderSummary();
+  renderDoctor();
+}
+
+async function loadDoctor() {
   try {
-    checks =
-      (await api(fresh ? "/api/doctor?fresh=1" : "/api/doctor")).checks || [];
+    checks = (await api("/api/doctor")).checks || [];
     doctorError = "";
   } catch (err) {
-    // The summary banner is the only place this shows, so paint it before the
-    // caller's own error handling takes over.
+    // The rows below would otherwise keep showing the previous run's verdicts
+    // under a banner saying the check failed.
     checks = null;
     doctorError = err.message;
     renderSummary();
+    renderDoctor();
     throw err;
   }
   renderSummary();
@@ -1215,8 +1292,15 @@ function focusKey(el) {
   ].join("|");
 }
 
-function restoreFocus(key) {
+/** restoreFocus puts focus back only where the re-render took it away: an
+ * element still in the document, or one the reader moved to meanwhile, keeps
+ * it. A fresh gather takes seconds, and stealing the caret back from wherever
+ * they went next is worse than losing it. */
+function restoreFocus(key, was) {
   if (!key) return;
+  const active = document.activeElement;
+  if (active && active !== document.body && active !== was) return;
+  if (was && was.isConnected) return;
   for (const el of document.querySelectorAll("[data-act]")) {
     if (focusKey(el) === key) {
       el.focus();
@@ -1225,17 +1309,80 @@ function restoreFocus(key) {
   }
 }
 
-async function refresh(fresh) {
+/**
+ * Refresh, Recheck and Run again all run the same gather, so while one is in
+ * flight every one of them is disabled: a second ?fresh=1 only drops the probe
+ * caches again and re-spawns claude for an answer the first is already
+ * fetching. refreshingAct names the one that was pressed, so the spinner lands
+ * on it.
+ */
+const REFRESH_ACTS = ["refresh", "recheck", "doctor-again"];
+let refreshing = false;
+let refreshingAct = "";
+let queued = false;
+let queuedFresh = false;
+
+/** syncRefreshControls applies that lock to whatever is in the document now.
+ * It is re-applied after each render, because renderConnection replaces the
+ * Recheck button while the gather that disabled it is still running. */
+function syncRefreshControls() {
+  for (const el of document.querySelectorAll("[data-act]")) {
+    if (!REFRESH_ACTS.includes(el.dataset.act)) continue;
+    el.disabled = refreshing;
+    const spin = refreshing && el.dataset.act === refreshingAct;
+    if (spin && el.dataset.idleLabel === undefined) {
+      el.dataset.idleLabel = el.innerHTML;
+      el.innerHTML = `${SPINNER}Checking…`;
+    } else if (!spin && el.dataset.idleLabel !== undefined) {
+      el.innerHTML = el.dataset.idleLabel;
+      delete el.dataset.idleLabel;
+    }
+  }
+}
+
+async function refresh(fresh, act) {
+  if (refreshing) {
+    // The gather in flight may have started before whatever prompted this, so
+    // run one more afterwards rather than dropping the request.
+    queued = true;
+    queuedFresh = queuedFresh || !!fresh;
+    return;
+  }
+  refreshing = true;
+  refreshingAct = act || "";
+  syncRefreshControls();
+
   const open = openDetails();
   const focused = focusKey(document.activeElement);
+  const wasFocused = document.activeElement;
   try {
-    await Promise.all([loadOverview(fresh), loadDoctor(fresh)]);
+    if (fresh) {
+      // Sequential on purpose: only the overview's ?fresh=1 drops the caches,
+      // and the doctor has to read what that gather refilled rather than race
+      // the invalidation and be handed the answer it was meant to replace.
+      doctorLoading();
+      await loadOverview(true);
+      await loadDoctor();
+    } else {
+      await Promise.all([loadOverview(), loadDoctor()]);
+    }
     renderSummary();
   } catch (err) {
     notice("error", `Could not read this machine: ${err.message}`);
   } finally {
+    refreshing = false;
+    refreshingAct = "";
+    clearBusy();
+    syncRefreshControls();
     restoreDetails(open);
-    restoreFocus(focused);
+    restoreFocus(focused, wasFocused);
+  }
+
+  if (queued) {
+    const again = queuedFresh;
+    queued = false;
+    queuedFresh = false;
+    await refresh(again);
   }
 }
 
@@ -1370,29 +1517,13 @@ function runFix(button) {
   });
 }
 
-/** busy swaps a button's label for a spinner while its work runs. A gather
- * the caches could not answer takes seconds, and a button that only greys out
- * reads as one that did nothing. */
-async function busy(button, label, work) {
-  if (!button) return work();
-  const original = button.innerHTML;
-  button.disabled = true;
-  button.innerHTML = `${SPINNER}${esc(label)}`;
-  try {
-    return await work();
-  } finally {
-    button.disabled = false;
-    button.innerHTML = original;
-  }
-}
-
 /** simple wraps an action that posts nothing but an empty body. */
 const simple = (action) => (button) => runAction(action, {}, button);
 
 const ACTIONS = {
-  refresh: () => refresh(true),
-  recheck: () => refresh(),
-  "doctor-again": (button) => busy(button, "Checking…", () => refresh(true)),
+  refresh: () => refresh(true, "refresh"),
+  recheck: () => refresh(true, "recheck"),
+  "doctor-again": () => refresh(true, "doctor-again"),
   "notice-dismiss": () => clearNotice(),
   "banner-dismiss": () => {
     overview.reloadHint = false;
@@ -1459,6 +1590,7 @@ function onClick(event) {
 document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", onClick);
   renderSummary();
+  renderSkeletons();
   renderJobs();
   refresh();
 });

@@ -16,6 +16,7 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/doctor"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/jobs"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/npmrc"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/settings"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/synced"
@@ -81,7 +82,7 @@ type Server struct {
 
 	mcpCache    probeCache[mcpListResult]
 	nodeCache   probeCache[nodeProbe]
-	npmrcCache  probeCache[[]string]
+	npmrcCache  probeCache[npmrc.Report]
 	syncedCache probeCache[[]synced.Plugin]
 	// staleCache holds the MCP scan: ~/.claude.json carries every project the
 	// partner has ever opened, so it is not a file to re-read per request.

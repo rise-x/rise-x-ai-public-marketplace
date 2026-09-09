@@ -79,10 +79,19 @@ if pgrep -x rise-x-kit >/dev/null 2>&1; then
   exit 1
 fi
 
+existing_dir=""
 if existing="$(command -v rise-x-kit 2>/dev/null)"; then
-  # Already on PATH somewhere -- replace it there instead of adding a second,
-  # possibly-shadowed copy elsewhere.
-  dest_dir="$(dirname "$existing")"
+  existing_dir="$(dirname "$existing")"
+fi
+
+if [ -n "$existing_dir" ] && [ -w "$existing_dir" ]; then
+  # Already on PATH somewhere writable -- replace it there instead of adding a
+  # second copy the first one would keep shadowing.
+  dest_dir="$existing_dir"
+elif [ -n "$existing_dir" ] && [ ! -w "$existing_dir" ]; then
+  echo "error: rise-x-kit is installed at $existing but $existing_dir is not writable." >&2
+  echo "       Remove it (sudo rm '$existing') and run this again, or re-run with sudo." >&2
+  exit 1
 elif [ -w /usr/local/bin ]; then
   dest_dir="/usr/local/bin"
 else

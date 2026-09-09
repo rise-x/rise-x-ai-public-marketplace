@@ -78,8 +78,7 @@ marketplace.
 the interface Claude uses to reach Rise-X) servers are connected, with three
 steps to connect them:
 
-1. In Claude Code Desktop, go to **Settings** > **Connectors** > **Add custom
-   connector**.
+1. In Claude Desktop, go to **Customize** > **Connectors**, then press **Add**.
 2. Enter the name and URL for each server: `rise-x-test` at
    `https://mcp-test.rise-x.io/mcp`, and `rise-x` at `https://mcp.rise-x.io/mcp`.
 3. Sign in when your browser prompts you.
@@ -87,8 +86,8 @@ steps to connect them:
 Connectors added in Claude Desktop before Rise-X moved to `mcp.rise-x.io` still
 point at the old address. Rise-X Kit lists any it finds under **Old Rise-X
 addresses**, with a **Fix** button for the ones added with the `claude` CLI;
-connectors the Desktop app owns have to be removed and re-added in **Settings**
-> **Connectors**.
+connectors the Desktop app owns have to be removed and re-added in
+**Customize** > **Connectors**.
 
 When your organisation delivers the Rise-X skill, its connections belong to
 Claude Desktop. `claude mcp list` cannot see them, so the card reads **Managed
