@@ -43,6 +43,18 @@ jobs:
         shell: bash
         working-directory: kit
     steps:
+      # Before the checkout, so it governs it. Windows runners default to
+      # core.autocrlf=true, which rewrites every .go file to CRLF on the way
+      # out; gofmt then reports the whole tree as unformatted and the tests
+      # read content that is not what the repo holds.
+      - name: Check out with the repo's own line endings
+        if: runner.os == 'Windows'
+        # The default working directory is kit/, which the checkout below has
+        # not created yet.
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Full history: the version check below diffs against the PR base.
@@ -60,7 +72,9 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: bash scripts/check-kit-version.sh "origin/$BASE_REF"
+      # Formatting is not platform-specific, so one leg checks it.
       - name: gofmt
+        if: matrix.os == 'ubuntu-latest'
         run: |
           unformatted="$(gofmt -l .)"
           if [[ -n "$unformatted" ]]; then
