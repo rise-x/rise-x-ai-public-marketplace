@@ -3,7 +3,9 @@ package synced
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 )
 
 // manifestEntry is one plugins[] entry of the manifest fixture.
@@ -239,5 +241,77 @@ func TestReadClaudeDir_NameFromDirectory(t *testing.T) {
 	got, _ := ReadClaudeDir(claudeDir)
 	if len(got) != 1 || got[0].Name != "rise-x-apps" {
 		t.Fatalf("read %+v", got)
+	}
+}
+
+// writeSession writes a Desktop session file for account, naming the
+// connectors in body's remoteMcpServersConfig, and stamps it at when.
+func writeSession(t *testing.T, dataDir, account, id string, when time.Time, body string) {
+	t.Helper()
+	dir := filepath.Join(dataDir, "claude-code-sessions", account, "org-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "local_"+id+".json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const gmailSession = `{"sessionId":"local_a","remoteMcpServersConfig":[` +
+	`{"uuid":"u1","name":"Gmail","tools":[{"name":"create_draft"},{"name":"reply"}]}]}`
+
+const riseXSession = `{"sessionId":"local_b","remoteMcpServersConfig":[` +
+	`{"uuid":"u1","name":"Gmail","tools":[{"name":"create_draft"}]},` +
+	`{"uuid":"u2","name":"Rise-X","tools":[{"name":"get_active_ecosystem"},{"name":"list_flows"}]}]}`
+
+// The newest session file of the signed-in account is the one that says
+// what the app hands sessions now; another account's, however recent, is not.
+func TestConnectors_NewestSessionOfSignedInAccount(t *testing.T) {
+	dataDir := t.TempDir()
+	writeConfig(t, dataDir, currentAccount)
+	base := time.Now().Add(-time.Hour)
+	writeSession(t, dataDir, currentAccount, "old", base, gmailSession)
+	writeSession(t, dataDir, currentAccount, "new", base.Add(time.Minute), riseXSession)
+	writeSession(t, dataDir, "account-2", "newer", base.Add(2*time.Minute), gmailSession)
+
+	got, err := Connectors(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Connector{
+		{Name: "Gmail", Tools: []string{"create_draft"}},
+		{Name: "Rise-X", Tools: []string{"get_active_ecosystem", "list_flows"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Connectors = %+v, want %+v", got, want)
+	}
+}
+
+func TestConnectors_NoSession(t *testing.T) {
+	dataDir := t.TempDir()
+	writeConfig(t, dataDir, currentAccount)
+	if got, err := Connectors(dataDir); err != nil || got != nil {
+		t.Fatalf("Connectors = %+v, %v; want nil, nil", got, err)
+	}
+	// With no signed-in account known, a session file cannot be told apart
+	// from a previous account's.
+	dataDir = t.TempDir()
+	writeSession(t, dataDir, currentAccount, "a", time.Now(), riseXSession)
+	if got, err := Connectors(dataDir); err != nil || got != nil {
+		t.Fatalf("Connectors = %+v, %v; want nil, nil without config.json", got, err)
+	}
+}
+
+// A session file that is not JSON is reported, never read as "no connectors".
+func TestConnectors_InvalidSession(t *testing.T) {
+	dataDir := t.TempDir()
+	writeConfig(t, dataDir, currentAccount)
+	writeSession(t, dataDir, currentAccount, "a", time.Now(), "{not json")
+	if _, err := Connectors(dataDir); err == nil {
+		t.Fatal("Connectors accepted an invalid session file")
 	}
 }

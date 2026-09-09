@@ -25,7 +25,8 @@
  *       installSource?: "public"|"marketplace"|"desktop"|"organisation",
  *       sourceName? }],      // the marketplace installSource came from
  *     mcp?: { verdict: "connected"|"needs_auth"|"failed"|"pending"|"unknown"
- *               |"not_installed"|"managed", // managed = the Desktop app owns them
+ *               |"not_installed"|"managed"|"desktop", // managed = the Desktop app owns them; desktop = added there
+ *       desktopConnectors?: [string], // the Rise-X connectors the Desktop app gave the latest session
  *       servers?: [{ name, target, status }], configured?: [{ name, type?, url?, command?, args? }],
  *       stale?: [{ name, scope: "user"|"local"|"desktop", projectPath?, url, suggestedUrl }],
  *       message?: string,    // why the verdict is unknown, when it is
@@ -205,6 +206,7 @@ const CONNECTION = {
   pending: ["Starting up", "default"],
   not_installed: ["Not installed", "outline"],
   managed: ["Managed in Claude Desktop", "info"],
+  desktop: ["Connected in Claude Desktop", "success"],
   unknown: ["Unknown", "default"],
 };
 
@@ -851,10 +853,28 @@ const MOVED_NOTE =
   'Connectors added in Claude Desktop before the move to mcp.rise-x.io still point at the old address; remove them in <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> and add the new one.';
 
 const GUIDE_STEPS = [
-  'Open <strong class="font-medium text-foreground">Claude Desktop</strong> &rsaquo; <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong>, then press <strong class="font-medium text-foreground">Add</strong>.',
-  "Paste the name and address from the rows above. Leave the headers empty.",
-  'Sign in when the browser opens, then come back here and press <strong class="font-medium text-foreground">Recheck</strong>.',
+  'Open <strong class="font-medium text-foreground">Claude Desktop</strong> &rsaquo; <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong>, press <strong class="font-medium text-foreground">Add</strong>, then <strong class="font-medium text-foreground">Add custom connector</strong>.',
+  'Paste the name and address from a row above and press <strong class="font-medium text-foreground">Continue</strong>. Keep what it detected, add no headers, and press <strong class="font-medium text-foreground">Add</strong>.',
+  'Open the new connector, press <strong class="font-medium text-foreground">Connect</strong>, and finish in your browser: <strong class="font-medium text-foreground">Continue connecting</strong>, then sign in.',
+  'Repeat for the other row, then come back here and press <strong class="font-medium text-foreground">Recheck</strong>.',
 ];
+
+/** SESSION_HINT says where Kit reads Desktop connectors from, since Recheck
+ * cannot see one until a Claude Code session in the app has had it. */
+const SESSION_HINT =
+  "Kit reads these connectors from your Claude Code sessions in Claude Desktop, so if Recheck does not see them yet, open a session there first.";
+
+/** desktopNote explains a connection the Desktop app made, which the raw check
+ * below cannot see. */
+function desktopNote(names) {
+  return `<div class="rounded-lg bg-fill-0 p-3.5">
+    <div class="text-xs font-medium text-foreground">Connected in Claude Desktop</div>
+    <div class="mt-1 text-xs text-muted-foreground">
+      Your latest Claude Code session in Claude Desktop had ${esc(names.join(", "))}.
+      The skill's own copy of the connection, in the raw check output below, asks for Claude Code's own sign-in; that only matters when you run <code class="font-mono">claude</code> in a terminal.
+    </div>
+  </div>`;
+}
 
 function connectionRows(mcp) {
   const configured = mcp.configured || [];
@@ -918,7 +938,9 @@ function renderConnection() {
   const rows = connectionRows(mcp);
   const managed = mcp.verdict === "managed";
 
-  const guide = managed
+  const guide = mcp.verdict === "desktop"
+    ? desktopNote(mcp.desktopConnectors || [])
+    : managed
     ? `<div class="rounded-lg bg-fill-0 p-3.5">
          <div class="text-xs font-medium text-foreground">Managed in Claude Desktop</div>
          <div class="mt-1 text-xs text-muted-foreground">
@@ -934,6 +956,7 @@ function renderConnection() {
              <span class="text-xs text-muted-foreground">${step}</span>
            </li>`,
          ).join("")}</ol>
+         <div class="mt-2.5 text-xs text-muted-foreground">${SESSION_HINT}</div>
          <div class="mt-2.5 text-xs text-muted-foreground">${MOVED_NOTE}</div>
        </div>`;
 
@@ -1068,6 +1091,7 @@ const jobError = (job) => (job.status === "failed" && job.error) || "";
  */
 function jobItem(job) {
   job.rendered = job.lines.length;
+  job.shown = job.status;
   const error = jobError(job);
   return `
     <div data-slot="item" id="kit-job-${esc(job.id)}" class="flex flex-col rounded-lg border border-border-subtle p-3.5">
@@ -1089,9 +1113,16 @@ function renderJobsHeader() {
   const running = jobs.find((job) => job.status === "running");
   const finished = jobs.length - (running ? 1 : 0);
 
-  $("kit-jobs-glyph").innerHTML = running
-    ? SPINNER
-    : dot(finished ? "bg-success" : "bg-fill-3", finished ? "Done" : "Idle");
+  // Replacing the spinner on every poll restarts its animation, so the glyph
+  // changes hands only when what it shows does.
+  const glyph = $("kit-jobs-glyph");
+  const state = running ? "running" : finished ? "done" : "idle";
+  if (glyph.dataset.state !== state) {
+    glyph.dataset.state = state;
+    glyph.innerHTML = running
+      ? SPINNER
+      : dot(finished ? "bg-success" : "bg-fill-3", finished ? "Done" : "Idle");
+  }
   $("kit-jobs-summary").textContent = running
     ? `${running.title}…`
     : finished
@@ -1136,8 +1167,11 @@ function patchJob(job) {
     renderJobs(); // the entry is new to the drawer
     return;
   }
-  block.querySelector("[data-job-glyph]").innerHTML = jobGlyph(job);
-  block.querySelector("[data-job-result]").innerHTML = jobResult(job);
+  if (job.shown !== job.status) {
+    job.shown = job.status;
+    block.querySelector("[data-job-glyph]").innerHTML = jobGlyph(job);
+    block.querySelector("[data-job-result]").innerHTML = jobResult(job);
+  }
 
   const error = block.querySelector("[data-job-error]");
   error.textContent = jobError(job);

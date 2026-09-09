@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -34,7 +35,19 @@ const (
 	// VerdictManaged means the servers come from a plugin the Claude Desktop
 	// app manages, so `claude mcp list` cannot see their state at all.
 	VerdictManaged Verdict = "managed"
+	// VerdictDesktop means the connection is one the partner added in Claude
+	// Desktop: `claude mcp list` cannot see it, but the app's latest Claude
+	// Code session had it, tools and all.
+	VerdictDesktop Verdict = "desktop"
 )
+
+// riseXTool is a tool only the Rise-X MCP server serves. A connector added in
+// Claude Desktop carries whatever name the partner typed and no address, so
+// its tool list is what says it is Rise-X.
+const riseXTool = "get_active_ecosystem"
+
+// RiseXToolset reports whether tools is the Rise-X MCP server's.
+func RiseXToolset(tools []string) bool { return slices.Contains(tools, riseXTool) }
 
 // Parse reads `claude mcp list`'s text output into a list of servers,
 // skipping the health-check banner line and any "[mcp-sdk] ..." noise.

@@ -494,3 +494,57 @@ func TestHandler_PluginUninstall_MirrorCopy_400(t *testing.T) {
 		t.Fatalf("error = %q", got)
 	}
 }
+
+const needsAuthList = "Checking MCP server health…\n\n" +
+	"plugin:rise-x-mcp:rise-x: https://mcp.rise-x.io/mcp (HTTP) - ! Needs authentication\n" +
+	"plugin:rise-x-mcp:rise-x-test: https://mcp-test.rise-x.io/mcp (HTTP) - ! Needs authentication\n"
+
+// writeDesktopSession writes the Desktop app's session file for the
+// signed-in account, naming the connectors in body.
+func writeDesktopSession(t *testing.T, dataDir, body string) {
+	t.Helper()
+	dir := filepath.Join(dataDir, "claude-code-sessions", "account-1", "org-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "local_s.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A connector added in Claude Desktop lives in the account, so `claude mcp
+// list` keeps reporting the plugin's own copy as needing Claude Code's sign-in
+// however many times the partner signs in through the app. The connectors the
+// app handed the latest Claude Code session answer instead.
+func TestGather_DesktopConnectorsAnswerNeedsAuth(t *testing.T) {
+	cases := []struct {
+		name      string
+		session   string
+		verdict   string
+		connected []string
+	}{
+		{"rise-x connector", `{"remoteMcpServersConfig":[` +
+			`{"uuid":"u1","name":"Gmail","tools":[{"name":"create_draft"}]},` +
+			`{"uuid":"u2","name":"Rise-X","tools":[{"name":"get_active_ecosystem"},{"name":"list_flows"}]},` +
+			`{"uuid":"u3","name":"Rise-X-Test","tools":[{"name":"get_active_ecosystem"}]}]}`,
+			"desktop", []string{"Rise-X", "Rise-X-Test"}},
+		{"other connectors only", `{"remoteMcpServersConfig":[` +
+			`{"uuid":"u1","name":"Gmail","tools":[{"name":"create_draft"}]}]}`,
+			"needs_auth", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeCLI(installedPluginList)
+			fake.Set(fakeCLIPath, []string{"mcp", "list"}, runnertest.Result{Stdout: needsAuthList})
+			dataDir, _ := signedInRoot(t)
+			writeDesktopSession(t, dataDir, tc.session)
+			baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath), DesktopDataDir: dataDir})
+
+			var got OverviewResponse
+			getJSON(t, baseURL+"/api/overview", token, &got)
+			if got.Mcp.Verdict != tc.verdict || !slices.Equal(got.Mcp.DesktopConnectors, tc.connected) {
+				t.Fatalf("mcp = %+v, want verdict %q with connectors %v", got.Mcp, tc.verdict, tc.connected)
+			}
+		})
+	}
+}

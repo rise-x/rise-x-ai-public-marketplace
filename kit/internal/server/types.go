@@ -67,6 +67,10 @@ type McpInfo struct {
 	// Stale holds the connections pointing at an address Rise-X has moved
 	// off, each with the address it should point at instead.
 	Stale []mcp.Stale `json:"stale,omitempty"`
+	// DesktopConnectors names the Rise-X connectors the Claude Desktop app
+	// gave the account's latest Claude Code session, when Verdict is
+	// "desktop".
+	DesktopConnectors []string `json:"desktopConnectors,omitempty"`
 	// Message explains a verdict the page cannot read off the servers, such
 	// as a `claude mcp list` that could not run at all.
 	Message string `json:"message,omitempty"`

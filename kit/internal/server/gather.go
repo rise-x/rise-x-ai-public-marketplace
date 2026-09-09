@@ -519,7 +519,35 @@ func (s *Server) gatherMcp(ctx context.Context, client *claudecli.Client, plResu
 			info.Message = "" // the Desktop app owns them; nothing failed
 		}
 	}
+	// A connector added under Customize > Connectors lives in the account, in
+	// no file `claude mcp list` reads, so the plugin's own copy of the
+	// connection keeps asking for Claude Code's sign-in however many times the
+	// partner signs in through the Desktop app. What the app handed the
+	// latest Claude Code session answers instead; only a copy the CLI itself
+	// has connected, or no copy at all, outranks that.
+	switch mcp.Verdict(info.Verdict) {
+	case mcp.VerdictConnected, mcp.VerdictNotInstalled:
+	default:
+		if names := s.desktopConnectors(); len(names) > 0 {
+			info.Verdict, info.DesktopConnectors, info.Message = string(mcp.VerdictDesktop), names, ""
+		}
+	}
 	overview.Mcp = info
+}
+
+// desktopConnectors names the Rise-X connectors the Desktop app gave the
+// account's latest Claude Code session.
+func (s *Server) desktopConnectors() []string {
+	return s.connectorsCache.get(func() []string {
+		connectors, _ := synced.Connectors(s.desktopDataDir)
+		var names []string
+		for _, c := range connectors {
+			if mcp.RiseXToolset(c.Tools) {
+				names = append(names, c.Name)
+			}
+		}
+		return names
+	})
 }
 
 // syncedMcpConfig reads the .mcp.json bundled with the account-synced
