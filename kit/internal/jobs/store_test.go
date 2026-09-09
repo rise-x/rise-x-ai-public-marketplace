@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -313,4 +314,39 @@ func TestStore_WaitIdle_ReportsBusy(t *testing.T) {
 	}
 	s.CancelAll()
 	waitFinished(t, s, id)
+}
+
+// A `curl | bash` installer can emit hundreds of thousands of lines, and 50
+// finished jobs are retained at once, so a job keeps only its tail. Seq must
+// not come from the slice's length: the page polls with ?since=<seq>, so a
+// number that repeated after a drop would make the browser skip the new lines
+// carrying it.
+func TestJobLog_KeepsATailWithMonotonicSeq(t *testing.T) {
+	const emitted = maxRetainedLines + 250
+	j := &job{}
+	for i := 1; i <= emitted; i++ {
+		j.appendLine(fmt.Sprintf("line %d", i))
+	}
+
+	all := j.snapshot(0)
+	if len(all.Log) != maxRetainedLines {
+		t.Fatalf("kept %d lines, want the %d-line cap", len(all.Log), maxRetainedLines)
+	}
+	if got, want := all.Log[0].Text, fmt.Sprintf("line %d", emitted-maxRetainedLines+1); got != want {
+		t.Fatalf("oldest kept line = %q, want %q: the tail is what matters", got, want)
+	}
+	last := all.Log[len(all.Log)-1]
+	if last.Seq != emitted {
+		t.Fatalf("last Seq = %d, want %d - the counter must survive the drop", last.Seq, emitted)
+	}
+	seen := map[int]bool{}
+	for _, l := range all.Log {
+		if seen[l.Seq] {
+			t.Fatalf("Seq %d appears twice; a polling page would skip a line", l.Seq)
+		}
+		seen[l.Seq] = true
+	}
+	if rest := j.snapshot(emitted - 3); len(rest.Log) != 3 {
+		t.Fatalf("?since=%d returned %d lines, want 3", emitted-3, len(rest.Log))
+	}
 }

@@ -93,8 +93,8 @@ behind `<!-- notes -->` and `<!-- changelog -->` markers so release-notes
 tooling can parse it. Text inside the notes block is hand-written and survives
 regeneration; everything else is overwritten on every push.
 
-`main` accepts pull requests from `release/*` and `hotfix/*` only.
-`close-direct-prs` closes anything else and comments with the branch to
+`main` accepts pull requests from `release/*`, `release-kit/*` and `hotfix/*`
+only. `close-direct-prs` closes anything else and comments with the branch to
 retarget onto, so a feature cannot reach customers without going through a
 release. It is a guardrail rather than a gate, because a ruleset cannot
 restrict which head branch opens a PR; it reacts on open, reopen, a push, and
@@ -253,10 +253,10 @@ Future known-benign hits specific to one plugin belong in that plugin's own
 ## Process
 
 Use conventional commits standard. Never commit directly to `main` — a ruleset requires a PR, code-owner
-review, and a passing `validate` check. Only `release/*` and `hotfix/*` may
-open a PR into `main`; feature PRs target the open release branch, and
-anything else aimed at `main` is closed with a comment (see "Release
-process"). PRs opened from outside the org are
+review, and a passing `validate` check. Only `release/*`, `release-kit/*` and
+`hotfix/*` may open a PR into `main`; feature PRs target the open release
+branch for their track, and anything else aimed at `main` is closed with a
+comment (see "Release process"). PRs opened from outside the org are
 auto-closed by workflow; external input arrives via issues, not PRs.
 
 Two workflows close PRs, for different reasons. `close-outside-prs` handles

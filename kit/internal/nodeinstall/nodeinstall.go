@@ -5,6 +5,7 @@ package nodeinstall
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // The pinned nvm release the kit installs from, and the sha256 of that exact
@@ -35,6 +36,25 @@ bash "$f"
 type Command struct {
 	Name string
 	Args []string
+	// FallbackOn lists exit codes that mean the verb was wrong rather than
+	// the machine broken. The caller then runs FallbackArgs instead of
+	// failing: winget refuses to upgrade a Node it did not install, which is
+	// every nvm-windows, fnm or zip install.
+	FallbackOn   []int
+	FallbackArgs []string
+}
+
+// Recovers reports whether code is one FallbackArgs answers.
+func (c Command) Recovers(code int) bool {
+	if len(c.FallbackArgs) == 0 {
+		return false
+	}
+	for _, want := range c.FallbackOn {
+		if want == code {
+			return true
+		}
+	}
+	return false
 }
 
 // Env is the OS access Plan needs, so tests describe a machine instead of
@@ -42,21 +62,28 @@ type Command struct {
 type Env struct {
 	GOOS string
 	Home string
-	// NvmDir is $NVM_DIR when the machine sets one. The nvm installer honours
-	// it, so assuming $HOME/.nvm would install nvm in one place and then
-	// source it from another.
-	NvmDir   string
-	LookPath func(file string) (string, error)
-	Stat     func(name string) (os.FileInfo, error)
+	// NvmDir is $NVM_DIR when the machine sets one, and XDGConfigHome is
+	// $XDG_CONFIG_HOME. The nvm installer honours both, in that order, so
+	// assuming $HOME/.nvm would install nvm in one place and then source it
+	// from another.
+	NvmDir        string
+	XDGConfigHome string
+	LookPath      func(file string) (string, error)
+	Stat          func(name string) (os.FileInfo, error)
 	// NodeFound says whether node is already installed, which is what decides
 	// between winget's install and upgrade verbs.
 	NodeFound bool
 }
 
-// nvmDir is where this machine keeps nvm.
+// nvmDir is where this machine keeps nvm, following the pinned installer's
+// own nvm_install_dir: $NVM_DIR wins, then $XDG_CONFIG_HOME/nvm, then
+// $HOME/.nvm.
 func (env Env) nvmDir() string {
 	if env.NvmDir != "" {
 		return env.NvmDir
+	}
+	if env.XDGConfigHome != "" {
+		return filepath.Join(env.XDGConfigHome, "nvm")
 	}
 	if env.Home == "" {
 		return ""
@@ -87,9 +114,12 @@ func CanInstall(env Env) bool {
 // deliberately left unset: the installer appends to the user's shell profile
 // as it normally does, so new shells - and new Claude Code sessions - see node.
 func nvmPlan(env Env) []Command {
+	if env.nvmDir() == "" {
+		return nil // nowhere to install to, and nowhere to source it from
+	}
 	steps := []Command{
-		nvmShell("nvm install --lts"),
-		nvmShell(`nvm alias default 'lts/*'`),
+		env.nvmShell("nvm install --lts"),
+		env.nvmShell(`nvm alias default 'lts/*'`),
 	}
 	if hasNvm(env) {
 		return steps
@@ -107,19 +137,36 @@ func hasNvm(env Env) bool {
 }
 
 // nvmShell runs one nvm command in a login shell with nvm sourced: nvm is a
-// shell function, so it exists only once nvm.sh has been read. The path is
-// resolved in the shell rather than baked in, so a machine that exports
-// NVM_DIR sources the same nvm the installer wrote.
-func nvmShell(cmd string) Command {
-	return Command{Name: "bash", Args: []string{"-lc", `. "${NVM_DIR:-$HOME/.nvm}/nvm.sh" && ` + cmd}}
+// shell function, so it exists only once nvm.sh has been read. The directory
+// is the one resolved here rather than a shell fallback, because the
+// installer's default follows XDG_CONFIG_HOME: on such a machine
+// "${NVM_DIR:-$HOME/.nvm}" names a path nvm was never written to, and `bash
+// -lc` does not rescue it, since the installer edits ~/.bashrc and a
+// non-interactive login shell does not read that.
+func (env Env) nvmShell(cmd string) Command {
+	src := shellQuote(filepath.Join(env.nvmDir(), "nvm.sh"))
+	return Command{Name: "bash", Args: []string{"-lc", ". " + src + " && " + cmd}}
 }
+
+// shellQuote wraps s for a POSIX shell, so a home directory with a space or a
+// quote in it still names one word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// wingetNoUpgrade is winget's "no applicable upgrade found", which is what an
+// upgrade of a Node winget did not install reports - nvm-windows, fnm, or a
+// zip. Windows hands the exit status back as the raw DWORD; the signed reading
+// is listed too, since that is how a 32-bit process would see it.
+var wingetNoUpgrade = []int{0x8A150014, -1978335212}
 
 // wingetPlan installs or upgrades the LTS package with winget, when winget is
 // there at all; without it the doctor keeps the nodejs.org link instead.
 // `winget install` on an installed package exits non-zero rather than
 // upgrading it, and the doctor offers this action exactly when Node is present
-// but old, so the verb has to follow NodeFound. Untested: no Windows machine
-// has run this path yet.
+// but old, so the verb has to follow NodeFound - falling back to install when
+// winget has no upgrade to apply because some other tool put Node there.
+// Untested: no Windows machine has run this path yet.
 func wingetPlan(env Env) []Command {
 	if env.LookPath == nil {
 		return nil
@@ -128,12 +175,15 @@ func wingetPlan(env Env) []Command {
 	if err != nil {
 		return nil
 	}
-	verb := "install"
-	if env.NodeFound {
-		verb = "upgrade"
+	args := func(verb string) []string {
+		return []string{verb, "--id", "OpenJS.NodeJS.LTS", "-e",
+			"--accept-source-agreements", "--accept-package-agreements"}
 	}
-	return []Command{{Name: exe, Args: []string{
-		verb, "--id", "OpenJS.NodeJS.LTS", "-e",
-		"--accept-source-agreements", "--accept-package-agreements",
-	}}}
+	if !env.NodeFound {
+		return []Command{{Name: exe, Args: args("install")}}
+	}
+	return []Command{{
+		Name: exe, Args: args("upgrade"),
+		FallbackOn: wingetNoUpgrade, FallbackArgs: args("install"),
+	}}
 }

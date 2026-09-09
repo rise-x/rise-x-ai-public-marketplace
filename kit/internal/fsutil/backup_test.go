@@ -94,3 +94,85 @@ func TestWriteAtomic_ReplacesAndKeepsMode(t *testing.T) {
 		t.Fatalf("left a temp file behind: %d entries", len(entries))
 	}
 }
+
+// WriteAtomic renames over its target, so a caller that hands it a symlink's
+// own path replaces the link. Resolve is what keeps a dotfiles setup intact,
+// and this pins the pair together.
+func TestResolve_WriteAtomicKeepsASymlinkedFileLinked(t *testing.T) {
+	dir := t.TempDir()
+	tracked := filepath.Join(dir, "dotfiles", "npmrc")
+	if err := os.MkdirAll(filepath.Dir(tracked), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tracked, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, ".npmrc")
+	if err := os.Symlink(tracked, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if err := WriteAtomic(Resolve(link), []byte("new\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the write replaced the symlink with a plain file")
+	}
+	if got, _ := os.ReadFile(tracked); string(got) != "new\n" {
+		t.Fatalf("tracked file = %q, want the new content", got)
+	}
+}
+
+// A link whose target does not exist yet still names where the write belongs;
+// EvalSymlinks refuses the whole path in that case.
+func TestResolve_DanglingLinkNamesItsTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "dotfiles", "CLAUDE.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "CLAUDE.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if got := Resolve(link); got != target {
+		t.Fatalf("Resolve = %q, want the link's target %q", got, target)
+	}
+}
+
+func TestResolve_PlainPathIsItself(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plain")
+	if got := Resolve(path); got != path {
+		t.Fatalf("Resolve = %q, want %q", got, path)
+	}
+}
+
+// A ref file is trusted because of where it sits, so a link planted there
+// must not hand back some other file's bytes.
+func TestReadNoFollow_RefusesASymlink(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "secret")
+	if err := os.WriteFile(secret, []byte("sk-do-not-leak\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "ref")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if got, err := ReadNoFollow(link); err == nil {
+		t.Fatalf("read through a planted symlink: %q", got)
+	}
+
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(plain, []byte("abc123\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadNoFollow(plain)
+	if err != nil || string(got) != "abc123\n" {
+		t.Fatalf("ReadNoFollow(plain) = %q, %v", got, err)
+	}
+}

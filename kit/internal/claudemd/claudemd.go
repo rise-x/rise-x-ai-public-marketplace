@@ -48,8 +48,13 @@ type Result struct {
 	Backup string
 }
 
-// Path is the global CLAUDE.md inside claudeDir.
-func Path(claudeDir string) string { return filepath.Join(claudeDir, "CLAUDE.md") }
+// Path is the global CLAUDE.md inside claudeDir, resolved through a symlink
+// to the file it names: WriteAtomic renames over its target, so writing the
+// link's own path would replace a dotfiles link with a plain file and strand
+// the partner's tracked copy.
+func Path(claudeDir string) string {
+	return fsutil.Resolve(filepath.Join(claudeDir, "CLAUDE.md"))
+}
 
 // ErrMalformed means the file's markers are not a single matched pair. The
 // kit refuses to write in that case: it cannot tell which text is its own, and
@@ -92,8 +97,9 @@ func Apply(claudeDir string) (Result, error) {
 		}
 	}
 	if err := fsutil.WriteAtomic(path, []byte(out), mode); err != nil {
-		// Keep res.Backup: it is what the partner needs precisely now.
-		return res, fmt.Errorf("write %s: %w", path, err)
+		// The backup is what the partner needs precisely now, and the error is
+		// the only thing the caller keeps on a failure, so name it there too.
+		return res, writeError(path, res.Backup, err)
 	}
 	res.Action = action
 	return res, nil
@@ -128,10 +134,20 @@ func Remove(claudeDir string) (Result, error) {
 		return res, err
 	}
 	if err := fsutil.WriteAtomic(path, []byte(join(before, after)), mode); err != nil {
-		return res, fmt.Errorf("write %s: %w", path, err)
+		return res, writeError(path, res.Backup, err)
 	}
 	res.Action = "removed"
 	return res, nil
+}
+
+// writeError names the backup in the message: these instructions are the
+// partner's own, and a caller that only keeps the error would otherwise never
+// mention the copy sitting next to the file.
+func writeError(path, backup string, err error) error {
+	if backup == "" {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return fmt.Errorf("write %s (your file is backed up at %s): %w", path, backup, err)
 }
 
 // merge renders the file with the block in it, and says what that changed.

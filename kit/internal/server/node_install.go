@@ -15,7 +15,8 @@ import (
 func (s *Server) nodeInstallEnv(nodeFound bool) nodeinstall.Env {
 	env := s.nodeEnv(s.runner)
 	return nodeinstall.Env{
-		GOOS: runtime.GOOS, Home: env.Home, NvmDir: os.Getenv("NVM_DIR"),
+		GOOS: runtime.GOOS, Home: env.Home,
+		NvmDir: os.Getenv("NVM_DIR"), XDGConfigHome: os.Getenv("XDG_CONFIG_HOME"),
 		LookPath: env.LookPath, Stat: env.Stat, NodeFound: nodeFound,
 	}
 }
@@ -31,11 +32,19 @@ func (s *Server) handleNodeInstall(w http.ResponseWriter, ctx context.Context, a
 		return
 	}
 	s.startJob(w, ctx, action, noCLI, nodeInstallJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
-		for _, cmd := range plan {
-			onLine(runner.Redact(runner.Argv(cmd.Name, cmd.Args)))
-			code, err := s.runner.Stream(jctx, cmd.Name, cmd.Args, func(l runner.Line) {
+		stream := func(name string, args []string) (int, error) {
+			onLine(runner.Redact(runner.Argv(name, args)))
+			return s.runner.Stream(jctx, name, args, func(l runner.Line) {
 				onLine(runner.Redact(l.Text))
 			})
+		}
+		for _, cmd := range plan {
+			code, err := stream(cmd.Name, cmd.Args)
+			if err == nil && cmd.Recovers(code) {
+				// winget has no upgrade for a Node it did not install; that is
+				// the wrong verb for this machine, not a failed job.
+				code, err = stream(cmd.Name, cmd.FallbackArgs)
+			}
 			if err != nil || code != 0 {
 				return code, err
 			}

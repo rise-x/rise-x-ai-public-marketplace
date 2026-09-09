@@ -21,6 +21,11 @@ var ErrBusy = errors.New("a job is already running")
 // polls a job it started a moment ago.
 const maxRetainedJobs = 50
 
+// maxRetainedLines bounds one job's kept output. A `curl | bash` installer can
+// emit hundreds of thousands of lines, and maxRetainedJobs of those are held
+// at once; the drawer shows a tail, so the oldest lines are what to drop.
+const maxRetainedLines = 5000
+
 type Status string
 
 const (
@@ -57,10 +62,15 @@ type Snapshot struct {
 type Func func(ctx context.Context, onLine func(string)) (exitCode int, err error)
 
 type job struct {
-	mu   sync.Mutex
-	job  Job
-	log  []LogLine
-	done bool
+	mu  sync.Mutex
+	job Job
+	log []LogLine
+	// nextSeq counts every line the job ever emitted, not the ones still
+	// kept: the page polls with ?since=<seq>, so a sequence derived from the
+	// slice length would repeat numbers after a drop and the browser would
+	// silently skip the new lines carrying them.
+	nextSeq int
+	done    bool
 }
 
 func (j *job) appendLine(text string) {
@@ -69,7 +79,11 @@ func (j *job) appendLine(text string) {
 	if j.done {
 		return // fn may outlive its timeout; its late output is not the job's
 	}
-	j.log = append(j.log, LogLine{Seq: len(j.log) + 1, Text: text})
+	j.nextSeq++
+	j.log = append(j.log, LogLine{Seq: j.nextSeq, Text: text})
+	if len(j.log) > maxRetainedLines {
+		j.log = append(j.log[:0], j.log[len(j.log)-maxRetainedLines:]...)
+	}
 }
 
 func (j *job) snapshot(since int) Snapshot {

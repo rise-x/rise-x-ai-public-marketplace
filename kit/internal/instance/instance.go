@@ -25,10 +25,11 @@ const probeTimeout = 1500 * time.Millisecond
 
 // state is what one running kit writes down. The token is deliberately absent:
 // reopening needs only the address, and the page is served the token itself.
+// So is the version: a reopen asks the running kit itself, which is the only
+// answer that cannot be out of date.
 type state struct {
-	Port int    `json:"port"`
-	PID  int    `json:"pid"`
-	Ver  string `json:"version,omitempty"`
+	Port int `json:"port"`
+	PID  int `json:"pid"`
 }
 
 // Path is the file a running kit records itself in. It lives in the user's
@@ -97,7 +98,12 @@ func Answers(port int) (version string, ok bool) {
 // once could drive `claude plugin install` or rewrite ~/.claude/settings.json
 // concurrently, which is what those slots exist to prevent. The probe alone
 // cannot close that: two launches racing before either has bound would both
-// find nothing. release is nil when the lock was not taken.
+// find nothing.
+//
+// The lock is an OS lock on an open file, not the file's existence: the kernel
+// drops it when the holder dies, so a killed kit never wedges the next launch
+// and there is no staleness heuristic to get wrong. release is nil when the
+// lock was not taken.
 func Lock() (release func(), ok bool) {
 	path, err := Path()
 	if err != nil {
@@ -107,45 +113,34 @@ func Lock() (release func(), ok bool) {
 		return nil, false
 	}
 	name := path + ".lock"
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		if !os.IsExist(err) {
-			return nil, false
-		}
-		// A lock left behind by a kit that was killed would wedge every later
-		// launch, so an unheld one is cleared rather than trusted.
-		if staleLock(name) {
-			_ = os.Remove(name)
-			return Lock()
-		}
 		return nil, false
 	}
-	fmt.Fprintf(f, "%d\n", os.Getpid())
-	f.Close()
-	return func() { _ = os.Remove(name) }, true
-}
-
-// staleLockAge is how long a lock file may sit before a launch assumes the
-// process that made it is gone. Only the moments between two launches matter,
-// so this is generous.
-const staleLockAge = 2 * time.Minute
-
-// staleLock reports whether the lock is old enough, and unbacked by a running
-// kit, to be treated as debris.
-func staleLock(name string) bool {
-	fi, err := os.Stat(name)
-	if err != nil {
-		return true
+	if err := lockFile(f); err != nil {
+		f.Close()
+		return nil, false
 	}
-	if time.Since(fi.ModTime()) < staleLockAge {
-		return false
+	// The pid is for a human reading the file; the lock itself is the handle.
+	if err := f.Truncate(0); err == nil {
+		fmt.Fprintf(f, "%d\n", os.Getpid())
 	}
-	return Running() == nil
+	return func() {
+		// Unlink before closing: a launch that opened this name a moment ago
+		// still sees the lock held until we let go, so it cannot end up
+		// holding an unlinked inode while a third one locks a fresh file.
+		// Windows refuses to remove an open file, so it gets a second try.
+		removed := os.Remove(name) == nil
+		f.Close()
+		if !removed {
+			_ = os.Remove(name)
+		}
+	}, true
 }
 
 // Record writes this process's port down. A failure is not fatal: it costs the
 // next launch its reopen, not this one its window.
-func Record(port int, version string) error {
+func Record(port int) error {
 	path, err := Path()
 	if err != nil {
 		return err
@@ -153,7 +148,7 @@ func Record(port int, version string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	data, err := json.Marshal(state{Port: port, PID: os.Getpid(), Ver: version})
+	data, err := json.Marshal(state{Port: port, PID: os.Getpid()})
 	if err != nil {
 		return err
 	}

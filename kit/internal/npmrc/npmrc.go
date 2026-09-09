@@ -77,7 +77,13 @@ func hostLabel(line string) string {
 // the public npm registry, preserving every other byte — auth lines
 // included, whatever host they name. It backs the file up first at the
 // original permissions; a file with nothing to rewrite is left untouched.
+//
+// The write lands on the file a symlinked ~/.npmrc resolves to. WriteAtomic
+// renames over its target, so writing the link's own path would replace the
+// link: a stow or chezmoi partner would keep the bad line in the repo they
+// track and get it back at the next re-link.
 func Clean(path string) (Result, error) {
+	path = fsutil.Resolve(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

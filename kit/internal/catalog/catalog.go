@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/fsutil"
 )
 
 // ErrRateLimited means GitHub's API refused the request (typically 403,
@@ -278,8 +280,21 @@ func (c *Catalog) get(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, &StatusError{URL: url, Code: resp.StatusCode}
 	}
-	return io.ReadAll(resp.Body)
+	// The body is a marketplace manifest or a commit object, both small. A
+	// response that keeps going past this is not one, and reading it whole
+	// would let whatever answers the request grow the kit's heap.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxBodyBytes {
+		return nil, fmt.Errorf("%s: response larger than %d bytes", url, maxBodyBytes)
+	}
+	return body, nil
 }
+
+// maxBodyBytes caps one API response.
+const maxBodyBytes = 8 << 20
 
 // LocalHEAD reads the marketplace clone's current commit SHA from .git,
 // handling a symbolic-ref HEAD (normal branch checkout), a detached HEAD
@@ -303,7 +318,10 @@ func LocalHEAD(installLocation string) (string, error) {
 		return "", fmt.Errorf("HEAD names %q, which is not a ref", ref)
 	}
 
-	if data, err := os.ReadFile(filepath.Join(gitDir, ref)); err == nil {
+	// The ref file is trusted only because of where it sits, so a symlink
+	// planted there must not be followed into some unrelated file whose first
+	// line would then be reported as a commit.
+	if data, err := fsutil.ReadNoFollow(filepath.Join(gitDir, ref)); err == nil {
 		return strings.TrimSpace(string(data)), nil
 	}
 

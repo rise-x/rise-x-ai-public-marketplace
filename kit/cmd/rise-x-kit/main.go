@@ -18,6 +18,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,7 +33,12 @@ import (
 // job to notice its cancelled context, then draining HTTP connections.
 const shutdownGrace = 5 * time.Second
 
-func main() {
+// main is a thin wrapper so run's defers - releasing the single-instance lock
+// above all - still run on every failure. log.Fatal skips them, which is what
+// left a lock behind after a bad -port.
+func main() { os.Exit(run()) }
+
+func run() int {
 	port := flag.Int("port", 0, "port to listen on (0 = pick any free port)")
 	noBrowser := flag.Bool("no-browser", false, "don't open the browser automatically")
 	claudeDir := flag.String("claude-dir", defaultClaudeDir(), "Claude Code config directory")
@@ -43,57 +50,68 @@ func main() {
 
 	if *showVersion {
 		fmt.Println(buildinfo.String())
-		return
+		return 0
 	}
 
 	if *writeClaudeMD || *removeClaudeMD {
 		if err := applyClaudeMD(*claudeDir, *removeClaudeMD); err != nil {
-			log.Fatalf("claude.md: %v", err)
+			log.Printf("claude.md: %v", err)
+			return 1
 		}
-		return
+		return 0
 	}
 
-	// A partner who closed the tab has no way back to a port that was picked at
-	// random, so a second launch reopens the running window rather than leaving
-	// another server behind. An explicit -port asks for a server on that port,
-	// so it overrides this.
-	if !portRequested() {
-		if found := instance.Running(); found != nil {
-			reportReopen(found, *printToken)
-			fmt.Println(found.URL)
-			if !*noBrowser {
-				openBrowser(found.URL)
-			}
-			return
+	// A partner who closed the tab has no way back to a port that was picked
+	// at random, so a second launch reopens the running window rather than
+	// leaving another server behind. An explicit -port asks for a server on
+	// that port, so it takes the lock instead of reopening.
+	requested := given("port")
+	found := instance.Running()
+
+	var releaseLock func()
+	locked := false
+	if found == nil || requested {
+		// One kit at a time: the jobs slot and the write slot live in this
+		// process, so a second one would write ~/.claude with neither aware of
+		// the other. The lock also covers the moment before a kit records
+		// itself, when the probe still sees nothing.
+		releaseLock, locked = instance.Lock()
+		if !locked && found == nil {
+			// Whoever holds it may have finished starting since the probe.
+			found = instance.Running()
 		}
 	}
 
-	// One kit at a time: the jobs slot and the write slot live in this
-	// process, so a second one would write ~/.claude with neither aware of
-	// the other.
-	releaseLock, locked := instance.Lock()
-	if !locked {
-		if found := instance.Running(); found != nil {
-			reportReopen(found, *printToken)
-			fmt.Println(found.URL)
-			if !*noBrowser {
-				openBrowser(found.URL)
-			}
-			return
+	switch decide(requested, found != nil, locked) {
+	case reopenWindow:
+		reportReopen(found)
+		fmt.Println(found.URL)
+		if !*noBrowser {
+			openBrowser(found.URL)
 		}
-		log.Fatal("another Rise-X Kit is starting; try again in a moment")
+		if *printToken {
+			// Nothing was started here, so there is no token to print, and a
+			// script must be able to tell that from a successful run.
+			return 1
+		}
+		return 0
+	case refuse:
+		log.Print(refusal(requested))
+		return 1
 	}
 	defer releaseLock()
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
-		log.Fatalf("listen: %v", err)
+		log.Printf("listen: %v", err)
+		return 1
 	}
 	actualPort := ln.Addr().(*net.TCPAddr).Port
 
 	token, err := randomToken()
 	if err != nil {
-		log.Fatalf("generate token: %v", err)
+		log.Printf("generate token: %v", err)
+		return 1
 	}
 
 	srv := server.New(server.Config{
@@ -104,7 +122,7 @@ func main() {
 	})
 
 	// Recorded before the browser opens, so the next launch finds this window.
-	if err := instance.Record(actualPort, buildinfo.Version); err != nil {
+	if err := instance.Record(actualPort); err != nil {
 		log.Printf("could not record this instance, so a second launch will start its own: %v", err)
 	}
 	defer instance.Clear()
@@ -122,18 +140,23 @@ func main() {
 	}
 
 	httpServer := &http.Server{Handler: srv.Handler()}
+	serveErr := make(chan error, 1)
 	go func() {
 		if err := httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("serve: %v", err)
+			serveErr <- err
 		}
 	}()
 
 	sigCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
+	code := 0
 	select {
 	case <-sigCtx.Done():
 	case <-srv.Quit():
+	case err := <-serveErr:
+		log.Printf("serve: %v", err)
+		code = 1
 	}
 
 	// Cancel the running job before we stop serving: http.Server.Shutdown
@@ -147,30 +170,79 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	_ = httpServer.Shutdown(ctx)
+	return code
 }
 
-// reportReopen says what the reopen actually did, since it silently ignores
-// flags that only mean something for a launch that starts a server.
-func reportReopen(found *instance.Found, printToken bool) {
+// action is what a launch does once it knows what else is on the machine.
+type action int
+
+const (
+	// startServer: this process holds the lock, so it serves.
+	startServer action = iota
+	// reopenWindow: a kit is already serving and this launch named no port,
+	// so it hands back that window instead of starting a rival.
+	reopenWindow
+	// refuse: another kit holds the lock and its window is not what was
+	// asked for.
+	refuse
+)
+
+// decide picks between the three. It is a function of its own so the ladder
+// can be tested: an explicit -port must never be answered with somebody
+// else's window, which is what the lock-held path used to do.
+func decide(portRequested, kitRunning, lockTaken bool) action {
+	if kitRunning && !portRequested {
+		return reopenWindow
+	}
+	if lockTaken {
+		return startServer
+	}
+	return refuse
+}
+
+// refusal says why nothing happened, in the terms the partner used.
+func refusal(portRequested bool) string {
+	if portRequested {
+		return "another Rise-X Kit holds the single-instance lock, so -port cannot be honoured; quit it from its page first."
+	}
+	return "another Rise-X Kit is starting; try again in a moment."
+}
+
+// launchOnlyFlags are the flags that only mean something for a launch that
+// starts a server. A reopen silently ignores them, so it says so.
+var launchOnlyFlags = []string{"port", "claude-dir", "print-token"}
+
+// reportReopen says what the reopen actually did.
+func reportReopen(found *instance.Found) {
 	if found.Version != buildinfo.Version {
 		fmt.Printf("reopening the Rise-X Kit already running (version %s; this binary is %s).\n",
 			found.Version, buildinfo.Version)
 		fmt.Println("quit it from its page to start this version instead.")
 	}
-	if printToken {
-		fmt.Println("-print-token needs a kit this command started; quit the running one first.")
+	if ignored := givenOf(launchOnlyFlags); len(ignored) > 0 {
+		fmt.Printf("ignored, because this reopened a kit this command did not start: %s\n",
+			strings.Join(ignored, ", "))
 	}
 }
 
-// portRequested reports whether -port was given, as opposed to defaulted.
-func portRequested() bool {
-	set := false
+// given reports whether a flag was set on the command line, as opposed to
+// left at its default.
+func given(name string) bool { return len(givenOf([]string{name})) == 1 }
+
+// givenOf returns which of names were set on the command line, as "-name".
+func givenOf(names []string) []string {
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	var out []string
 	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "port" {
-			set = true
+		if want[f.Name] {
+			out = append(out, "-"+f.Name)
 		}
 	})
-	return set
+	sort.Strings(out)
+	return out
 }
 
 // applyClaudeMD is the installer's step: it teaches a Claude Code session how

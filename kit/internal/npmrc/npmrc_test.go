@@ -3,6 +3,7 @@ package npmrc
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -373,5 +374,43 @@ func TestMask(t *testing.T) {
 		if got := mask(in); got != want {
 			t.Errorf("mask(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A stow or chezmoi partner has ~/.npmrc as a symlink into a tracked repo.
+// WriteAtomic renames over its target, so writing the link's own path would
+// sever it: the repo would keep the bad line and the next re-link would bring
+// it back, while the doctor reported the problem fixed.
+func TestClean_KeepsASymlinkedNpmrcLinked(t *testing.T) {
+	dir := t.TempDir()
+	tracked := filepath.Join(dir, "dotfiles", "npmrc")
+	if err := os.MkdirAll(filepath.Dir(tracked), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tracked, []byte("@rise-x:registry=https://pkgs.example/npm/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, ".npmrc")
+	if err := os.Symlink(tracked, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	res, err := Clean(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rewritten) != 1 {
+		t.Fatalf("Rewritten = %v, want the one registry line", res.Rewritten)
+	}
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("Clean replaced the symlink with a plain file")
+	}
+	got, _ := os.ReadFile(tracked)
+	if !strings.Contains(string(got), npmjsRegistryURL) {
+		t.Fatalf("tracked file = %q, want the rewritten line", got)
 	}
 }

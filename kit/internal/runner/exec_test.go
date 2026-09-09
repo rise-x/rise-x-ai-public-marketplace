@@ -345,3 +345,73 @@ func TestExecRun_ContextDeadline_ReturnsError(t *testing.T) {
 		t.Fatalf("stdout = %q, want the output written before the deadline", r.stdout)
 	}
 }
+
+// The ctx watcher may not kill once cmd.Wait has returned: on the normal exit
+// path no member of the child's group is left, so the pgid is free and the
+// signal would land on whatever recycled the pid. The guard is what draws
+// that line, and stop must be a hard boundary even under a concurrent kill.
+func TestKillGuard_NoKillOnceStopped(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		var g killGuard
+		var mu sync.Mutex
+		stopped, killedAfterStop := false, false
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			g.run(func() {
+				mu.Lock()
+				if stopped {
+					killedAfterStop = true
+				}
+				mu.Unlock()
+			})
+		}()
+
+		g.stop()
+		mu.Lock()
+		stopped = true
+		mu.Unlock()
+		<-done
+
+		mu.Lock()
+		bad := killedAfterStop
+		mu.Unlock()
+		if bad {
+			t.Fatalf("run %d: killed after stop returned", i)
+		}
+	}
+}
+
+// Before stop, the kill is exactly what has to happen: a cancelled command
+// whose grandchild holds the pipes only dies because of it.
+func TestKillGuard_KillsBeforeStop(t *testing.T) {
+	var g killGuard
+	killed := false
+	g.run(func() { killed = true })
+	if !killed {
+		t.Fatal("the guard suppressed a kill while the child was still running")
+	}
+	g.stop()
+	g.run(func() { t.Fatal("the guard let a kill through after stop") })
+}
+
+// Run holds its whole result in memory, so a command that never stops talking
+// must not be able to grow the heap a line at a time.
+func TestExecRun_CapsTotalOutput(t *testing.T) {
+	var c capped
+	line := strings.Repeat("x", 1024)
+	for i := 0; i < (maxRunBytes/len(line))+100; i++ {
+		c.line(line)
+	}
+	got := c.String()
+	if len(got) > maxRunBytes+len(outputTruncationMarker)+1 {
+		t.Fatalf("kept %d bytes, want no more than the %d-byte cap", len(got), maxRunBytes)
+	}
+	if !strings.HasSuffix(got, outputTruncationMarker+"\n") {
+		t.Fatal("the cap was hit but nothing said so")
+	}
+	if strings.Count(got, outputTruncationMarker) != 1 {
+		t.Fatal("the marker repeats once per dropped line")
+	}
+}

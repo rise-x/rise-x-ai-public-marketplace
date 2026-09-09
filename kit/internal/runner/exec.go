@@ -35,23 +35,51 @@ const (
 
 	truncationMarker = "[line truncated]"
 
+	// maxRunBytes caps what Run keeps per stream. Run's callers parse a CLI's
+	// answer - a version string, a JSON list - so output past this is a
+	// runaway command rather than a reply, and the whole of it is held in
+	// memory. Stream, which the jobs drawer uses, is capped by the store.
+	maxRunBytes = 4 * 1024 * 1024
+
+	outputTruncationMarker = "[output truncated]"
+
 	// stderrTailLines is how much stderr a returned error quotes.
 	stderrTailLines = 3
 )
 
 func (Exec) Run(ctx context.Context, name string, args []string) (stdout, stderr string, exitCode int, err error) {
-	var outBuf, errBuf strings.Builder
+	var outBuf, errBuf capped
 	exitCode, err = (Exec{}).Stream(ctx, name, args, func(l Line) {
 		if l.Stderr {
-			errBuf.WriteString(l.Text)
-			errBuf.WriteByte('\n')
+			errBuf.line(l.Text)
 		} else {
-			outBuf.WriteString(l.Text)
-			outBuf.WriteByte('\n')
+			outBuf.line(l.Text)
 		}
 	})
 	return outBuf.String(), errBuf.String(), exitCode, err
 }
+
+// capped collects lines until it has maxRunBytes of them, then keeps only a
+// note that it stopped. Each line is already capped, but their number is not.
+type capped struct {
+	b    strings.Builder
+	full bool
+}
+
+func (c *capped) line(text string) {
+	if c.full {
+		return
+	}
+	if c.b.Len()+len(text)+1 > maxRunBytes {
+		c.full = true
+		c.b.WriteString(outputTruncationMarker + "\n")
+		return
+	}
+	c.b.WriteString(text)
+	c.b.WriteByte('\n')
+}
+
+func (c *capped) String() string { return c.b.String() }
 
 func (Exec) Stream(ctx context.Context, name string, args []string, onLine func(Line)) (int, error) {
 	return Exec{}.StreamDir(ctx, "", name, args, onLine)
@@ -103,17 +131,24 @@ func (Exec) StreamDir(ctx context.Context, dir, name string, args []string, onLi
 	// stdout - in that case the stdlib never calls Cancel and we'd sit out
 	// the full WaitDelay before the group gets killed. Watch ctx ourselves
 	// so the kill is unconditional and immediate.
+	//
+	// The guard is what keeps that watcher inside the window where the group
+	// is still ours. Once Wait has returned on the normal exit path no member
+	// of the group is left, the kernel is free to reuse the pid, and killing
+	// the group would signal whatever took it.
+	var guard killGuard
 	watchDone := make(chan struct{})
-	defer close(watchDone)
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = killTree(cmd)
+			guard.run(func() { _ = killTree(cmd) })
 		case <-watchDone:
 		}
 	}()
 
 	err := cmd.Wait()
+	guard.stop()
+	close(watchDone)
 	if errors.Is(err, exec.ErrWaitDelay) {
 		// The child is reaped by now and a descendant still holds the pipes,
 		// so this signals a pgid whose leader has already exited. The kernel
@@ -158,14 +193,36 @@ func (Exec) StreamDir(ctx context.Context, dir, name string, args []string, onLi
 	return code, nil
 }
 
+// killGuard runs a kill only while the child is still unreaped. stop closes
+// that window, and a kill already inside it finishes before stop returns.
+type killGuard struct {
+	mu      sync.Mutex
+	stopped bool
+}
+
+func (g *killGuard) run(kill func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.stopped {
+		kill()
+	}
+}
+
+func (g *killGuard) stop() {
+	g.mu.Lock()
+	g.stopped = true
+	g.mu.Unlock()
+}
+
 func cmdError(name string, args []string, err error, stderrTail string) error {
-	// The tail is the command's own output, so it gets the same redaction the
+	// Both halves are the command's own text, so both get the redaction the
 	// streamed lines get: this string becomes job.Error and is served over the
 	// API.
+	argv := Redact(Argv(name, args))
 	if stderrTail = Redact(stderrTail); stderrTail != "" {
-		return fmt.Errorf("%s: %w: %s", Argv(name, args), err, stderrTail)
+		return fmt.Errorf("%s: %w: %s", argv, err, stderrTail)
 	}
-	return fmt.Errorf("%s: %w", Argv(name, args), err)
+	return fmt.Errorf("%s: %w", argv, err)
 }
 
 // lineWriter splits what a command writes into lines and hands each one to

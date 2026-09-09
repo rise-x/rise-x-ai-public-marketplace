@@ -32,20 +32,22 @@ func argvs(plan []Command) []string {
 }
 
 func TestPlan_NvmPresent(t *testing.T) {
-	plan := Plan(Env{GOOS: "darwin", Home: homeWithNvm(t), Stat: os.Stat})
+	home := homeWithNvm(t)
+	plan := Plan(Env{GOOS: "darwin", Home: home, Stat: os.Stat})
 	if len(plan) != 2 {
 		t.Fatalf("plan = %v, want the two nvm commands", argvs(plan))
 	}
-	for i, want := range []string{"nvm install --lts", `nvm alias default 'lts/*'`} {
+	want := ". '" + filepath.Join(home, ".nvm", "nvm.sh") + "' &&"
+	for i, cmd := range []string{"nvm install --lts", `nvm alias default 'lts/*'`} {
 		if plan[i].Name != "bash" || len(plan[i].Args) != 2 || plan[i].Args[0] != "-lc" {
 			t.Fatalf("plan[%d] = %+v, want a bash -lc command", i, plan[i])
 		}
 		script := plan[i].Args[1]
-		if !strings.Contains(script, `. "${NVM_DIR:-$HOME/.nvm}/nvm.sh" &&`) {
-			t.Errorf("plan[%d] script %q does not source nvm.sh", i, script)
+		if !strings.HasPrefix(script, want) {
+			t.Errorf("plan[%d] script %q does not source %s", i, script, want)
 		}
-		if !strings.HasSuffix(script, want) {
-			t.Errorf("plan[%d] script %q does not run %q", i, script, want)
+		if !strings.HasSuffix(script, cmd) {
+			t.Errorf("plan[%d] script %q does not run %q", i, script, cmd)
 		}
 	}
 }
@@ -121,10 +123,47 @@ func TestPlan_HonoursNvmDir(t *testing.T) {
 	if len(plan) != 2 {
 		t.Fatalf("plan = %v, want the two nvm commands with no install step", argvs(plan))
 	}
+	want := ". '" + filepath.Join(nvm, "nvm.sh") + "' &&"
 	for _, c := range plan {
-		if !strings.Contains(c.Args[1], `${NVM_DIR:-$HOME/.nvm}`) {
-			t.Errorf("script %q does not defer to NVM_DIR", c.Args[1])
+		if !strings.HasPrefix(c.Args[1], want) {
+			t.Errorf("script %q does not source the nvm at NVM_DIR", c.Args[1])
 		}
+	}
+}
+
+// The pinned installer's own default is $XDG_CONFIG_HOME/nvm when that is
+// set, so a plan that assumed $HOME/.nvm sourced a file the install had never
+// written and the whole job failed with "No such file or directory".
+func TestPlan_HonoursXDGConfigHome(t *testing.T) {
+	dir := t.TempDir()
+	xdg := filepath.Join(dir, "config")
+	if err := os.MkdirAll(filepath.Join(xdg, "nvm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "nvm", "nvm.sh"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := Plan(Env{GOOS: "linux", Home: t.TempDir(), XDGConfigHome: xdg, Stat: os.Stat})
+	if len(plan) != 2 {
+		t.Fatalf("plan = %v, want the two nvm commands with no install step", argvs(plan))
+	}
+	want := ". '" + filepath.Join(xdg, "nvm", "nvm.sh") + "' &&"
+	for _, c := range plan {
+		if !strings.HasPrefix(c.Args[1], want) {
+			t.Errorf("script %q does not source the nvm under XDG_CONFIG_HOME", c.Args[1])
+		}
+	}
+}
+
+// NVM_DIR wins over XDG_CONFIG_HOME, the order the installer uses.
+func TestPlan_NvmDirBeatsXDG(t *testing.T) {
+	dir := t.TempDir()
+	env := Env{GOOS: "linux", Home: dir, NvmDir: filepath.Join(dir, "explicit"),
+		XDGConfigHome: filepath.Join(dir, "config"), Stat: os.Stat}
+	plan := Plan(env)
+	want := ". '" + filepath.Join(dir, "explicit", "nvm.sh") + "' &&"
+	if !strings.HasPrefix(plan[len(plan)-1].Args[1], want) {
+		t.Errorf("script %q does not prefer NVM_DIR", plan[len(plan)-1].Args[1])
 	}
 }
 
@@ -145,5 +184,41 @@ func TestPlan_WindowsWithoutWinget(t *testing.T) {
 func TestCanInstall_UnknownPlatform(t *testing.T) {
 	if CanInstall(Env{GOOS: "plan9"}) {
 		t.Error("CanInstall = true, want false on a platform with no installer")
+	}
+}
+
+// winget refuses to upgrade a Node it did not install - nvm-windows, fnm, a
+// zip - so the plan carries the install verb as the recovery for exactly that
+// exit code, rather than reporting a failed job.
+func TestPlan_WindowsUpgradeFallsBackToInstall(t *testing.T) {
+	env := Env{GOOS: "windows", NodeFound: true, LookPath: func(string) (string, error) {
+		return `C:\winget.exe`, nil
+	}}
+	plan := Plan(env)
+	if len(plan) != 1 {
+		t.Fatalf("plan = %v, want one winget command", argvs(plan))
+	}
+	if plan[0].Args[0] != "upgrade" {
+		t.Fatalf("verb = %q, want upgrade when Node is present", plan[0].Args[0])
+	}
+	if len(plan[0].FallbackArgs) == 0 || plan[0].FallbackArgs[0] != "install" {
+		t.Fatalf("FallbackArgs = %v, want the install verb", plan[0].FallbackArgs)
+	}
+	if !plan[0].Recovers(0x8A150014) {
+		t.Error("no fallback for winget's \"no applicable upgrade\" code")
+	}
+	if plan[0].Recovers(1) {
+		t.Error("fallback fired for a generic failure; only the wrong-verb code recovers")
+	}
+	if !plan[0].Recovers(-1978335212) {
+		t.Error("the signed reading of the same DWORD is not recognised")
+	}
+}
+
+// A machine with no home and no nvm directory has nowhere to install to, so
+// there is no plan and the doctor keeps the nodejs.org link.
+func TestPlan_NoHomeNoPlan(t *testing.T) {
+	if plan := Plan(Env{GOOS: "darwin", Stat: os.Stat}); len(plan) != 0 {
+		t.Fatalf("plan = %v, want nothing runnable", argvs(plan))
 	}
 }

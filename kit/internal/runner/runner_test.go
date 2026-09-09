@@ -32,7 +32,7 @@ func TestRedact(t *testing.T) {
 
 		"plain line, nothing sensitive":                   "plain line, nothing sensitive",
 		"npx -y @upstash/context7-mcp":                    "npx -y @upstash/context7-mcp",
-		"claude mcp login plugin:rise-x-mcp:rise-x":       "claude mcp login plugin:rise-x-mcp:rise-x",
+		"claude mcp list":                                 "claude mcp list",
 		"claude plugin install rise-x-apps@rise-x-public": "claude plugin install rise-x-apps@rise-x-public",
 	}
 	for in, want := range cases {

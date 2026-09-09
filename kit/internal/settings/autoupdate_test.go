@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/fsutil"
 )
 
 const repo = "rise-x/rise-x-ai-public-marketplace"
@@ -617,5 +619,67 @@ func assertNoTmpFiles(t *testing.T, dir string) {
 		if strings.HasPrefix(e.Name(), ".settings-") && strings.HasSuffix(e.Name(), ".tmp") {
 			t.Fatalf("leftover tmp file: %s", e.Name())
 		}
+	}
+}
+
+// settings.json is the one file here that can hold an apiKeyHelper, and the
+// backup name is predictable, so a planted symlink at that name would carry
+// its contents wherever the link points.
+func TestSetAutoUpdate_BackupRefusesAPlantedSymlink(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	write(t, path, `{"apiKeyHelper":"echo sk-secret"}`, 0o600)
+
+	victim := filepath.Join(dir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("do not touch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	planted := fsutil.BackupPath(path)
+	if err := os.Symlink(victim, planted); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	backup, err := NewWriter(path).SetAutoUpdate("rise-x-public", repo, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "do not touch\n" {
+		t.Fatalf("the backup wrote through the planted symlink: victim = %q", got)
+	}
+	if backup == planted {
+		t.Fatalf("backup used the planted name %q", backup)
+	}
+	if got, _ := os.ReadFile(backup); !strings.Contains(string(got), "apiKeyHelper") {
+		t.Fatalf("backup = %q, want the original settings", got)
+	}
+	fi, err := os.Stat(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("backup mode = %v, want the source's 0600", perm)
+	}
+}
+
+// Two writes inside one second share a timestamp; the second must not
+// overwrite the first backup's file.
+func TestSetAutoUpdate_BackupDoesNotOverwriteAnEarlierOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	write(t, path, `{"a":1}`, 0o600)
+
+	taken := fsutil.BackupPath(path)
+	if err := os.WriteFile(taken, []byte("an earlier backup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := NewWriter(path).SetAutoUpdate("rise-x-public", repo, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backup == taken {
+		t.Fatal("the backup reused a name that was already taken")
+	}
+	if got, _ := os.ReadFile(taken); string(got) != "an earlier backup\n" {
+		t.Fatalf("earlier backup was overwritten: %q", got)
 	}
 }

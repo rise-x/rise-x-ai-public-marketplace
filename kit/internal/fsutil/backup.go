@@ -4,6 +4,7 @@ package fsutil
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -67,11 +68,15 @@ func write(f *os.File, name string, data []byte, mode os.FileMode) error {
 		return fail(err)
 	}
 	// The backup exists to survive a failed write of the original, so it has
-	// to reach the disk before that write starts.
+	// to reach the disk before that write starts - the name included, which
+	// is the directory's entry rather than the file's own bytes.
 	if err := f.Sync(); err != nil {
 		return fail(err)
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return fail(err)
+	}
+	return SyncDir(filepath.Dir(name))
 }
 
 // WriteAtomic replaces path with data through a temp file in the same
@@ -102,5 +107,44 @@ func WriteAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(name, path)
+	if err := os.Rename(name, path); err != nil {
+		return err
+	}
+	return SyncDir(dir)
+}
+
+// Resolve follows a symlinked path to the real file it names, so a dotfiles
+// setup keeps its link and the change lands in the repo the partner tracks:
+// WriteAtomic renames over its target, which would otherwise replace the link
+// itself. A link whose target does not exist yet still names where the write
+// belongs, and a path that is not a link resolves to itself.
+func Resolve(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return path
+	}
+	if filepath.IsAbs(target) {
+		return target
+	}
+	return filepath.Join(filepath.Dir(path), target)
+}
+
+// maxReadBytes caps ReadNoFollow. Its callers read small metadata files; a
+// larger one is not the file they are looking for.
+const maxReadBytes = 1 << 20
+
+// ReadNoFollow reads path, refusing to follow a symlink at its last element.
+// It is for files trusted only because of where they sit: following a link
+// planted there would report some unrelated file's bytes instead. O_NOFOLLOW
+// has no Windows equivalent, so the refusal is unix-only.
+func ReadNoFollow(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|oNoFollow, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, maxReadBytes))
 }

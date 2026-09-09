@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 )
 
 // cacheHome points UserCacheDir at a temp tree, so a test never touches the
@@ -45,7 +45,7 @@ func portOf(t *testing.T, url string) int {
 func TestRunning_ReopensARecordedKit(t *testing.T) {
 	cacheHome(t)
 	port := kitOn(t)
-	if err := Record(port, "0.1.0"); err != nil {
+	if err := Record(port); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	got := Running()
@@ -62,7 +62,7 @@ func TestRunning_ReopensARecordedKit(t *testing.T) {
 func TestRunning_StaleRecord(t *testing.T) {
 	t.Run("no server", func(t *testing.T) {
 		cacheHome(t)
-		if err := Record(freePort(t), "0.1.0"); err != nil {
+		if err := Record(freePort(t)); err != nil {
 			t.Fatal(err)
 		}
 		if got := Running(); got != nil {
@@ -73,7 +73,7 @@ func TestRunning_StaleRecord(t *testing.T) {
 		cacheHome(t)
 		other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 		defer other.Close()
-		if err := Record(portOf(t, other.URL), "0.1.0"); err != nil {
+		if err := Record(portOf(t, other.URL)); err != nil {
 			t.Fatal(err)
 		}
 		if got := Running(); got != nil {
@@ -110,7 +110,7 @@ func TestRunning_UnreadableRecord(t *testing.T) {
 // served the token by the server itself.
 func TestRecord_KeepsNoSecretAndIsOwnerOnly(t *testing.T) {
 	cacheHome(t)
-	if err := Record(12345, "0.1.0"); err != nil {
+	if err := Record(12345); err != nil {
 		t.Fatal(err)
 	}
 	path, _ := Path()
@@ -132,7 +132,7 @@ func TestRecord_KeepsNoSecretAndIsOwnerOnly(t *testing.T) {
 
 func TestClear_RemovesOurOwnRecordOnly(t *testing.T) {
 	cacheHome(t)
-	if err := Record(12345, "0.1.0"); err != nil {
+	if err := Record(12345); err != nil {
 		t.Fatal(err)
 	}
 	path, _ := Path()
@@ -146,7 +146,7 @@ func TestClear_RemovesOurOwnRecordOnly(t *testing.T) {
 		t.Fatalf("Clear removed another instance's record: %v", err)
 	}
 
-	if err := Record(12345, "0.1.0"); err != nil {
+	if err := Record(12345); err != nil {
 		t.Fatal(err)
 	}
 	Clear()
@@ -183,9 +183,10 @@ func TestLock_OnlyOneHolder(t *testing.T) {
 	release2()
 }
 
-// A kit that was killed leaves its lock behind; that must not wedge every
-// later launch.
-func TestLock_StaleLockIsCleared(t *testing.T) {
+// The case the sequential test above cannot reach: several launches arriving
+// at once, including over a lock file left by a dead holder, must produce
+// exactly one winner.
+func TestLock_ConcurrentLaunchesLeaveOneWinner(t *testing.T) {
 	cacheHome(t)
 	path, err := Path()
 	if err != nil {
@@ -194,17 +195,54 @@ func TestLock_StaleLockIsCleared(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	lock := path + ".lock"
-	if err := os.WriteFile(lock, []byte("999999\n"), 0o600); err != nil {
+	if err := os.WriteFile(path+".lock", []byte("999999\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(lock, old, old); err != nil {
+
+	const launches = 8
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var releases []func()
+	start := make(chan struct{})
+	for i := 0; i < launches; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if release, ok := Lock(); ok {
+				mu.Lock()
+				releases = append(releases, release)
+				mu.Unlock()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if len(releases) != 1 {
+		t.Fatalf("%d launches took the lock, want exactly 1", len(releases))
+	}
+	releases[0]()
+}
+
+// A kit that was killed leaves its lock file behind; the OS drops the lock
+// with the process, so the next launch must take it rather than time out.
+func TestLock_SurvivesADeadHolder(t *testing.T) {
+	cacheHome(t)
+	path, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Debris from a killed kit: the file is there, nothing holds it.
+	if err := os.WriteFile(path+".lock", []byte("999999\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	release, ok := Lock()
 	if !ok {
-		t.Fatal("a stale lock with no kit behind it still blocked the launch")
+		t.Fatal("a lock file with no live holder still blocked the launch")
 	}
 	release()
 }
@@ -216,7 +254,7 @@ func TestRunning_ReportsTheServedVersion(t *testing.T) {
 		w.Header().Set(HeaderName, "0.1.0")
 	}))
 	defer srv.Close()
-	if err := Record(portOf(t, srv.URL), "0.1.0"); err != nil {
+	if err := Record(portOf(t, srv.URL)); err != nil {
 		t.Fatal(err)
 	}
 	got := Running()

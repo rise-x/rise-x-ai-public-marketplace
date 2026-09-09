@@ -24,18 +24,6 @@ const riseXMcpJSON = `{"mcpServers":{
   "rise-x-test":{"type":"http","url":"https://mcp-test.rise-x.io/mcp"}
 }}`
 
-func mcpPluginList(t *testing.T) string {
-	t.Helper()
-	installPath := t.TempDir()
-	if err := os.WriteFile(filepath.Join(installPath, ".mcp.json"), []byte(riseXMcpJSON), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return `{
-  "installed": [{"id":"rise-x-mcp@rise-x-public","version":"1.3.1","scope":"user","enabled":true,"installPath":"` + installPath + `"}],
-  "available": [{"pluginId":"rise-x-mcp@rise-x-public","name":"rise-x-mcp","marketplaceName":"rise-x-public","source":"./plugins/rise-x-mcp"}]
-}`
-}
-
 // A mirror of the public marketplace installs the same plugin under its own
 // name, and its bundled servers are the same servers.
 func TestRiseXMcpConfig_MirrorMarketplace(t *testing.T) {

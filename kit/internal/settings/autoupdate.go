@@ -142,7 +142,7 @@ func (w *Writer) SetAutoUpdate(name, repo string, enabled bool) (backupPath stri
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	target := resolve(w.Path)
+	target := fsutil.Resolve(w.Path)
 	for attempt := 0; attempt < 2; attempt++ {
 		backupPath, err = w.setOnce(target, name, repo, enabled)
 		if !errors.Is(err, errChanged) {
@@ -176,7 +176,7 @@ func (w *Writer) setOnce(target, name, repo string, enabled bool) (backupPath st
 		return "", err
 	}
 	if exists && !w.backedUp {
-		if backupPath, err = backup(target, original, mode); err != nil {
+		if backupPath, err = fsutil.Backup(target, original, mode); err != nil {
 			return "", err
 		}
 		w.backedUp = true
@@ -276,27 +276,8 @@ func readTarget(target string) (data []byte, exists bool, err error) {
 	return nil, false, err
 }
 
-// resolve follows a symlinked settings.json to the real file, so a dotfiles
-// setup keeps its link and the change lands in the repo the partner tracks.
-func resolve(path string) string {
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		return real
-	}
-	return path
-}
-
 func isNull(raw json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
-}
-
-// backup copies the file's exact bytes - BOM, line endings and all - at the
-// same permissions, so a 0600 secrets file never leaves a world-readable copy.
-func backup(target string, original []byte, mode os.FileMode) (string, error) {
-	path := fsutil.BackupPath(target)
-	if err := os.WriteFile(path, original, mode); err != nil {
-		return "", fmt.Errorf("backup %s: %w", target, err)
-	}
-	return path, nil
 }
 
 // readFile reads path, stripping (and reporting) a leading UTF-8 BOM. A
@@ -340,6 +321,11 @@ func writeAtomic(path string, data []byte, mode os.FileMode, expect []byte) erro
 	if _, err := tmp.Write(data); err != nil {
 		return err
 	}
+	// settings.json can hold an apiKeyHelper, so the replacement has to be on
+	// disk before the rename exposes it under the real name.
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
@@ -354,5 +340,8 @@ func writeAtomic(path string, data []byte, mode os.FileMode, expect []byte) erro
 	if !bytes.Equal(current, expect) {
 		return errChanged
 	}
-	return os.Rename(name, path)
+	if err := os.Rename(name, path); err != nil {
+		return err
+	}
+	return fsutil.SyncDir(filepath.Dir(path))
 }

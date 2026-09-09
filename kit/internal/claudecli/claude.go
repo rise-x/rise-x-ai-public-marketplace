@@ -34,14 +34,16 @@ func (c *Client) run(ctx context.Context, args []string) (stdout string, err err
 		return "", cmdError(runner.Argv(c.Path, args), err, stderr)
 	}
 	if exitCode != 0 {
-		return "", fmt.Errorf("%s: exit %d: %s", runner.Argv(c.Path, args), exitCode, runner.Redact(strings.TrimSpace(stderr)))
+		return "", fmt.Errorf("%s: exit %d: %s", runner.Redact(runner.Argv(c.Path, args)), exitCode, runner.Redact(strings.TrimSpace(stderr)))
 	}
 	return stdout, nil
 }
 
 // cmdError wraps a command failure, quoting the stderr tail when there is
-// one so a timeout says why rather than just "deadline exceeded".
+// one so a timeout says why rather than just "deadline exceeded". Both halves
+// are redacted: this string is served as job.Error and rendered in the doctor.
 func cmdError(argv string, err error, stderr string) error {
+	argv = runner.Redact(argv)
 	if s := runner.Redact(strings.TrimSpace(stderr)); s != "" {
 		return fmt.Errorf("%s: %w: %s", argv, err, s)
 	}

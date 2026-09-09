@@ -227,3 +227,56 @@ func TestApply_BackupIsSafe(t *testing.T) {
 		t.Fatalf("backup mode = %v, %v; want 0600 like the source", fi.Mode().Perm(), err)
 	}
 }
+
+// The same dotfiles case as ~/.npmrc: this file is a partner's own global
+// instructions, and a rename over a symlink would strand their tracked copy.
+func TestApply_KeepsASymlinkedClaudeMDLinked(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tracked := filepath.Join(dir, "dotfiles", "CLAUDE.md")
+	if err := os.MkdirAll(filepath.Dir(tracked), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tracked, []byte("# my rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(claudeDir, "CLAUDE.md")
+	if err := os.Symlink(tracked, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if _, err := Apply(claudeDir); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("Apply replaced the symlink with a plain file")
+	}
+	got, _ := os.ReadFile(tracked)
+	if !strings.Contains(string(got), startMarker) || !strings.Contains(string(got), "# my rules") {
+		t.Fatalf("tracked file = %q, want the partner's rules plus the block", got)
+	}
+}
+
+// The backup is exactly what the partner needs when the write fails, and the
+// error is all a caller keeps - main discards the Result - so it has to name
+// it there, the way npmrc already does.
+func TestWriteError_NamesTheBackup(t *testing.T) {
+	got := writeError("/home/p/.claude/CLAUDE.md", "/home/p/.claude/CLAUDE.md.bak-x", os.ErrPermission)
+	if !strings.Contains(got.Error(), "/home/p/.claude/CLAUDE.md.bak-x") {
+		t.Fatalf("error = %q, want the backup path in it", got)
+	}
+	if !errors.Is(got, os.ErrPermission) {
+		t.Fatalf("error = %q, want the cause still wrapped", got)
+	}
+	bare := writeError("/home/p/.claude/CLAUDE.md", "", os.ErrPermission)
+	if strings.Contains(bare.Error(), "backed up") {
+		t.Fatalf("error = %q, want no backup clause when there is no backup", bare)
+	}
+}

@@ -137,11 +137,18 @@ func New(cfg Config) *Server {
 	if npmrcPath == "" {
 		npmrcPath = defaultNpmrcPath()
 	}
+	// The version is served as the X-Rise-X-Kit header, and an empty header
+	// reads as "not a kit": a build that lost its -X ldflag would then be
+	// invisible to the next launch's probe, which would start a rival server.
+	version := cfg.Version
+	if version == "" {
+		version = "unknown"
+	}
 	s := &Server{
 		port:           cfg.Port,
 		token:          cfg.Token,
 		claudeDir:      cfg.ClaudeDir,
-		version:        cfg.Version,
+		version:        version,
 		runner:         r,
 		locateEnv:      locateEnv,
 		nodeEnv:        nodeEnv,

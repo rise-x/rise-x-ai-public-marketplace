@@ -232,3 +232,51 @@ func TestRawPaths(t *testing.T) {
 		}
 	}
 }
+
+// The ref file is trusted only because of where it sits, so a symlink planted
+// under .git/refs must not hand back some unrelated file's first line as a
+// commit SHA.
+func TestLocalHEAD_RefusesASymlinkedRef(t *testing.T) {
+	dir := t.TempDir()
+	gitDir := filepath.Join(dir, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "heads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(secret, []byte("sk-do-not-leak\nrest\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(gitDir, "refs", "heads", "main")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	sha, err := LocalHEAD(dir)
+	if err == nil {
+		t.Fatalf("LocalHEAD followed the symlink and returned %q", sha)
+	}
+	if sha != "" {
+		t.Fatalf("sha = %q, want nothing", sha)
+	}
+}
+
+// A response that keeps going is not a manifest, and reading it whole would
+// let whatever answers the request grow the kit's heap.
+func TestGet_RefusesAnOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < (maxBodyBytes>>20)+2; i++ {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	c := New("rise-x/rise-x-ai-public-marketplace")
+	if _, err := c.get(context.Background(), srv.URL); err == nil {
+		t.Fatal("a body past the cap was read whole")
+	}
+}
