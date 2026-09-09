@@ -10,15 +10,22 @@ the Rise-X AI gateway; files sit on the MCP server only transiently, staged unti
 > a run is covered here in § Using a store in a run, and in more depth by
 > `references/managing-agents.md` for the agent-config path.
 
+**Not every server has this release.** On a server without it, all five tools are simply absent —
+a call returns tool-not-found, not a permissions or id error. Read that absence as *not supported
+here*, tell the user the deployment predates file search, and don't retry with a different
+ecosystem or id.
+
 ## Before you create a store
 
 A store expires `expires_after_days` days (default 90, capped at 365 — the server rejects anything
-above that with a 400) after its **last use**: every search against it resets the countdown, so an
-actively used store never expires and an abandoned one eventually does. **Tell the user this rule
-and confirm the number of days before calling `create_vector_store`.** Getting it wrong is awkward
-to fix later: renewing an active store is easy, but rebuilding an expired one costs a new id and a
-record update everywhere the old one was saved (see § Renewing, renaming, rebuilding, and file
-retention).
+above that with a 400) after its **last use**: every **agent run** that searches it resets the
+countdown, so a store an agent keeps using never expires and an abandoned one eventually does. A
+`file_search` call does not move the clock by itself — the platform re-applies the expiry policy
+once per run, after the reply — so a store attached to an agent nobody runs still expires on
+schedule. **Tell the user this rule and confirm the number of days before calling
+`create_vector_store`.** Getting it wrong is awkward to fix later: renewing an active store is
+easy, but rebuilding an expired one costs a new id and a record update everywhere the old one was
+saved (see § Renewing, renaming, rebuilding, and file retention).
 
 ## Tool inventory
 
@@ -26,7 +33,7 @@ retention).
 |---|---|
 | `create_vector_store(name, expires_after_days=90, purpose?, resource_type?, resource_id?)` | Creates the store; returns its `id` (an OpenAI `vs_…` id), the store view, and an `expiry` block |
 | `get_vector_store(vector_store_id, include_files=False)` | Status, file counts, usage, and expiry; per-file status and `lastError` with `include_files=True` |
-| `manage_vector_store(vector_store_id, action, expires_after_days?, name?)` | `action` is required, one of `"renew"` \| `"rename"` \| `"rebuild"` \| `"delete"` — see § Renewing, renaming, rebuilding, and file retention for each one's arguments |
+| `manage_vector_store(vector_store_id, action, expires_after_days?, name?)` | `action` is required, one of `"renew"` \| `"rebuild"` \| `"rename"` \| `"delete"` — see § Renewing, renaming, rebuilding, and file retention for each one's arguments |
 | `request_vector_store_upload()` | Step 1 of adding files: a one-time `uploadUrl` and `uploadId` |
 | `add_vector_store_files(vector_store_id, upload_id, filename?)` | Step 3: attaches the uploaded file(s) to the store |
 
@@ -38,19 +45,28 @@ belongs to right away, with `update_work_data` (work item) or `edit_asset` (asse
 conversation. That record's own permissions then decide who can use the store, since the store
 itself carries no access control of its own.
 
-`purpose`, `resource_type`, and `resource_id` are optional metadata on `create_vector_store`. They
-help support staff diagnose an issue and help a later session find the owning record, but they
-don't replace saving the id on that record.
+`purpose`, `resource_type`, and `resource_id` are optional free-text metadata on
+`create_vector_store` (§ Creating a store). They help support staff diagnose an issue and help a
+later session find the owning record, but they don't replace saving the id on that record.
 
 ## Creating a store
 
 ```yaml
 create_vector_store(
   name: "Q3 vessel inspection reports"
-  expires_after_days: 90
+  expires_after_days: 90              # 1-365; outside that range the server returns a 400
+  resource_type: "work"               # free text, max 512 chars, like purpose and resource_id
+  resource_id: "<the owning work id>"
 )
-# → ok: true, id: "vs_abc123...", expiry: {days: 90, expiresAt: "...", daysUntilExpiry: 90, notice: "..."}
+# → ok: true, id: "vs_abc123...", expiry: {days: 90, expiresAt: "2026-12-08", daysUntilExpiry: 90,
+#     notice: "Expires on 2026-12-08 if unused; every agent run resets the 90-day window.
+#              Renew before then; after expiry, rebuild."}
 ```
+
+`purpose`, `resource_type`, and `resource_id` are free-text labels of up to 512 characters each
+with no enum behind them, so pick plain values the next reader can act on and don't invent a
+taxonomy. `expiry.notice` is server-composed prose meant for the user as-is: surface it, never
+parse it.
 
 Confirm the expiry days with the user first (§ Before you create a store), then save `id` on the
 owning work item or asset before doing anything else.
@@ -138,9 +154,9 @@ built today).
 
 ## Cost
 
-OpenAI bills vector-store storage per GB per day. The sliding expiry (every search resets the
-countdown) is the cost control: an abandoned store stops accruing that cost on its own, without
-anyone having to remember to delete it.
+OpenAI bills vector-store storage per GB per day. The sliding expiry (every agent run that
+searches the store resets the countdown) is the cost control: a store nobody runs against stops
+accruing that cost on its own, without anyone having to remember to delete it.
 
 ## Pitfalls
 
@@ -161,8 +177,9 @@ anyone having to remember to delete it.
 5. **Expecting an image to be searchable.** Images are rejected outright, along with msg, rtf, and
    odt: there's no conversion path for them the way there is for spreadsheets and email.
 6. **Not confirming the expiry days before creating.** The store expires `expires_after_days` days
-   after its last use, sliding forward on every search. Tell the user this rule and confirm the
-   number before the first `create_vector_store` call (§ Before you create a store).
+   after its last use, sliding forward on every agent run that searches it — not on a `file_search`
+   call by itself, and not at all for a store nobody runs against. Tell the user this rule and
+   confirm the number before the first `create_vector_store` call (§ Before you create a store).
 7. **Renewing after expiry.** `manage_vector_store(action="renew")` only works before the store
    expires. Once it has, the store needs `action="rebuild"` instead, which returns a new id.
 8. **Rebuilding or recreating a store just to relabel it.** `action="rename"` changes the display
