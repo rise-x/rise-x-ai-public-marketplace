@@ -332,8 +332,11 @@ func TestDoctor_NoCLI_StillReportsMachineFacts(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("DISABLE_AUTOUPDATER", "1")
-	t.Setenv("FORCE_AUTOUPDATE_PLUGINS", "")
+	claudeDir := t.TempDir()
+	settingsBody := `{"env":{"DISABLE_AUTOUPDATER":"1"}}`
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settingsBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	npmrcBody := "@rise-x:registry=https://rise-x.pkgs.visualstudio.com/_packaging/npm/registry/\n" +
 		"//rise-x.pkgs.visualstudio.com/_packaging/npm/registry/:_authToken=secret\n"
 	if err := os.WriteFile(filepath.Join(home, ".npmrc"), []byte(npmrcBody), 0o600); err != nil {
@@ -344,6 +347,7 @@ func TestDoctor_NoCLI_StillReportsMachineFacts(t *testing.T) {
 	fake.Set("/fake/node", []string{"--version"}, runnertest.Result{Stdout: "v20.11.0\n"})
 	baseURL, token := newServer(t, Config{
 		Runner:    fake,
+		ClaudeDir: claudeDir,
 		LocateEnv: locateNone,
 		NodeEnv: func(r runner.Runner) doctor.Env {
 			return doctor.Env{
@@ -493,6 +497,66 @@ func TestGather_MachineProbesCachedUntilRescan(t *testing.T) {
 	getJSON(t, baseURL+"/api/overview", token, &got)
 	if n := nodeProbes(); n != 2 {
 		t.Fatalf("node probed %d times after a rescan, want 2", n)
+	}
+}
+
+// Run again and Refresh ask with ?fresh=1, which must re-probe the machine:
+// a cached answer is why the button looked like it did nothing.
+func TestGather_FreshBypassesTheCaches(t *testing.T) {
+	fake := newFakeCLI(pluginListFixture)
+	fake.Set("/fake/node", []string{"--version"}, runnertest.Result{Stdout: "v20.11.0\n"})
+	baseURL, token := newServer(t, Config{
+		Runner:    fake,
+		LocateEnv: locateAt(fakeCLIPath),
+		NodeEnv: func(r runner.Runner) doctor.Env {
+			return doctor.Env{
+				LookPath: func(string) (string, error) { return "/fake/node", nil },
+				Runner:   r,
+			}
+		},
+	})
+
+	spawns := func() (pluginList, node int) {
+		for _, c := range fake.Calls {
+			switch {
+			case c.Name == "/fake/node":
+				node++
+			case len(c.Args) > 1 && c.Args[0] == "plugin" && c.Args[1] == "list":
+				pluginList++
+			}
+		}
+		return pluginList, node
+	}
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	getJSON(t, baseURL+"/api/doctor", token, &DoctorResponse{})
+	if pl, node := spawns(); pl != 1 || node != 1 {
+		t.Fatalf("a plain GET within the gather TTL re-probed: plugin list %d, node %d", pl, node)
+	}
+
+	getJSON(t, baseURL+"/api/doctor?fresh=1", token, &DoctorResponse{})
+	if pl, node := spawns(); pl != 2 || node != 2 {
+		t.Fatalf("fresh=1 did not re-probe: plugin list %d, node %d", pl, node)
+	}
+
+	getJSON(t, baseURL+"/api/overview?fresh=1", token, &got)
+	if pl, node := spawns(); pl != 3 || node != 3 {
+		t.Fatalf("fresh=1 on /api/overview did not re-probe: plugin list %d, node %d", pl, node)
+	}
+}
+
+// Claude Code's desktop shell exports DISABLE_AUTOUPDATER to what it starts,
+// so reading the kit's own environment made this row depend on how the kit was
+// launched. Only settings.json counts.
+func TestGather_AutoupdaterIgnoresProcessEnv(t *testing.T) {
+	t.Setenv("DISABLE_AUTOUPDATER", "1")
+	baseURL, token := newServer(t, Config{
+		Runner:    newFakeCLI(pluginListFixture),
+		LocateEnv: locateAt(fakeCLIPath),
+	})
+	if c := doctorCheck(t, baseURL, token, "env.autoupdater"); c.Status != doctor.StatusOK {
+		t.Errorf("env.autoupdater = %+v, want ok", c)
 	}
 }
 

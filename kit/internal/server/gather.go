@@ -448,22 +448,17 @@ func syncedMcpConfig(plugins []synced.Plugin) []mcp.ConfiguredServer {
 	return cfg
 }
 
-// autoupdaterEnv reports whether DISABLE_AUTOUPDATER/FORCE_AUTOUPDATE_PLUGINS
-// are set, via the process environment or settings.json's "env" block.
+// autoupdaterEnv reports whether settings.json's "env" block sets
+// DISABLE_AUTOUPDATER/FORCE_AUTOUPDATE_PLUGINS. The kit's own process
+// environment is deliberately not read: Claude Code's desktop shell exports
+// DISABLE_AUTOUPDATER to what it launches, so the answer would depend on
+// whether the partner started the kit from a session or from Finder.
 func autoupdaterEnv(set settings.Settings) (disable, force bool) {
-	disable = os.Getenv("DISABLE_AUTOUPDATER") != ""
-	force = os.Getenv("FORCE_AUTOUPDATE_PLUGINS") != ""
 	env, err := set.Env()
 	if err != nil {
-		return disable, force
+		return false, false
 	}
-	if env["DISABLE_AUTOUPDATER"] != "" {
-		disable = true
-	}
-	if env["FORCE_AUTOUPDATE_PLUGINS"] != "" {
-		force = true
-	}
-	return disable, force
+	return env["DISABLE_AUTOUPDATER"] != "", env["FORCE_AUTOUPDATE_PLUGINS"] != ""
 }
 
 func defaultNpmrcPath() string {

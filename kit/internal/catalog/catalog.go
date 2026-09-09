@@ -79,6 +79,26 @@ func fresh(at time.Time, err error, ttl time.Duration) bool {
 	return time.Since(at) < ttl
 }
 
+// ForgetFailures drops the cached lookup failures, so the next gather retries
+// GitHub instead of repeating a minute-old error. Successful lookups keep
+// their own cache: nothing on this machine changes what GitHub answers, and
+// the rate limit is 60 requests an hour.
+func (c *Catalog) ForgetFailures() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for name, e := range c.versions {
+		if e.err != nil {
+			delete(c.versions, name)
+		}
+	}
+	if c.headErr != nil {
+		c.headAt = time.Time{}
+	}
+	if c.namesErr != nil {
+		c.namesAt = time.Time{}
+	}
+}
+
 func New(repo string) *Catalog {
 	return &Catalog{
 		Repo:       repo,

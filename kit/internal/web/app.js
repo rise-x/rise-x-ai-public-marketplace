@@ -965,7 +965,7 @@ function checkAction(check) {
 
 function renderDoctor() {
   $("kit-doctor-desc").textContent =
-    `${checks.length} checks, run just now. Anything that needs you has a button next to it.`;
+    `${checks.length} checks, checked just now. Anything that needs you has a button next to it.`;
 
   $("kit-doctor-list").innerHTML = checks
     .map((check) => {
@@ -1110,8 +1110,8 @@ function scrollLog(job) {
 
 /* load */
 
-async function loadOverview() {
-  overview = await api("/api/overview");
+async function loadOverview(fresh) {
+  overview = await api(fresh ? "/api/overview?fresh=1" : "/api/overview");
   renderVersion();
   renderBanner();
   renderCli();
@@ -1119,9 +1119,17 @@ async function loadOverview() {
   renderConnection();
 }
 
-async function loadDoctor() {
+async function loadDoctor(fresh) {
+  if (fresh) {
+    // A fresh check re-probes the machine, which takes seconds, so paint the
+    // loading state before asking rather than sitting on the old answer.
+    checks = null;
+    renderSummary();
+    $("kit-doctor-desc").textContent = "Checking your setup…";
+  }
   try {
-    checks = (await api("/api/doctor")).checks || [];
+    checks =
+      (await api(fresh ? "/api/doctor?fresh=1" : "/api/doctor")).checks || [];
     doctorError = "";
   } catch (err) {
     // The summary banner is the only place this shows, so paint it before the
@@ -1174,11 +1182,11 @@ function restoreFocus(key) {
   }
 }
 
-async function refresh() {
+async function refresh(fresh) {
   const open = openDetails();
   const focused = focusKey(document.activeElement);
   try {
-    await Promise.all([loadOverview(), loadDoctor()]);
+    await Promise.all([loadOverview(fresh), loadDoctor(fresh)]);
   } catch (err) {
     notice("error", `Could not read this machine: ${err.message}`);
   } finally {
@@ -1310,13 +1318,29 @@ function runFix(button) {
   });
 }
 
+/** busy swaps a button's label for a spinner while its work runs. A gather
+ * the caches could not answer takes seconds, and a button that only greys out
+ * reads as one that did nothing. */
+async function busy(button, label, work) {
+  if (!button) return work();
+  const original = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = `${SPINNER}${esc(label)}`;
+  try {
+    return await work();
+  } finally {
+    button.disabled = false;
+    button.innerHTML = original;
+  }
+}
+
 /** simple wraps an action that posts nothing but an empty body. */
 const simple = (action) => (button) => runAction(action, {}, button);
 
 const ACTIONS = {
-  refresh: () => refresh(),
+  refresh: () => refresh(true),
   recheck: () => refresh(),
-  "doctor-again": () => loadDoctor(),
+  "doctor-again": (button) => busy(button, "Checking…", () => refresh(true)),
   "notice-dismiss": () => clearNotice(),
   "banner-dismiss": () => {
     overview.reloadHint = false;

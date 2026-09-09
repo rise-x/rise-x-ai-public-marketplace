@@ -401,5 +401,5 @@ func envAutoupdaterCheck(f Facts) Check {
 			Message: "DISABLE_AUTOUPDATER is set without FORCE_AUTOUPDATE_PLUGINS, so skills will not update on their own."}
 	}
 	return Check{ID: id, Status: StatusOK, Title: "Auto-update environment",
-		Message: "Nothing is blocking automatic updates."}
+		Message: "Nothing in your Claude Code settings blocks automatic updates."}
 }

@@ -110,7 +110,7 @@ fixes arrive in the background instead of waiting for a manual update.
 | Node.js | Whether Node.js 20 or later is available (only the app-building skill needs it) | None — links to nodejs.org |
 | `.npmrc` | Whether a leftover `@rise-x:registry` line still points `@rise-x` packages at their old host — they're on the public npm registry now — and whether any auth line for that same host is still around. **Show lines** lists them, masked | Backs up `~/.npmrc` first, then removes only those lines |
 | Git (Windows only) | Whether `git` is on `PATH` | None — Claude Code Desktop prompts to install it |
-| Auto-updater environment | Whether an environment variable is blocking plugin auto-updates | None — informational only |
+| Auto-updater environment | Whether your Claude Code settings' `env` block is blocking plugin auto-updates | None — informational only |
 
 **Activity** is a drawer at the bottom of the page listing every command Rise-X
 Kit ran, with its streamed output, so you can see exactly what happened.

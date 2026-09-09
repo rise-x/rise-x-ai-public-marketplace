@@ -311,6 +311,14 @@ func TestRun_EnvAutoupdaterMessage(t *testing.T) {
 	if c.Message != want {
 		t.Fatalf("env message = %q, want %q", c.Message, want)
 	}
+
+	// The ok copy names settings.json's env block, the only source the check
+	// reads, so it never claims more than it checked.
+	ok := findCheck(t, Run(baseFacts()), "env.autoupdater")
+	wantOK := "Nothing in your Claude Code settings blocks automatic updates."
+	if ok.Message != wantOK {
+		t.Fatalf("env ok message = %q, want %q", ok.Message, wantOK)
+	}
 }
 
 // No row may leak engineering vocabulary into the partner-facing copy.

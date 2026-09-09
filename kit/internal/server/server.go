@@ -191,6 +191,16 @@ func (s *Server) invalidateClaudeProbes() {
 	s.invalidateGather()
 }
 
+// invalidateProbes drops every cached probe of the machine, so the next gather
+// re-runs all of them. This is what ?fresh=1 asks for: the partner pressed
+// Run again because something changed outside the kit.
+func (s *Server) invalidateProbes() {
+	s.nodeCache.invalidate()
+	s.npmrcCache.invalidate()
+	s.catalog.ForgetFailures()
+	s.invalidateClaudeProbes()
+}
+
 // Quit is closed when the "quit" action runs, so main can shut the process
 // down.
 func (s *Server) Quit() <-chan struct{} { return s.quitRequested }

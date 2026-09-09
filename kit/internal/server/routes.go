@@ -119,8 +119,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(web.Index(s.token))
 }
 
+// gatherFor answers one GET. ?fresh=1 drops every cache first, so the page's
+// Refresh and Run again buttons re-probe the machine instead of being handed
+// a three-second-old answer.
+func (s *Server) gatherFor(r *http.Request) (OverviewResponse, doctor.Facts, error) {
+	if r.URL.Query().Get("fresh") == "1" {
+		s.invalidateProbes()
+	}
+	return s.cachedGather(r.Context())
+}
+
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
-	overview, _, err := s.cachedGather(r.Context())
+	overview, _, err := s.gatherFor(r)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -129,7 +139,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
-	_, facts, err := s.cachedGather(r.Context())
+	_, facts, err := s.gatherFor(r)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, err.Error())
 		return

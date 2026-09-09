@@ -11,7 +11,7 @@
 
   The only script is the review-time state switcher docked bottom-right.
 -->
-<html lang="en" data-summary="warn" data-cli="found" data-skills="update" data-conn="connected" data-catalog="current" data-banner="off" data-jobs="closed" data-autoupdate="default">
+<html lang="en" data-summary="warn" data-cli="found" data-skills="update" data-conn="connected" data-catalog="current" data-banner="off" data-jobs="closed" data-autoupdate="default" data-doctor="idle">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -455,10 +455,12 @@ latency    ok   142 ms</pre>
           <div class="min-w-0 flex-1">
             <div data-slot="card-title" class="text-ui leading-tight font-medium">Doctor</div>
             <div data-slot="card-description" class="mt-0.5 text-xs text-muted-foreground">
-              Eight checks, run just now. Anything that needs you has a button next to it.
+              <span data-when="doctor:idle">Eight checks, checked just now. Anything that needs you has a button next to it.</span>
+              <span data-when="doctor:checking" hidden>Checking your setup&hellip;</span>
             </div>
           </div>
-          <button data-slot="button" data-variant="outline" data-size="sm" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-sm rounded-md px-2.5">Run again</button>
+          <button data-when="doctor:idle" data-slot="button" data-variant="outline" data-size="sm" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-sm rounded-md px-2.5">Run again</button>
+          <button data-when="doctor:checking" data-slot="button" data-variant="outline" data-size="sm" disabled data-disabled="" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-sm rounded-md px-2.5" hidden><span data-slot="spinner" role="status" aria-label="Working" style="width: 13px; height: 13px; border-width: 1.5px" class="inline-block shrink-0 rounded-full border-border border-t-muted-foreground motion-safe:animate-spin"></span>Checking&hellip;</button>
         </div>
 
         <div data-slot="list" class="flex flex-col border-t border-border-subtle">
@@ -614,6 +616,7 @@ writing ~/.claude/plugins/rise-x-mcp
         { key: 'conn', label: 'Connection', options: [['connected', 'Connected'], ['signin', 'Sign-in'], ['notinstalled', 'Missing'], ['unknown', 'Unknown']] },
         { key: 'catalog', label: 'Catalog', options: [['current', 'Current'], ['behind', 'Behind']] },
         { key: 'autoupdate', label: 'Auto-update', options: [['default', 'Default'], ['org', 'Org-managed']] },
+        { key: 'doctor', label: 'Doctor', options: [['idle', 'Checked'], ['checking', 'Checking']] },
         { key: 'banner', label: 'Restart banner', options: [['off', 'Hidden'], ['on', 'Shown']] },
         { key: 'jobs', label: 'Activity drawer', options: [['closed', 'Closed'], ['open', 'Job running']] },
       ];
