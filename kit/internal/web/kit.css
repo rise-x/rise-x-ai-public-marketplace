@@ -44,6 +44,17 @@
   min-width: 640px;
 }
 
+/* Doctor rows double as the summary banner's jump targets. scroll-margin keeps
+   the sticky page header off the row the fragment lands on; the flash class,
+   removed after 1.5 s, says which row the reader was sent to. */
+.kit-check {
+  scroll-margin-top: 84px;
+  transition: background-color 0.3s var(--ease);
+}
+.kit-check-flash {
+  background-color: color-mix(in srgb, var(--ring-control) 16%, transparent);
+}
+
 @layer components {
   /* Button — base lifted from data-slot="button"; variant and size classes stay
      inline so a reviewer can match them against demo.html. */

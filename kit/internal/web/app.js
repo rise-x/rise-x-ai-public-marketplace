@@ -237,6 +237,7 @@ async function api(path, options) {
 
 let overview = null;
 let checks = null;
+let doctorError = ""; // set when /api/doctor itself failed, for the summary banner
 const jobs = []; // newest first
 let drawerOpen = false;
 
@@ -363,6 +364,108 @@ function renderVersion() {
   badge.hidden = !overview.kitVersion;
 }
 
+/** Alert colours per summary tone, with the role that announces it: a problem
+ * interrupts the reader, a good result waits to be read. */
+const SUMMARY_TONES = {
+  neutral: ["border-border bg-muted/50", "status"],
+  success: ["border-success/25 bg-success/8", "status"],
+  warning: ["border-warning/30 bg-warning/10", "alert"],
+  error: ["border-error/25 bg-error/8", "alert"],
+};
+
+/** checkLink turns one doctor row's title into a jump to that row. */
+const checkLink = (check) =>
+  `<a href="#check-${esc(check.id)}" data-act="jump" data-check="${esc(check.id)}" class="text-foreground underline decoration-border-strong underline-offset-2 hover:decoration-foreground">${esc(check.title)}</a>`;
+
+/**
+ * summaryState reduces the doctor's checks to the one line above the cards.
+ * Failed rows come before warnings in the link list: a failure is what to deal
+ * with first. body is a list of blocks, so the fail state can name a starting
+ * point on its own line.
+ */
+function summaryState() {
+  if (doctorError) {
+    return {
+      tone: "error",
+      glyph: dot("bg-error mt-1.5", "Not working"),
+      title: "Could not check your setup.",
+      body: [esc(doctorError)],
+    };
+  }
+  if (!checks) {
+    return {
+      tone: "neutral",
+      glyph: `<span class="mt-0.5 inline-flex">${SPINNER}</span>`,
+      title: "Checking your setup…",
+      body: [],
+    };
+  }
+
+  const fails = checks.filter((check) => check.status === "fail");
+  const warns = checks.filter((check) => check.status === "warn");
+  const links = [...fails, ...warns].map(checkLink).join(", ");
+
+  if (fails.length) {
+    return {
+      tone: "error",
+      glyph: dot("bg-error mt-1.5", "Not working"),
+      title: "Rise-X is not ready yet",
+      body: [`Start with: ${esc(fails[0].title)}.`, links],
+    };
+  }
+  if (warns.length) {
+    return {
+      tone: "warning",
+      glyph: dot("bg-warning mt-1.5", "Needs attention"),
+      title:
+        warns.length === 1
+          ? "One thing needs your attention"
+          : `${warns.length} things need your attention`,
+      body: [links],
+    };
+  }
+  return {
+    tone: "success",
+    glyph: dot("bg-success mt-1.5", "Passed"),
+    title: "Everything is set up",
+    body: [
+      "Your Rise-X skills and connection are ready to use in Claude Code Desktop.",
+    ],
+  };
+}
+
+function renderSummary() {
+  const state = summaryState();
+  const [tone, role] = SUMMARY_TONES[state.tone];
+  $("kit-summary").innerHTML = `
+    <div data-slot="alert" role="${role}" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start ${tone}">
+      ${state.glyph}
+      <div class="min-w-0 flex-1">
+        <div data-slot="alert-title" class="mb-px text-ui font-medium">${esc(state.title)}</div>
+        ${
+          state.body.length
+            ? `<div data-slot="alert-description" class="text-xs text-muted-foreground">${state.body
+                .map(
+                  (block, i) =>
+                    `<div${i ? ' class="mt-1"' : ""}>${block}</div>`,
+                )
+                .join("")}</div>`
+            : ""
+        }
+      </div>
+    </div>`;
+}
+
+/** jumped flashes the doctor row a summary link points at. The browser does
+ * the scrolling from the link's own fragment; .kit-check keeps the sticky
+ * header off it. */
+function jumped(link) {
+  const row = $(`check-${link.dataset.check}`);
+  if (!row) return;
+  row.classList.add("kit-check-flash");
+  setTimeout(() => row.classList.remove("kit-check-flash"), 1500);
+}
+
 function renderBanner() {
   $("kit-banner").innerHTML = overview.reloadHint
     ? `<div data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs border-info/25 bg-info/8 items-start">
@@ -385,6 +488,8 @@ function renderBanner() {
  * targets and the doctor checks all use it, so they cannot drift apart.
  */
 function listItem({
+  id,
+  cls,
   dot,
   name,
   code,
@@ -395,7 +500,7 @@ function listItem({
   muted,
 }) {
   return `
-    <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+    <div data-slot="list-item"${id ? ` id="${esc(id)}"` : ""} class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0${cls ? ` ${cls}` : ""}">
       ${dot || ""}
       <div data-slot="list-main" class="min-w-0 flex-1">
         <span data-slot="list-name" class="flex items-center gap-2 text-ui${muted ? " text-muted-foreground" : ""}">${esc(name)}${code ? `<span class="text-micro text-subtle font-mono">${esc(code)}</span>` : ""}</span>
@@ -867,6 +972,8 @@ function renderDoctor() {
       const [dotClass, dotTitle] = CHECK_DOTS[check.status] || CHECK_DOTS.skip;
       const isSkill = check.id.startsWith("plugin.");
       return listItem({
+        id: `check-${check.id}`,
+        cls: "kit-check",
         dot: dot(dotClass, dotTitle),
         name: check.title,
         code: isSkill ? check.id.slice("plugin.".length) : "",
@@ -1013,7 +1120,18 @@ async function loadOverview() {
 }
 
 async function loadDoctor() {
-  checks = (await api("/api/doctor")).checks || [];
+  try {
+    checks = (await api("/api/doctor")).checks || [];
+    doctorError = "";
+  } catch (err) {
+    // The summary banner is the only place this shows, so paint it before the
+    // caller's own error handling takes over.
+    checks = null;
+    doctorError = err.message;
+    renderSummary();
+    throw err;
+  }
+  renderSummary();
   renderDoctor();
 }
 
@@ -1039,9 +1157,11 @@ function restoreDetails(keys) {
 function focusKey(el) {
   const data = el && el.dataset;
   if (!data || !data.act) return "";
-  return [data.act, data.op || "", data.name || data.server || data.fix || ""].join(
-    "|",
-  );
+  return [
+    data.act,
+    data.op || "",
+    data.name || data.server || data.fix || data.check || "",
+  ].join("|");
 }
 
 function restoreFocus(key) {
@@ -1247,6 +1367,7 @@ const ACTIONS = {
     return runAction(`plugin.${op}`, { name, marketplace }, button);
   },
   fix: runFix,
+  jump: jumped,
 };
 
 function onClick(event) {
@@ -1261,6 +1382,7 @@ function onClick(event) {
 
 document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", onClick);
+  renderSummary();
   renderJobs();
   refresh();
 });

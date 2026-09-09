@@ -56,6 +56,9 @@ are planned.
 
 ## What each section does
 
+**Summary** is the banner under the page header: it says whether your setup is
+ready, and links straight to any check that needs you.
+
 **Claude Code** shows the `claude` CLI that Rise-X Kit found — its path and
 version — or, if none is found, an **Install** button and a **Rescan** button.
 

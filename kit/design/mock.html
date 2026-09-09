@@ -11,7 +11,7 @@
 
   The only script is the review-time state switcher docked bottom-right.
 -->
-<html lang="en" data-cli="found" data-skills="update" data-conn="connected" data-catalog="current" data-banner="off" data-jobs="closed" data-autoupdate="default">
+<html lang="en" data-summary="warn" data-cli="found" data-skills="update" data-conn="connected" data-catalog="current" data-banner="off" data-jobs="closed" data-autoupdate="default">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -64,6 +64,42 @@
     </header>
 
     <main class="kit-shell py-6 kit-stack">
+      <!-- ============ Status summary (states: loading / ok / warn / fail / error) ============ -->
+      <div data-when="summary:loading" data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start border-border bg-muted/50">
+        <span class="mt-0.5 inline-flex"><span data-slot="spinner" role="status" aria-label="Working" style="width: 13px; height: 13px; border-width: 1.5px" class="inline-block shrink-0 rounded-full border-border border-t-muted-foreground motion-safe:animate-spin"></span></span>
+        <div class="min-w-0 flex-1">
+          <div data-slot="alert-title" class="mb-px text-ui font-medium">Checking your setup&hellip;</div>
+        </div>
+      </div>
+      <div data-when="summary:ok" data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start border-success/25 bg-success/8">
+        <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-success mt-1.5" title="Passed"></span>
+        <div class="min-w-0 flex-1">
+          <div data-slot="alert-title" class="mb-px text-ui font-medium">Everything is set up</div>
+          <div data-slot="alert-description" class="text-xs text-muted-foreground"><div>Your Rise-X skills and connection are ready to use in Claude Code Desktop.</div></div>
+        </div>
+      </div>
+      <div data-when="summary:warn" data-slot="alert" role="alert" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start border-warning/30 bg-warning/10">
+        <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning mt-1.5" title="Needs attention"></span>
+        <div class="min-w-0 flex-1">
+          <div data-slot="alert-title" class="mb-px text-ui font-medium">4 things need your attention</div>
+          <div data-slot="alert-description" class="text-xs text-muted-foreground"><div><a href="#check-marketplace.autoupdate" class="text-foreground underline decoration-border-strong underline-offset-2 hover:decoration-foreground">Automatic updates</a>, <a href="#check-plugin.rise-x-mcp" class="text-foreground underline decoration-border-strong underline-offset-2 hover:decoration-foreground">Skill versions</a>, <a href="#check-node" class="text-foreground underline decoration-border-strong underline-offset-2 hover:decoration-foreground">Node.js</a>, <a href="#check-npmrc" class="text-foreground underline decoration-border-strong underline-offset-2 hover:decoration-foreground">npm configuration</a></div></div>
+        </div>
+      </div>
+      <div data-when="summary:fail" data-slot="alert" role="alert" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start border-error/25 bg-error/8">
+        <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-error mt-1.5" title="Not working"></span>
+        <div class="min-w-0 flex-1">
+          <div data-slot="alert-title" class="mb-px text-ui font-medium">Rise-X is not ready yet</div>
+          <div data-slot="alert-description" class="text-xs text-muted-foreground"><div>Start with: Claude Code.</div><div class="mt-1"><a href="#check-cli" class="text-foreground underline decoration-border-strong underline-offset-2 hover:decoration-foreground">Claude Code</a>, <a href="#check-npmrc" class="text-foreground underline decoration-border-strong underline-offset-2 hover:decoration-foreground">npm configuration</a></div></div>
+        </div>
+      </div>
+      <div data-when="summary:error" data-slot="alert" role="alert" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs items-start border-error/25 bg-error/8">
+        <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-error mt-1.5" title="Not working"></span>
+        <div class="min-w-0 flex-1">
+          <div data-slot="alert-title" class="mb-px text-ui font-medium">Could not check your setup.</div>
+          <div data-slot="alert-description" class="text-xs text-muted-foreground"><div><span class="font-mono">claude mcp list</span> exited with code 1</div></div>
+        </div>
+      </div>
+
       <!-- ================= Restart banner (state: after-change) ================= -->
       <div data-when="banner:on" data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs border-info/25 bg-info/8 items-start">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mt-0.5 size-3.5 shrink-0 text-info-text" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
@@ -427,7 +463,7 @@ latency    ok   142 ms</pre>
 
         <div data-slot="list" class="flex flex-col border-t border-border-subtle">
           <!-- ok -->
-          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+          <div data-slot="list-item" id="check-cli" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0 kit-check">
             <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-success" title="Passed"></span>
             <div data-slot="list-main" class="min-w-0 flex-1">
               <span data-slot="list-name" class="flex items-center gap-2 text-ui">Claude Code</span>
@@ -442,7 +478,7 @@ latency    ok   142 ms</pre>
             </div>
           </div>
           <!-- warn + fix -->
-          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+          <div data-slot="list-item" id="check-marketplace.autoupdate" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0 kit-check">
             <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning" title="Needs attention"></span>
             <div data-slot="list-main" class="min-w-0 flex-1">
               <span data-slot="list-name" class="flex items-center gap-2 text-ui">Automatic updates</span>
@@ -450,7 +486,7 @@ latency    ok   142 ms</pre>
             </div>
             <button data-slot="button" data-variant="outline" data-size="xs" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-xs gap-1 rounded-md px-2 text-xs shrink-0">Fix</button>
           </div>
-          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+          <div data-slot="list-item" id="check-plugin.rise-x-mcp" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0 kit-check">
             <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning" title="Needs attention"></span>
             <div data-slot="list-main" class="min-w-0 flex-1">
               <span data-slot="list-name" class="flex items-center gap-2 text-ui">Skill versions</span>
@@ -465,7 +501,7 @@ latency    ok   142 ms</pre>
               <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">Last refreshed 20 minutes ago.</span>
             </div>
           </div>
-          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+          <div data-slot="list-item" id="check-node" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0 kit-check">
             <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning" title="Needs attention"></span>
             <div data-slot="list-main" class="min-w-0 flex-1">
               <span data-slot="list-name" class="flex items-center gap-2 text-ui">Node.js</span>
@@ -476,7 +512,7 @@ latency    ok   142 ms</pre>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="size-3"><path d="M7 17 17 7M8 7h9v9"/></svg>
             </button>
           </div>
-          <div data-slot="list-item" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0">
+          <div data-slot="list-item" id="check-npmrc" class="flex items-center gap-2.5 border-t border-border-subtle px-3.5 py-2.5 first:border-t-0 kit-check">
             <span data-slot="status-dot" class="inline-block size-1.5 shrink-0 rounded-full bg-warning" title="Needs attention"></span>
             <div data-slot="list-main" class="min-w-0 flex-1">
               <span data-slot="list-name" class="flex items-center gap-2 text-ui">npm configuration</span>
@@ -572,6 +608,7 @@ writing ~/.claude/plugins/rise-x-mcp
       // Review-time state switcher. Not part of the product.
       const KIT_GROUPS = [
         { key: 'theme', label: 'Theme', options: [['light', 'Light'], ['dark', 'Dark']] },
+        { key: 'summary', label: 'Summary', options: [['loading', 'Checking'], ['ok', 'Ready'], ['warn', 'Warnings'], ['fail', 'Failures'], ['error', 'Unreadable']] },
         { key: 'cli', label: 'Claude Code', options: [['found', 'Found'], ['missing', 'Missing']] },
         { key: 'skills', label: 'Rise-X skill', options: [['update', 'Update'], ['uptodate', 'Current'], ['unknown', 'Unknown'], ['disabled', 'Disabled']] },
         { key: 'conn', label: 'Connection', options: [['connected', 'Connected'], ['signin', 'Sign-in'], ['notinstalled', 'Missing'], ['unknown', 'Unknown']] },
