@@ -386,9 +386,11 @@ const SUMMARY_TONES = {
  * not be read. Those rows are skips, so nothing in the counts below would
  * otherwise say the answer is unknown. */
 function cliCheckFailed() {
+  // The doctor can answer before the overview on a cached load.
+  const ov = overview || {};
   return (
-    !!(overview.marketplace || {}).checkError ||
-    (overview.plugins || []).some((plugin) => plugin.checkError)
+    !!(ov.marketplace || {}).checkError ||
+    (ov.plugins || []).some((plugin) => plugin.checkError)
   );
 }
 
@@ -1228,6 +1230,7 @@ async function refresh(fresh) {
   const focused = focusKey(document.activeElement);
   try {
     await Promise.all([loadOverview(fresh), loadDoctor(fresh)]);
+    renderSummary();
   } catch (err) {
     notice("error", `Could not read this machine: ${err.message}`);
   } finally {
