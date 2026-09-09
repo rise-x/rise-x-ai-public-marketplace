@@ -58,14 +58,32 @@ func main() {
 	// another server behind. An explicit -port asks for a server on that port,
 	// so it overrides this.
 	if !portRequested() {
-		if url := instance.Running(); url != "" {
-			fmt.Println(url)
+		if found := instance.Running(); found != nil {
+			reportReopen(found, *printToken)
+			fmt.Println(found.URL)
 			if !*noBrowser {
-				openBrowser(url)
+				openBrowser(found.URL)
 			}
 			return
 		}
 	}
+
+	// One kit at a time: the jobs slot and the write slot live in this
+	// process, so a second one would write ~/.claude with neither aware of
+	// the other.
+	releaseLock, locked := instance.Lock()
+	if !locked {
+		if found := instance.Running(); found != nil {
+			reportReopen(found, *printToken)
+			fmt.Println(found.URL)
+			if !*noBrowser {
+				openBrowser(found.URL)
+			}
+			return
+		}
+		log.Fatal("another Rise-X Kit is starting; try again in a moment")
+	}
+	defer releaseLock()
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
@@ -129,6 +147,19 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	_ = httpServer.Shutdown(ctx)
+}
+
+// reportReopen says what the reopen actually did, since it silently ignores
+// flags that only mean something for a launch that starts a server.
+func reportReopen(found *instance.Found, printToken bool) {
+	if found.Version != buildinfo.Version {
+		fmt.Printf("reopening the Rise-X Kit already running (version %s; this binary is %s).\n",
+			found.Version, buildinfo.Version)
+		fmt.Println("quit it from its page to start this version instead.")
+	}
+	if printToken {
+		fmt.Println("-print-token needs a kit this command started; quit the running one first.")
+	}
 }
 
 // portRequested reports whether -port was given, as opposed to defaulted.

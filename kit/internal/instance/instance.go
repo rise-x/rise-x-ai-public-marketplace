@@ -44,37 +44,103 @@ func Path() (string, error) {
 // URL is the address a kit on port serves.
 func URL(port int) string { return fmt.Sprintf("http://127.0.0.1:%d/", port) }
 
-// Running returns the URL of a kit that is already listening, or "" when there
-// is none. A file naming a port nothing answers on, or a port something else
+// Found describes the kit a launch discovered already running.
+type Found struct {
+	URL string
+	// Version is what that kit reports. It differs from ours after an
+	// upgrade, when reopening hands back the previous version's window.
+	Version string
+}
+
+// Running returns the kit that is already listening, or nil when there is
+// none. A file naming a port nothing answers on, or a port something else
 // took, counts as none.
-func Running() string {
+func Running() *Found {
 	path, err := Path()
 	if err != nil {
-		return ""
+		return nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return nil
 	}
 	var s state
 	if err := json.Unmarshal(data, &s); err != nil || s.Port <= 0 {
-		return ""
+		return nil
 	}
-	if !Answers(s.Port) {
-		return ""
+	version, ok := Answers(s.Port)
+	if !ok {
+		return nil
 	}
-	return URL(s.Port)
+	return &Found{URL: URL(s.Port), Version: version}
 }
 
-// Answers reports whether a kit is serving on port.
-func Answers(port int) bool {
-	client := &http.Client{Timeout: probeTimeout}
+// Answers reports whether a kit is serving on port, and which version it says
+// it is. Redirects are refused: a service squatting the port must not be able
+// to send the probe somewhere that does carry the header.
+func Answers(port int) (version string, ok bool) {
+	client := &http.Client{
+		Timeout:       probeTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	resp, err := client.Get(URL(port))
 	if err != nil {
-		return false
+		return "", false
 	}
 	defer resp.Body.Close()
-	return resp.Header.Get(HeaderName) != ""
+	v := resp.Header.Get(HeaderName)
+	return v, v != ""
+}
+
+// Lock takes the single-instance lock, or reports that another launch holds
+// it. The jobs slot and the write slot are per-process, so two kits running at
+// once could drive `claude plugin install` or rewrite ~/.claude/settings.json
+// concurrently, which is what those slots exist to prevent. The probe alone
+// cannot close that: two launches racing before either has bound would both
+// find nothing. release is nil when the lock was not taken.
+func Lock() (release func(), ok bool) {
+	path, err := Path()
+	if err != nil {
+		return nil, false
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, false
+	}
+	name := path + ".lock"
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if !os.IsExist(err) {
+			return nil, false
+		}
+		// A lock left behind by a kit that was killed would wedge every later
+		// launch, so an unheld one is cleared rather than trusted.
+		if staleLock(name) {
+			_ = os.Remove(name)
+			return Lock()
+		}
+		return nil, false
+	}
+	fmt.Fprintf(f, "%d\n", os.Getpid())
+	f.Close()
+	return func() { _ = os.Remove(name) }, true
+}
+
+// staleLockAge is how long a lock file may sit before a launch assumes the
+// process that made it is gone. Only the moments between two launches matter,
+// so this is generous.
+const staleLockAge = 2 * time.Minute
+
+// staleLock reports whether the lock is old enough, and unbacked by a running
+// kit, to be treated as debris.
+func staleLock(name string) bool {
+	fi, err := os.Stat(name)
+	if err != nil {
+		return true
+	}
+	if time.Since(fi.ModTime()) < staleLockAge {
+		return false
+	}
+	return Running() == nil
 }
 
 // Record writes this process's port down. A failure is not fatal: it costs the

@@ -115,9 +115,13 @@ func (Exec) StreamDir(ctx context.Context, dir, name string, args []string, onLi
 
 	err := cmd.Wait()
 	if errors.Is(err, exec.ErrWaitDelay) {
-		// Only here is the process reaped while something still holds its
-		// pipes: kill the group so the grandchild goes too. After a normal
-		// exit the pid may already be reused, so we leave it alone.
+		// The child is reaped by now and a descendant still holds the pipes,
+		// so this signals a pgid whose leader has already exited. The kernel
+		// keeps that pid reserved while any member of the group remains, and
+		// a member is precisely what is holding the pipes, so the group is
+		// still ours. The residual case is a holder that left the group by
+		// its own setsid; there the pid could in principle have been reused,
+		// and the alternative is leaking the descendant, so we accept it.
 		_ = killTree(cmd)
 	}
 	outW.Close()
@@ -155,7 +159,10 @@ func (Exec) StreamDir(ctx context.Context, dir, name string, args []string, onLi
 }
 
 func cmdError(name string, args []string, err error, stderrTail string) error {
-	if stderrTail != "" {
+	// The tail is the command's own output, so it gets the same redaction the
+	// streamed lines get: this string becomes job.Error and is served over the
+	// API.
+	if stderrTail = Redact(stderrTail); stderrTail != "" {
 		return fmt.Errorf("%s: %w: %s", Argv(name, args), err, stderrTail)
 	}
 	return fmt.Errorf("%s: %w", Argv(name, args), err)

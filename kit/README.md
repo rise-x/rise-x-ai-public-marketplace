@@ -60,8 +60,11 @@ when you're done.
 You can also just ask Claude: the installer adds a short "how to open Rise-X
 Kit" note to your global `~/.claude/CLAUDE.md`, so **open Rise-X Kit** works as
 an instruction in any Claude Code session. Your own file is backed up first, and
-the note sits between two `rise-x-kit` markers. Delete them and it stays gone,
-or run `rise-x-kit -remove-claude-md`.
+the note sits between two `rise-x-kit` markers. To take it out, run `rise-x-kit
+-remove-claude-md`; to keep the installer from writing it at all, set
+`RISE_X_KIT_CLAUDE_MD=0` before installing. Deleting only one of the two markers
+by hand leaves the file in a state the kit refuses to touch, and it says so
+rather than guessing.
 
 **What it needs:**
 

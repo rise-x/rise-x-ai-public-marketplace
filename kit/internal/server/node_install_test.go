@@ -13,7 +13,7 @@ import (
 // machine: nothing about installing Node.js needs one. The plan comes from the
 // same env the handler builds, so this covers whichever platform runs the test.
 func TestHandler_NodeInstall_RunsEveryStepWithoutCLI(t *testing.T) {
-	plan := nodeinstall.Plan((&Server{nodeEnv: noNodeEnv}).nodeInstallEnv())
+	plan := nodeinstall.Plan((&Server{nodeEnv: noNodeEnv}).nodeInstallEnv(false))
 	fake := runnertest.NewFake()
 	for _, cmd := range plan {
 		fake.Set(cmd.Name, cmd.Args, runnertest.Result{Stdout: "ok\n"})

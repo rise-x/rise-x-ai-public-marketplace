@@ -41,7 +41,7 @@ func TestPlan_NvmPresent(t *testing.T) {
 			t.Fatalf("plan[%d] = %+v, want a bash -lc command", i, plan[i])
 		}
 		script := plan[i].Args[1]
-		if !strings.Contains(script, `. "$HOME/.nvm/nvm.sh" &&`) {
+		if !strings.Contains(script, `. "${NVM_DIR:-$HOME/.nvm}/nvm.sh" &&`) {
 			t.Errorf("plan[%d] script %q does not source nvm.sh", i, script)
 		}
 		if !strings.HasSuffix(script, want) {
@@ -81,9 +81,50 @@ func TestPlan_WindowsWithWinget(t *testing.T) {
 	if len(plan) != 1 {
 		t.Fatalf("plan = %v, want one winget command", argvs(plan))
 	}
-	want := "winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements"
+	// The resolved path, not the bare name: a bare name is looked up again at
+	// run time, against whatever PATH the child ends up with.
+	want := `C:\winget.exe install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements`
 	if got := runner.Argv(plan[0].Name, plan[0].Args); got != want {
 		t.Errorf("argv = %q, want %q", got, want)
+	}
+}
+
+// `winget install` on an installed package exits non-zero instead of
+// upgrading, and the doctor offers this action exactly when Node is present
+// but too old.
+func TestPlan_WindowsUpgradesWhenNodeIsAlreadyThere(t *testing.T) {
+	plan := Plan(Env{GOOS: "windows", NodeFound: true, LookPath: func(string) (string, error) {
+		return `C:\winget.exe`, nil
+	}})
+	if len(plan) != 1 {
+		t.Fatalf("plan = %v, want one winget command", argvs(plan))
+	}
+	if got := plan[0].Args[0]; got != "upgrade" {
+		t.Errorf("verb = %q, want upgrade", got)
+	}
+}
+
+// The nvm installer honours $NVM_DIR, so the plan has to source the nvm it
+// actually wrote rather than assuming $HOME/.nvm.
+func TestPlan_HonoursNvmDir(t *testing.T) {
+	dir := t.TempDir()
+	nvm := filepath.Join(dir, "elsewhere")
+	if err := os.MkdirAll(nvm, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nvm, "nvm.sh"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// nvm lives at NVM_DIR, and nowhere near Home: the plan must see it as
+	// installed and not prepend a second install step.
+	plan := Plan(Env{GOOS: "darwin", Home: t.TempDir(), NvmDir: nvm, Stat: os.Stat})
+	if len(plan) != 2 {
+		t.Fatalf("plan = %v, want the two nvm commands with no install step", argvs(plan))
+	}
+	for _, c := range plan {
+		if !strings.Contains(c.Args[1], `${NVM_DIR:-$HOME/.nvm}`) {
+			t.Errorf("script %q does not defer to NVM_DIR", c.Args[1])
+		}
 	}
 }
 

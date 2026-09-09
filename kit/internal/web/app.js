@@ -43,7 +43,7 @@
  * POST /api/actions/{name}  body: JSON (may be empty) -> 200 | 400 | 403 | 409 | 422
  *   Sync actions respond immediately:
  *     autoupdate.set {enabled, marketplace?} -> {backup}
- *     npmrc.clean {confirm:true} -> {removed: [string], backup}
+ *     npmrc.clean {confirm:true} -> {updated: [string], backup}
  *     cli.rescan {} -> {found}  |  quit {} -> {ok: true}
  *     reload-hint.dismiss {} -> {ok: true}
  *   Job actions respond {jobId} and stream their log via GET /api/jobs/{id}:
@@ -1492,10 +1492,10 @@ function runFix(button) {
     if (name === "autoupdate.set") {
       notice("info", `Automatic updates are on.${backupNote(result.backup)}`);
     } else if (name === "npmrc.clean") {
-      const removed = result.removed || [];
+      const updated = result.updated || [];
       notice(
         "info",
-        `Updated ${removed.length} line(s) in ~/.npmrc.${backupNote(result.backup)}`,
+        `Updated ${updated.length} line(s) in ~/.npmrc.${backupNote(result.backup)}`,
       );
       // npmrc.clean is synchronous (no jobId), so the drawer entry is built
       // here instead of via startPolling, to show the masked updated lines.
@@ -1503,7 +1503,7 @@ function runFix(button) {
         id: `local-${Date.now()}`,
         title: "Clean up ~/.npmrc",
         subtitle: "",
-        lines: removed.length ? ["Updated:", ...removed] : [],
+        lines: updated.length ? ["Updated:", ...updated] : [],
         rendered: 0,
         since: 0,
         status: "succeeded",

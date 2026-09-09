@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"os"
 	"runtime"
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/nodeinstall"
@@ -11,16 +12,19 @@ import (
 
 // nodeInstallEnv describes this machine to the nodeinstall package, through
 // the same seam DetectNode uses, so a test can point it at a temp home.
-func (s *Server) nodeInstallEnv() nodeinstall.Env {
+func (s *Server) nodeInstallEnv(nodeFound bool) nodeinstall.Env {
 	env := s.nodeEnv(s.runner)
-	return nodeinstall.Env{GOOS: runtime.GOOS, Home: env.Home, LookPath: env.LookPath, Stat: env.Stat}
+	return nodeinstall.Env{
+		GOOS: runtime.GOOS, Home: env.Home, NvmDir: os.Getenv("NVM_DIR"),
+		LookPath: env.LookPath, Stat: env.Stat, NodeFound: nodeFound,
+	}
 }
 
 // handleNodeInstall installs or updates Node.js: nvm on macOS and Linux,
 // winget on Windows. It needs no claude CLI, and the page asks for
 // confirmation before it is called.
 func (s *Server) handleNodeInstall(w http.ResponseWriter, ctx context.Context, action string) {
-	plan := nodeinstall.Plan(s.nodeInstallEnv())
+	plan := nodeinstall.Plan(s.nodeInstallEnv(s.nodeInstalled()))
 	if len(plan) == 0 {
 		httpError(w, http.StatusBadRequest,
 			"no Node.js installer on this machine; install it from nodejs.org")

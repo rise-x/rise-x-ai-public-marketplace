@@ -539,7 +539,7 @@ func (s *Server) handleNpmrcClean(w http.ResponseWriter, body actionBody) {
 	}
 	s.npmrcCache.invalidate()
 	s.invalidateGather()
-	writeJSON(w, map[string]any{"removed": res.Rewritten, "backup": res.Backup})
+	writeJSON(w, map[string]any{"updated": res.Rewritten, "backup": res.Backup})
 }
 
 // withWriteSlot runs fn while holding the jobs store's one running-job slot.

@@ -140,7 +140,7 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 		return nodeProbe{version: v, found: ok}, !ok
 	})
 	facts.NodeFound, facts.NodeVersion = node.found, node.version
-	facts.CanInstallNode = nodeinstall.CanInstall(s.nodeInstallEnv())
+	facts.CanInstallNode = nodeinstall.CanInstall(s.nodeInstallEnv(node.found))
 
 	report := s.npmrcCache.getOrFail(func() (npmrc.Report, bool) {
 		r, err := npmrc.Analyze(s.npmrcPath)
@@ -374,7 +374,9 @@ func cliCheckError(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return "Claude Code did not answer in time"
 	}
-	return oneLine(err.Error())
+	// This string is rendered in a doctor row, so it must not carry whatever
+	// the CLI printed on stderr verbatim.
+	return runner.Redact(oneLine(err.Error()))
 }
 
 // checkErrorReason turns a catalog failure into the short phrase the doctor
@@ -507,6 +509,14 @@ func autoupdaterEnv(set settings.Settings) (disable, force bool) {
 		return false, false
 	}
 	return env["DISABLE_AUTOUPDATER"] != "", env["FORCE_AUTOUPDATE_PLUGINS"] != ""
+}
+
+// nodeInstalled reports the cached node probe's verdict, for the winget verb.
+func (s *Server) nodeInstalled() bool {
+	return s.nodeCache.getOrFail(func() (nodeProbe, bool) {
+		v, ok := doctor.DetectNode(s.nodeEnv(s.runner))
+		return nodeProbe{version: v, found: ok}, !ok
+	}).found
 }
 
 func defaultNpmrcPath() string {

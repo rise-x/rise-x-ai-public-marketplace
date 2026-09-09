@@ -1,10 +1,13 @@
 package claudemd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/fsutil"
 )
 
 func write(t *testing.T, dir, body string, mode os.FileMode) string {
@@ -162,5 +165,65 @@ func TestRemove_NothingToRemove(t *testing.T) {
 	res, err = Remove(dir)
 	if err != nil || res.Action != "unchanged" || res.Backup != "" {
 		t.Fatalf("Remove without a block = %+v, %v", res, err)
+	}
+}
+
+// A half-deleted block must never cost the partner their own instructions. cut
+// needs both markers, so a lone start once read as "no block": Apply appended a
+// second one, and the next run spanned from the orphan to the new block's end.
+func TestApply_MalformedMarkers_LeaveTheFileAlone(t *testing.T) {
+	rules := "## IMPORTANT: never force push to main\n- always run the linter\n"
+	cases := map[string]string{
+		"lone start, rules after it":  "# My rules\n\n" + startMarker + "\n## Rise-X Kit\nold\n\n" + rules,
+		"lone start, rules before it": "# My rules\n\n" + rules + "\n" + startMarker + "\n## Rise-X Kit\nold\n",
+		"lone end":                    "# My rules\n\n" + rules + "\n" + endMarker + "\n",
+		"two blocks":                  startMarker + "\nA\n" + endMarker + "\n\n" + rules + startMarker + "\nB\n" + endMarker + "\n",
+		"end before start":            endMarker + "\n" + rules + startMarker + "\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := write(t, dir, body, 0o644)
+			for pass := 1; pass <= 2; pass++ {
+				if _, err := Apply(dir); !errors.Is(err, ErrMalformed) {
+					t.Fatalf("pass %d: err = %v, want ErrMalformed", pass, err)
+				}
+			}
+			if got := read(t, path); got != body {
+				t.Fatalf("the file was modified:\n%q", got)
+			}
+			if _, err := Remove(dir); !errors.Is(err, ErrMalformed) {
+				t.Fatalf("Remove err = %v, want ErrMalformed", err)
+			}
+		})
+	}
+}
+
+// The backup must not be writable through a symlink somebody planted at the
+// predictable name, and must not silently replace an earlier one.
+func TestApply_BackupIsSafe(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "# mine\n", 0o600)
+	victim := filepath.Join(dir, "VICTIM.txt")
+	if err := os.WriteFile(victim, []byte("do not touch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	planted := fsutil.BackupPath(Path(dir))
+	if err := os.Symlink(victim, planted); err != nil {
+		t.Skipf("cannot symlink here: %v", err)
+	}
+
+	res, err := Apply(dir)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if got := read(t, victim); got != "do not touch\n" {
+		t.Fatalf("the backup wrote through the planted symlink: %q", got)
+	}
+	if res.Backup == planted {
+		t.Fatal("the backup reused the planted name")
+	}
+	if fi, err := os.Stat(res.Backup); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("backup mode = %v, %v; want 0600 like the source", fi.Mode().Perm(), err)
 	}
 }

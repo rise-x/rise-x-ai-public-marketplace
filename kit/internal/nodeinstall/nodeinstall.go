@@ -40,10 +40,28 @@ type Command struct {
 // Env is the OS access Plan needs, so tests describe a machine instead of
 // probing this one.
 type Env struct {
-	GOOS     string
-	Home     string
+	GOOS string
+	Home string
+	// NvmDir is $NVM_DIR when the machine sets one. The nvm installer honours
+	// it, so assuming $HOME/.nvm would install nvm in one place and then
+	// source it from another.
+	NvmDir   string
 	LookPath func(file string) (string, error)
 	Stat     func(name string) (os.FileInfo, error)
+	// NodeFound says whether node is already installed, which is what decides
+	// between winget's install and upgrade verbs.
+	NodeFound bool
+}
+
+// nvmDir is where this machine keeps nvm.
+func (env Env) nvmDir() string {
+	if env.NvmDir != "" {
+		return env.NvmDir
+	}
+	if env.Home == "" {
+		return ""
+	}
+	return filepath.Join(env.Home, ".nvm")
 }
 
 // Plan returns the commands that install or update Node.js on env's platform,
@@ -80,31 +98,42 @@ func nvmPlan(env Env) []Command {
 }
 
 func hasNvm(env Env) bool {
-	if env.Home == "" || env.Stat == nil {
+	dir := env.nvmDir()
+	if dir == "" || env.Stat == nil {
 		return false
 	}
-	_, err := env.Stat(filepath.Join(env.Home, ".nvm", "nvm.sh"))
+	_, err := env.Stat(filepath.Join(dir, "nvm.sh"))
 	return err == nil
 }
 
 // nvmShell runs one nvm command in a login shell with nvm sourced: nvm is a
-// shell function, so it exists only once nvm.sh has been read.
+// shell function, so it exists only once nvm.sh has been read. The path is
+// resolved in the shell rather than baked in, so a machine that exports
+// NVM_DIR sources the same nvm the installer wrote.
 func nvmShell(cmd string) Command {
-	return Command{Name: "bash", Args: []string{"-lc", `. "$HOME/.nvm/nvm.sh" && ` + cmd}}
+	return Command{Name: "bash", Args: []string{"-lc", `. "${NVM_DIR:-$HOME/.nvm}/nvm.sh" && ` + cmd}}
 }
 
-// wingetPlan installs the LTS package with winget, when winget is there at
-// all; without it the doctor keeps the nodejs.org link instead. Untested: no
-// Windows machine has run this path yet.
+// wingetPlan installs or upgrades the LTS package with winget, when winget is
+// there at all; without it the doctor keeps the nodejs.org link instead.
+// `winget install` on an installed package exits non-zero rather than
+// upgrading it, and the doctor offers this action exactly when Node is present
+// but old, so the verb has to follow NodeFound. Untested: no Windows machine
+// has run this path yet.
 func wingetPlan(env Env) []Command {
 	if env.LookPath == nil {
 		return nil
 	}
-	if _, err := env.LookPath("winget.exe"); err != nil {
+	exe, err := env.LookPath("winget.exe")
+	if err != nil {
 		return nil
 	}
-	return []Command{{Name: "winget", Args: []string{
-		"install", "--id", "OpenJS.NodeJS.LTS", "-e",
+	verb := "install"
+	if env.NodeFound {
+		verb = "upgrade"
+	}
+	return []Command{{Name: exe, Args: []string{
+		verb, "--id", "OpenJS.NodeJS.LTS", "-e",
 		"--accept-source-agreements", "--accept-package-agreements",
 	}}}
 }

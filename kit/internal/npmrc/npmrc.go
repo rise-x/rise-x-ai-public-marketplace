@@ -95,12 +95,14 @@ func Clean(path string) (Result, error) {
 		return Result{}, nil
 	}
 
-	backup := fsutil.BackupPath(path)
-	if err := os.WriteFile(backup, data, mode); err != nil {
-		return Result{}, fmt.Errorf("backup %s: %w", path, err)
+	backup, err := fsutil.Backup(path, data, mode)
+	if err != nil {
+		return Result{}, err
 	}
-	if err := os.WriteFile(path, []byte(kept), mode); err != nil {
-		return Result{}, fmt.Errorf("write %s: %w", path, err)
+	if err := fsutil.WriteAtomic(path, []byte(kept), mode); err != nil {
+		// The backup is the whole point of the failure path: the auth lines
+		// this file keeps may exist nowhere else, so name it even here.
+		return Result{Backup: backup}, fmt.Errorf("write %s (your file is backed up at %s): %w", path, backup, err)
 	}
 	return Result{Rewritten: maskAll(rewritten), Backup: backup}, nil
 }

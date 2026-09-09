@@ -34,7 +34,7 @@ func (c *Client) run(ctx context.Context, args []string) (stdout string, err err
 		return "", cmdError(runner.Argv(c.Path, args), err, stderr)
 	}
 	if exitCode != 0 {
-		return "", fmt.Errorf("%s: exit %d: %s", runner.Argv(c.Path, args), exitCode, strings.TrimSpace(stderr))
+		return "", fmt.Errorf("%s: exit %d: %s", runner.Argv(c.Path, args), exitCode, runner.Redact(strings.TrimSpace(stderr)))
 	}
 	return stdout, nil
 }
@@ -42,7 +42,7 @@ func (c *Client) run(ctx context.Context, args []string) (stdout string, err err
 // cmdError wraps a command failure, quoting the stderr tail when there is
 // one so a timeout says why rather than just "deadline exceeded".
 func cmdError(argv string, err error, stderr string) error {
-	if s := strings.TrimSpace(stderr); s != "" {
+	if s := runner.Redact(strings.TrimSpace(stderr)); s != "" {
 		return fmt.Errorf("%s: %w: %s", argv, err, s)
 	}
 	return fmt.Errorf("%s: %w", argv, err)

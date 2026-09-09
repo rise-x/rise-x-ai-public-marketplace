@@ -119,11 +119,17 @@ try {
     $shortcut.Save()
 
     # Teach Claude Code how to open the app, so "open Rise-X Kit" works in a
-    # session. Idempotent, and the previous CLAUDE.md is backed up first.
-    try {
-        & $exePath -write-claude-md
-    } catch {
-        Write-Warning "Could not update the global CLAUDE.md: $_"
+    # session. Idempotent, and the previous CLAUDE.md is backed up first. This
+    # edits a global file, so say so, and let it be declined.
+    if ($env:RISE_X_KIT_CLAUDE_MD -eq '0') {
+        Write-Host "Skipped the CLAUDE.md note (RISE_X_KIT_CLAUDE_MD=0)."
+    } else {
+        Write-Host "Adding a `"how to open Rise-X Kit`" note to the global CLAUDE.md:"
+        try {
+            & $exePath -write-claude-md
+        } catch {
+            Write-Warning "Could not update the global CLAUDE.md: $_"
+        }
     }
 
     Write-Host "Installed rise-x-kit $version."

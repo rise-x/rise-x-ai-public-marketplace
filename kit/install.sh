@@ -115,8 +115,14 @@ chmod +x "$dest"
 xattr -d com.apple.quarantine "$dest" 2>/dev/null || true
 
 # Teach Claude Code how to open the app, so "open Rise-X Kit" works in a
-# session. Idempotent, and the previous CLAUDE.md is backed up first.
-"$dest" -write-claude-md || echo "note: could not update ~/.claude/CLAUDE.md" >&2
+# session. Idempotent, and the previous CLAUDE.md is backed up first. This
+# edits a global file, so say so, and let it be declined.
+if [ "${RISE_X_KIT_CLAUDE_MD:-1}" = "0" ]; then
+  echo "Skipped the ~/.claude/CLAUDE.md note (RISE_X_KIT_CLAUDE_MD=0)."
+else
+  echo "Adding a \"how to open Rise-X Kit\" note to ~/.claude/CLAUDE.md:"
+  "$dest" -write-claude-md || echo "note: could not update ~/.claude/CLAUDE.md" >&2
+fi
 
 echo "Installed rise-x-kit ${VERSION}. Run: rise-x-kit"
 

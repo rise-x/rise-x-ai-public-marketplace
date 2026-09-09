@@ -4,10 +4,103 @@ package fsutil
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 )
 
 // BackupPath names the backup copy of path: "<path>.bak-<UTC timestamp>".
+// Its granularity is one second, so Backup, not this, is what guarantees a
+// distinct file.
 func BackupPath(path string) string {
 	return fmt.Sprintf("%s.bak-%s", path, time.Now().UTC().Format("20060102T150405Z"))
+}
+
+// maxBackupAttempts bounds the search for an unused name. One second holds
+// far fewer real backups than this.
+const maxBackupAttempts = 100
+
+// Backup writes data beside path as a new file, and returns the name it used.
+//
+// It creates the backup with O_EXCL and O_NOFOLLOW, so it can neither write
+// through a symlink somebody planted at the predictable name nor overwrite an
+// earlier backup that shares this second's timestamp: a taken name is retried
+// with a counter. The mode is applied explicitly, because O_CREATE's perm
+// argument is masked by the umask and would leave a copy of a 0600 file
+// readable.
+func Backup(path string, data []byte, mode os.FileMode) (string, error) {
+	base := BackupPath(path)
+	for attempt := 0; attempt < maxBackupAttempts; attempt++ {
+		name := base
+		if attempt > 0 {
+			name = fmt.Sprintf("%s.%d", base, attempt)
+		}
+		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|oNoFollow, mode)
+		if os.IsExist(err) {
+			continue // this second's name is taken, or a symlink sits on it
+		}
+		if err != nil {
+			return "", fmt.Errorf("backup %s: %w", path, err)
+		}
+		if err := write(f, name, data, mode); err != nil {
+			return "", fmt.Errorf("backup %s: %w", path, err)
+		}
+		return name, nil
+	}
+	return "", fmt.Errorf("backup %s: no free name after %d attempts", path, maxBackupAttempts)
+}
+
+// write fills the already-created backup and puts it on disk, removing a
+// partial file rather than leaving one that looks like a good copy.
+func write(f *os.File, name string, data []byte, mode os.FileMode) error {
+	fail := func(err error) error {
+		f.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	// O_CREATE's perm is masked by the umask, so set the real mode here: the
+	// backup of a 0600 secrets file must not be world-readable.
+	if err := f.Chmod(mode); err != nil {
+		return fail(err)
+	}
+	if _, err := f.Write(data); err != nil {
+		return fail(err)
+	}
+	// The backup exists to survive a failed write of the original, so it has
+	// to reach the disk before that write starts.
+	if err := f.Sync(); err != nil {
+		return fail(err)
+	}
+	return f.Close()
+}
+
+// WriteAtomic replaces path with data through a temp file in the same
+// directory, so an interrupted write leaves the original intact rather than a
+// truncated file. The rename is the only moment path changes.
+func WriteAtomic(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer func() {
+		tmp.Close()
+		_ = os.Remove(name) // a no-op once the rename has moved it away
+	}()
+
+	// CreateTemp makes the file 0600; the original may be more permissive.
+	if err := tmp.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }

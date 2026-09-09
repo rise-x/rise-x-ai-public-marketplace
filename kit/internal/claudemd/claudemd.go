@@ -5,6 +5,7 @@
 package claudemd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,6 +51,12 @@ type Result struct {
 // Path is the global CLAUDE.md inside claudeDir.
 func Path(claudeDir string) string { return filepath.Join(claudeDir, "CLAUDE.md") }
 
+// ErrMalformed means the file's markers are not a single matched pair. The
+// kit refuses to write in that case: it cannot tell which text is its own, and
+// guessing would replace the span between somebody else's marker and its own,
+// taking whatever the partner wrote in between with it.
+var ErrMalformed = errors.New("the rise-x-kit markers in this file are not a single matched pair, so it was left alone; fix or delete them and run this again")
+
 // Apply adds or refreshes the kit's block in claudeDir/CLAUDE.md. An existing
 // file is backed up at its own permissions before the first change, since it is
 // the partner's own instructions to Claude.
@@ -60,6 +67,9 @@ func Apply(claudeDir string) (Result, error) {
 	original, err := os.ReadFile(path)
 	exists := err == nil
 	if err != nil && !os.IsNotExist(err) {
+		return res, err
+	}
+	if err := checkMarkers(string(original)); err != nil {
 		return res, err
 	}
 
@@ -77,13 +87,12 @@ func Apply(claudeDir string) (Result, error) {
 		return res, err
 	}
 	if exists {
-		res.Backup = fsutil.BackupPath(path)
-		if err := os.WriteFile(res.Backup, original, mode); err != nil {
-			return res, fmt.Errorf("backup %s: %w", path, err)
+		if res.Backup, err = fsutil.Backup(path, original, mode); err != nil {
+			return res, err
 		}
 	}
-	if err := os.WriteFile(path, []byte(out), mode); err != nil {
-		res.Backup = ""
+	if err := fsutil.WriteAtomic(path, []byte(out), mode); err != nil {
+		// Keep res.Backup: it is what the partner needs precisely now.
 		return res, fmt.Errorf("write %s: %w", path, err)
 	}
 	res.Action = action
@@ -103,6 +112,9 @@ func Remove(claudeDir string) (Result, error) {
 		}
 		return res, err
 	}
+	if err := checkMarkers(string(original)); err != nil {
+		return res, err
+	}
 	before, after, found := cut(string(original))
 	if !found {
 		return res, nil
@@ -112,12 +124,10 @@ func Remove(claudeDir string) (Result, error) {
 	if fi, serr := os.Stat(path); serr == nil {
 		mode = fi.Mode().Perm()
 	}
-	res.Backup = fsutil.BackupPath(path)
-	if err := os.WriteFile(res.Backup, original, mode); err != nil {
-		return res, fmt.Errorf("backup %s: %w", path, err)
+	if res.Backup, err = fsutil.Backup(path, original, mode); err != nil {
+		return res, err
 	}
-	if err := os.WriteFile(path, []byte(join(before, after)), mode); err != nil {
-		res.Backup = ""
+	if err := fsutil.WriteAtomic(path, []byte(join(before, after)), mode); err != nil {
 		return res, fmt.Errorf("write %s: %w", path, err)
 	}
 	res.Action = "removed"
@@ -137,6 +147,25 @@ func merge(original string, exists bool) (out, action string) {
 		return Block + "\n", "added"
 	}
 	return strings.TrimRight(original, "\n") + "\n\n" + Block + "\n", "added"
+}
+
+// checkMarkers rejects anything but zero or one matched pair, in order. A lone
+// start marker is the dangerous one: cut would report "no block", merge would
+// append a second, and the next run would then span from the orphan to the new
+// block's end and delete everything the partner wrote in between.
+func checkMarkers(content string) error {
+	starts := strings.Count(content, startMarker)
+	ends := strings.Count(content, endMarker)
+	if starts == 0 && ends == 0 {
+		return nil
+	}
+	if starts != 1 || ends != 1 {
+		return ErrMalformed
+	}
+	if strings.Index(content, startMarker) > strings.Index(content, endMarker) {
+		return ErrMalformed
+	}
+	return nil
 }
 
 // cut splits original around an existing block, keeping the text on each side.

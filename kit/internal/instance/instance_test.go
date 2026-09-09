@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // cacheHome points UserCacheDir at a temp tree, so a test never touches the
@@ -47,8 +48,12 @@ func TestRunning_ReopensARecordedKit(t *testing.T) {
 	if err := Record(port, "0.1.0"); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	if got, want := Running(), URL(port); got != want {
-		t.Fatalf("Running = %q, want %q", got, want)
+	got := Running()
+	if got == nil || got.URL != URL(port) {
+		t.Fatalf("Running = %+v, want %s", got, URL(port))
+	}
+	if got.Version != "test" {
+		t.Fatalf("Version = %q, want the header's value", got.Version)
 	}
 }
 
@@ -60,8 +65,8 @@ func TestRunning_StaleRecord(t *testing.T) {
 		if err := Record(freePort(t), "0.1.0"); err != nil {
 			t.Fatal(err)
 		}
-		if got := Running(); got != "" {
-			t.Fatalf("Running = %q, want \"\" for a port nothing answers on", got)
+		if got := Running(); got != nil {
+			t.Fatalf("Running = %+v, want nil", got)
 		}
 	})
 	t.Run("someone else's server", func(t *testing.T) {
@@ -71,16 +76,16 @@ func TestRunning_StaleRecord(t *testing.T) {
 		if err := Record(portOf(t, other.URL), "0.1.0"); err != nil {
 			t.Fatal(err)
 		}
-		if got := Running(); got != "" {
-			t.Fatalf("Running = %q, want \"\": that port is not a kit", got)
+		if got := Running(); got != nil {
+			t.Fatalf("Running = %+v, want nil", got)
 		}
 	})
 }
 
 func TestRunning_NoRecord(t *testing.T) {
 	cacheHome(t)
-	if got := Running(); got != "" {
-		t.Fatalf("Running = %q, want \"\"", got)
+	if got := Running(); got != nil {
+		t.Fatalf("Running = %+v, want nil", got)
 	}
 }
 
@@ -96,8 +101,8 @@ func TestRunning_UnreadableRecord(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := Running(); got != "" {
-		t.Fatalf("Running = %q, want \"\"", got)
+	if got := Running(); got != nil {
+		t.Fatalf("Running = %+v, want nil", got)
 	}
 }
 
@@ -157,4 +162,65 @@ func freePort(t *testing.T) int {
 	port := portOf(t, srv.URL)
 	srv.Close()
 	return port
+}
+
+// Two launches racing before either has bound must not both start: the jobs
+// slot and the write slot are per-process.
+func TestLock_OnlyOneHolder(t *testing.T) {
+	cacheHome(t)
+	release, ok := Lock()
+	if !ok {
+		t.Fatal("first Lock did not take the lock")
+	}
+	if _, ok := Lock(); ok {
+		t.Fatal("second Lock took a lock the first one holds")
+	}
+	release()
+	release2, ok := Lock()
+	if !ok {
+		t.Fatal("Lock did not free on release")
+	}
+	release2()
+}
+
+// A kit that was killed leaves its lock behind; that must not wedge every
+// later launch.
+func TestLock_StaleLockIsCleared(t *testing.T) {
+	cacheHome(t)
+	path, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lock := path + ".lock"
+	if err := os.WriteFile(lock, []byte("999999\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+	release, ok := Lock()
+	if !ok {
+		t.Fatal("a stale lock with no kit behind it still blocked the launch")
+	}
+	release()
+}
+
+// An upgraded kit must not silently hand back the old version's window.
+func TestRunning_ReportsTheServedVersion(t *testing.T) {
+	cacheHome(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(HeaderName, "0.1.0")
+	}))
+	defer srv.Close()
+	if err := Record(portOf(t, srv.URL), "0.1.0"); err != nil {
+		t.Fatal(err)
+	}
+	got := Running()
+	if got == nil || got.Version != "0.1.0" {
+		t.Fatalf("Running = %+v, want version 0.1.0", got)
+	}
 }

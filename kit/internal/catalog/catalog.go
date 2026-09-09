@@ -297,6 +297,11 @@ func LocalHEAD(installLocation string) (string, error) {
 	if !isSymbolic {
 		return line, nil // detached HEAD: a bare SHA
 	}
+	// A ref is a path under .git; anything else is not one, and joining it
+	// would read a file elsewhere and report its first line as a commit.
+	if !strings.HasPrefix(ref, "refs/") || strings.Contains(ref, "..") {
+		return "", fmt.Errorf("HEAD names %q, which is not a ref", ref)
+	}
 
 	if data, err := os.ReadFile(filepath.Join(gitDir, ref)); err == nil {
 		return strings.TrimSpace(string(data)), nil

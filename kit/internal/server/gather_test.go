@@ -680,7 +680,7 @@ func TestHandler_NpmrcClean_RewritesTheRegistryLine(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	var body struct {
-		Rewritten []string `json:"removed"`
+		Rewritten []string `json:"updated"`
 		Backup    string   `json:"backup"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
