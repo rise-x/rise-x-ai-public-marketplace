@@ -43,7 +43,8 @@ There is no `list_vector_stores` tool. The `id` in `create_vector_store`'s respo
 handle to the store; the server keeps no per-user index to browse later. Save it on the record it
 belongs to right away, with `update_work_data` (work item) or `edit_asset` (asset), not only in the
 conversation. That record's own permissions then decide who can use the store, since the store
-itself carries no access control of its own.
+itself carries no access control of its own. This is pitfall #66 in
+`references/common-pitfalls.md` — losing the id is the one mistake here with no recovery.
 
 `purpose`, `resource_type`, and `resource_id` are optional free-text metadata on
 `create_vector_store` (§ Creating a store). They help support staff diagnose an issue and help a

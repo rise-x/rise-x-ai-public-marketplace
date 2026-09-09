@@ -173,7 +173,7 @@ warning. Canonical names you'll use most: `input-text`, `input-select`,
 
 ## Common Pitfalls
 
-57 traps with the fix for each, in 64 numbered slots (7 are retired stubs kept so
+59 traps with the fix for each, in 66 numbered slots (7 are retired stubs kept so
 the numbering stays stable — other references cite these entries by number) —
 draft/publish lifecycle, ID confusion, component and dashboard authoring,
 search/filter semantics, exports, card layouts:
