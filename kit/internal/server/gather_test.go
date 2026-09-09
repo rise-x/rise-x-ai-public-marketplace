@@ -650,8 +650,9 @@ func npmrcServer(t *testing.T) (baseURL, token, npmrcPath string) {
 	return baseURL, token, npmrcPath
 }
 
-// The doctor names the lines it would remove, never their values: the detail
-// is shown on the page and copied into bug reports.
+// The doctor names the registry line it would rewrite, never a credential:
+// the detail is shown on the page and copied into bug reports, and the ADO
+// auth line stays a legitimate credential either way.
 func TestDoctor_NpmrcDetailIsMasked(t *testing.T) {
 	baseURL, token, _ := npmrcServer(t)
 
@@ -662,14 +663,15 @@ func TestDoctor_NpmrcDetailIsMasked(t *testing.T) {
 	if strings.Contains(c.Detail, "supersecrettoken") {
 		t.Fatalf("detail carries the token: %q", c.Detail)
 	}
-	if !strings.Contains(c.Detail, "_authToken=…") {
-		t.Fatalf("detail = %q, want the masked key", c.Detail)
+	if c.Detail != "@rise-x:registry=…" {
+		t.Fatalf("detail = %q, want the masked registry line", c.Detail)
 	}
 }
 
-// npmrc.clean end to end: the leftover lines go, the npmjs line stays, and a
+// npmrc.clean end to end: the leftover @rise-x:registry line is rewritten to
+// point at the public npm registry, the ADO auth line is untouched, and a
 // backup is left next to the file.
-func TestHandler_NpmrcClean_EditsTheFile(t *testing.T) {
+func TestHandler_NpmrcClean_RewritesTheRegistryLine(t *testing.T) {
 	baseURL, token, path := npmrcServer(t)
 
 	resp := post(t, baseURL+"/api/actions/npmrc.clean", token, map[string]any{"confirm": true})
@@ -678,16 +680,16 @@ func TestHandler_NpmrcClean_EditsTheFile(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	var body struct {
-		Removed []string `json:"removed"`
-		Backup  string   `json:"backup"`
+		Rewritten []string `json:"removed"`
+		Backup    string   `json:"backup"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Removed) != 2 {
-		t.Fatalf("removed = %v, want the two Rise-X lines", body.Removed)
+	if len(body.Rewritten) != 1 {
+		t.Fatalf("rewritten = %v, want the one @rise-x:registry line", body.Rewritten)
 	}
-	for _, line := range body.Removed {
+	for _, line := range body.Rewritten {
 		if strings.Contains(line, "supersecrettoken") {
 			t.Fatalf("response carries the token: %q", line)
 		}
@@ -696,8 +698,11 @@ func TestHandler_NpmrcClean_EditsTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(kept), "rise-x.pkgs.visualstudio.com") {
-		t.Fatalf("~/.npmrc still carries the old registry: %s", kept)
+	if !strings.Contains(string(kept), "@rise-x:registry=https://registry.npmjs.org/") {
+		t.Fatalf("~/.npmrc still points @rise-x away from public npm: %s", kept)
+	}
+	if !strings.Contains(string(kept), "supersecrettoken") {
+		t.Fatalf("~/.npmrc lost its ADO auth line: %s", kept)
 	}
 	if !strings.Contains(string(kept), "registry=https://registry.npmjs.org/") {
 		t.Fatalf("~/.npmrc lost its npmjs line: %s", kept)

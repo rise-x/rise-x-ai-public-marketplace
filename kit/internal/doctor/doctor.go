@@ -119,6 +119,10 @@ type Facts struct {
 	CanInstallNode bool
 
 	NpmrcOffendingLines []string
+	// NpmrcOffendingHost is the host the leftover @rise-x:registry line
+	// points at, unmasked, so the doctor message can name it; "" means
+	// nothing needs fixing.
+	NpmrcOffendingHost string
 
 	// McpStale holds the MCP connections pointing at an address Rise-X has
 	// moved off.
@@ -423,19 +427,15 @@ func parseNodeVersion(v string) (major, minor int) {
 
 func npmrcCheck(f Facts) Check {
 	const id = "npmrc"
-	n := len(f.NpmrcOffendingLines)
-	if n == 0 {
+	if len(f.NpmrcOffendingLines) == 0 {
 		return Check{ID: id, Status: StatusOK, Title: "npm configuration",
 			Message: "Nothing left over from the old private Rise-X registry."}
 	}
-	noun := "lines"
-	if n == 1 {
-		noun = "line"
-	}
 	return Check{ID: id, Status: StatusWarn, Title: "npm configuration",
-		Message: fmt.Sprintf("%d leftover %s from the old private Rise-X registry in ~/.npmrc.", n, noun),
-		Detail:  strings.Join(f.NpmrcOffendingLines, "\n"),
-		Fix:     "npmrc.clean"}
+		Message:  fmt.Sprintf("The @rise-x packages are on the public npm registry now, but ~/.npmrc still points them at %s.", f.NpmrcOffendingHost),
+		Detail:   strings.Join(f.NpmrcOffendingLines, "\n"),
+		Fix:      "npmrc.clean",
+		FixLabel: "Point @rise-x at public npm"}
 }
 
 func gitWindowsCheck(f Facts) Check {

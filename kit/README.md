@@ -108,7 +108,7 @@ fixes arrive in the background instead of waiting for a manual update.
 | Catalog freshness | Whether the local marketplace clone matches GitHub | Refreshes the marketplace |
 | Rise-X addresses | Whether any MCP connection still points at an address Rise-X has moved off | Removes the connection and adds it back at the current address, in the same scope |
 | Node.js | Whether Node.js 20 or later is available (only the app-building skill needs it) | Installs or updates Node.js to the current LTS release — with nvm on macOS and Linux, winget on Windows. Where neither is available, links to nodejs.org instead |
-| `.npmrc` | Whether a leftover `@rise-x:registry` line still points `@rise-x` packages at their old host — they're on the public npm registry now — and whether any auth line for that same host is still around. **Show lines** lists them, masked | Backs up `~/.npmrc` first, then removes only those lines |
+| `.npmrc` | Whether a leftover `@rise-x:registry` line still points `@rise-x` packages at their old host — they're on the public npm registry now. Auth lines are never touched, whatever host they name. **Show lines** lists the offending line, masked | Backs up `~/.npmrc` first, then rewrites that line to point at the public npm registry |
 | Git (Windows only) | Whether `git` is on `PATH` | None — Claude Code Desktop prompts to install it |
 | Auto-updater environment | Whether your Claude Code settings' `env` block is blocking plugin auto-updates | None — informational only |
 
@@ -122,10 +122,11 @@ runs `claude` commands on your behalf, and every command it runs shows in
 **Activity**. The only files it edits directly are `~/.claude/settings.json` (one
 setting, with a backup made first) and `~/.npmrc`; MCP connections are changed
 by running `claude mcp remove` and `claude mcp add`, never by editing
-`~/.claude.json`, which Kit only reads. Kit reads `~/.npmrc` to find
-leftover Rise-X registry lines, shows them masked, and backs up the file with its
-original permissions before removing those lines. It never sends the file's
-contents anywhere. The Node.js fix runs nvm's own installer (a pinned release,
+`~/.claude.json`, which Kit only reads. Kit reads `~/.npmrc` to find a
+leftover `@rise-x:registry` line, shows it masked, and backs up the file with
+its original permissions before rewriting that line to point at the public npm
+registry; auth lines are never touched, whatever host they name. It never
+sends the file's contents anywhere. The Node.js fix runs nvm's own installer (a pinned release,
 checked against its sha256 before it runs) or winget, and lets that tool edit
 your shell profile the way it normally does, so new shells find Node.
 The automatic-updates switch writes a documented Claude Code
@@ -161,7 +162,7 @@ Go 1.23, no third-party dependencies.
   connector URLs, and scans `~/.claude.json` and the Desktop app's config for
   connections still on an old Rise-X address (`oldHostSuffixes` and
   `exactStaleHosts` in `stale.go` are the one place those addresses are listed).
-- `internal/npmrc` — finds and cleans leftover Rise-X registry lines in
+- `internal/npmrc` — finds and repoints leftover `@rise-x:registry` lines in
   `~/.npmrc`.
 - `internal/runner` — runs external commands without a shell.
 - `internal/server` — the HTTP API the page calls, including its CSRF and host

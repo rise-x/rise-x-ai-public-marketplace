@@ -149,6 +149,7 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 		}
 		return lines, false
 	})
+	facts.NpmrcOffendingHost, _ = npmrc.Host(s.npmrcPath)
 
 	if runtime.GOOS == "windows" {
 		facts.GitFound = doctor.DetectGit(s.nodeEnv(s.runner))

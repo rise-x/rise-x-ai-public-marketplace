@@ -335,16 +335,15 @@ func TestRun_NodeFixAbsentWhenNoInstaller(t *testing.T) {
 
 func TestRun_NpmrcMessage(t *testing.T) {
 	f := baseFacts()
-	f.NpmrcOffendingLines = []string{"a", "b", "c"}
+	f.NpmrcOffendingLines = []string{"@rise-x:registry=…"}
+	f.NpmrcOffendingHost = "npm.pkg.github.com"
 	c := findCheck(t, Run(f), "npmrc")
-	want := "3 leftover lines from the old private Rise-X registry in ~/.npmrc."
+	want := "The @rise-x packages are on the public npm registry now, but ~/.npmrc still points them at npm.pkg.github.com."
 	if c.Message != want {
 		t.Fatalf("npmrc message = %q, want %q", c.Message, want)
 	}
-
-	f.NpmrcOffendingLines = []string{"a"}
-	if got := findCheck(t, Run(f), "npmrc").Message; !strings.Contains(got, "1 leftover line from") {
-		t.Fatalf("npmrc singular message = %q", got)
+	if c.FixLabel != "Point @rise-x at public npm" {
+		t.Fatalf("npmrc fix label = %q", c.FixLabel)
 	}
 }
 
@@ -590,14 +589,14 @@ func TestRun_McpStale_NoCLI_NoFix(t *testing.T) {
 	}
 }
 
-// The npmrc row carries the masked lines it would remove, so the partner can
-// read them before pressing Fix.
+// The npmrc row carries the masked line(s) it would rewrite, so the partner
+// can read them before pressing Fix.
 func TestRun_Npmrc_Detail(t *testing.T) {
 	f := baseFacts()
-	f.NpmrcOffendingLines = []string{"@rise-x:registry=…", "//rise-x.pkgs.visualstudio.com/:_authToken=…"}
+	f.NpmrcOffendingLines = []string{"@rise-x:registry=…"}
 
 	c := findCheck(t, Run(f), "npmrc")
-	if c.Detail != "@rise-x:registry=…\n//rise-x.pkgs.visualstudio.com/:_authToken=…" {
+	if c.Detail != "@rise-x:registry=…" {
 		t.Fatalf("detail = %q", c.Detail)
 	}
 }

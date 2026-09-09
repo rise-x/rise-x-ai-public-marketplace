@@ -10,10 +10,10 @@ import (
 // ending normalization on checkout can never corrupt the CRLF case.
 func TestClean_GoldenCases(t *testing.T) {
 	cases := []struct {
-		name    string
-		in      string
-		out     string
-		removed []string
+		name      string
+		in        string
+		out       string
+		rewritten []string
 	}{
 		{
 			name: "already clean",
@@ -31,8 +31,9 @@ func TestClean_GoldenCases(t *testing.T) {
 		},
 		{
 			// The ADO feed still serves @diana/* packages internal developers
-			// need, so ADO auth lines alone are not a leftover to remove.
-			name: "ADO auth lines alone, no registry line: nothing removed",
+			// need, so ADO auth lines are never touched, whatever host an
+			// @rise-x:registry line names.
+			name: "ADO auth lines alone, no registry line: nothing changes",
 			in: "registry=https://registry.npmjs.org/\n" +
 				"; begin auth token\n" +
 				"//rise-x.pkgs.visualstudio.com/_packaging/Example/npm/registry/:username=rise-x\n" +
@@ -45,17 +46,16 @@ func TestClean_GoldenCases(t *testing.T) {
 				"; end auth token\n",
 		},
 		{
-			name: "GHP registry line removes matching auth lines too",
+			name: "GHP registry line is rewritten, its auth line is not",
 			in: "registry=https://registry.npmjs.org/\n" +
 				"@rise-x:registry=https://npm.pkg.github.com\n" +
 				"//npm.pkg.github.com/:_authToken=ghp_xxx\n" +
 				"other-line=kept\n",
 			out: "registry=https://registry.npmjs.org/\n" +
+				"@rise-x:registry=https://registry.npmjs.org/\n" +
+				"//npm.pkg.github.com/:_authToken=ghp_xxx\n" +
 				"other-line=kept\n",
-			removed: []string{
-				"@rise-x:registry=https://npm.pkg.github.com",
-				"//npm.pkg.github.com/:_authToken=ghp_xxx",
-			},
+			rewritten: []string{"@rise-x:registry=https://npm.pkg.github.com"},
 		},
 		{
 			name: "GHP auth line kept when no registry line pointed there",
@@ -67,8 +67,9 @@ func TestClean_GoldenCases(t *testing.T) {
 		{
 			// Igor's shape: a leftover @rise-x:registry line pointing at GHP,
 			// six ADO auth lines (still legitimate — @diana/* stays on ADO),
-			// and one GHP token. Only the registry line and the GHP token go.
-			name: "Igor's shape: GHP registry leftover, ADO lines untouched",
+			// and one GHP token. Only the registry line's value changes; every
+			// other byte, both sets of auth lines included, is untouched.
+			name: "Igor's shape: only the @rise-x:registry line changes",
 			in: "registry=https://registry.npmjs.org/\n" +
 				"@rise-x:registry=https://npm.pkg.github.com\n" +
 				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:username=rise-x\n" +
@@ -79,30 +80,28 @@ func TestClean_GoldenCases(t *testing.T) {
 				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:email=e@x.com\n" +
 				"//npm.pkg.github.com/:_authToken=ghp_xxx\n",
 			out: "registry=https://registry.npmjs.org/\n" +
+				"@rise-x:registry=https://registry.npmjs.org/\n" +
 				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:username=rise-x\n" +
 				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:_password=p1\n" +
 				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:email=e@x.com\n" +
 				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:username=rise-x\n" +
 				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:_password=p2\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:email=e@x.com\n",
-			removed: []string{
-				"@rise-x:registry=https://npm.pkg.github.com",
-				"//npm.pkg.github.com/:_authToken=ghp_xxx",
-			},
+				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:email=e@x.com\n" +
+				"//npm.pkg.github.com/:_authToken=ghp_xxx\n",
+			rewritten: []string{"@rise-x:registry=https://npm.pkg.github.com"},
 		},
 		{
-			name: "registry leftover pointing at ADO removes its auth lines",
+			name: "ADO-pointed registry line is rewritten, ADO auth lines untouched",
 			in: "registry=https://registry.npmjs.org/\n" +
 				"@rise-x:registry=https://rise-x.pkgs.visualstudio.com\n" +
 				"//rise-x.pkgs.visualstudio.com/:_password=abcdef\n",
-			out: "registry=https://registry.npmjs.org/\n",
-			removed: []string{
-				"@rise-x:registry=https://rise-x.pkgs.visualstudio.com",
-				"//rise-x.pkgs.visualstudio.com/:_password=abcdef",
-			},
+			out: "registry=https://registry.npmjs.org/\n" +
+				"@rise-x:registry=https://registry.npmjs.org/\n" +
+				"//rise-x.pkgs.visualstudio.com/:_password=abcdef\n",
+			rewritten: []string{"@rise-x:registry=https://rise-x.pkgs.visualstudio.com"},
 		},
 		{
-			name: "registry already points at npmjs: nothing removed",
+			name: "registry already points at npmjs: nothing changes",
 			in: "@rise-x:registry=https://registry.npmjs.org/\n" +
 				"//npm.pkg.github.com/:_authToken=ghp_xxx\n",
 			out: "@rise-x:registry=https://registry.npmjs.org/\n" +
@@ -115,26 +114,25 @@ func TestClean_GoldenCases(t *testing.T) {
 				"//npm.pkg.github.com/:_authToken=ghp_xxx\r\n" +
 				"last-line=kept",
 			out: "registry=https://registry.npmjs.org/\r\n" +
+				"@rise-x:registry=https://registry.npmjs.org/\r\n" +
+				"//npm.pkg.github.com/:_authToken=ghp_xxx\r\n" +
 				"last-line=kept",
-			removed: []string{
-				"@rise-x:registry=https://npm.pkg.github.com",
-				"//npm.pkg.github.com/:_authToken=ghp_xxx",
-			},
+			rewritten: []string{"@rise-x:registry=https://npm.pkg.github.com"},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, removed := clean(tc.in)
+			out, rewritten := clean(tc.in)
 			if out != tc.out {
 				t.Errorf("output mismatch:\n got:  %q\n want: %q", out, tc.out)
 			}
-			if len(removed) != len(tc.removed) {
-				t.Fatalf("removed = %v, want %v", removed, tc.removed)
+			if len(rewritten) != len(tc.rewritten) {
+				t.Fatalf("rewritten = %v, want %v", rewritten, tc.rewritten)
 			}
-			for i := range removed {
-				if removed[i] != tc.removed[i] {
-					t.Errorf("removed[%d] = %q, want %q", i, removed[i], tc.removed[i])
+			for i := range rewritten {
+				if rewritten[i] != tc.rewritten[i] {
+					t.Errorf("rewritten[%d] = %q, want %q", i, rewritten[i], tc.rewritten[i])
 				}
 			}
 		})
@@ -158,13 +156,11 @@ func TestClean_WritesBackupAndFile(t *testing.T) {
 	if res.Backup == "" {
 		t.Fatal("expected a backup path")
 	}
-	if len(res.Removed) != 2 {
-		t.Fatalf("Removed = %v, want 2 lines", res.Removed)
+	if len(res.Rewritten) != 1 {
+		t.Fatalf("Rewritten = %v, want 1 line", res.Rewritten)
 	}
-	// The value never leaves the package: the response says which host and
-	// key went, not the credential.
-	if res.Removed[1] != "//rise-x.pkgs.visualstudio.com/:_password=…" {
-		t.Fatalf("Removed[1] = %q, want the value masked", res.Removed[1])
+	if res.Rewritten[0] != "@rise-x:registry=…" {
+		t.Fatalf("Rewritten[0] = %q, want the value masked", res.Rewritten[0])
 	}
 
 	backupBody, err := os.ReadFile(res.Backup)
@@ -179,8 +175,11 @@ func TestClean_WritesBackupAndFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(cleaned) != "registry=https://registry.npmjs.org/\n" {
-		t.Fatalf("cleaned file = %q", cleaned)
+	want := "registry=https://registry.npmjs.org/\n" +
+		"@rise-x:registry=https://registry.npmjs.org/\n" +
+		"//rise-x.pkgs.visualstudio.com/:_password=x\n"
+	if string(cleaned) != want {
+		t.Fatalf("cleaned file = %q, want %q", cleaned, want)
 	}
 }
 
@@ -196,7 +195,7 @@ func TestClean_NothingToDo_NoBackupNoRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	if res.Backup != "" || len(res.Removed) != 0 {
+	if res.Backup != "" || len(res.Rewritten) != 0 {
 		t.Fatalf("expected no-op result, got %+v", res)
 	}
 	entries, err := os.ReadDir(dir)
@@ -213,7 +212,7 @@ func TestClean_MissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Clean: %v", err)
 	}
-	if res.Backup != "" || len(res.Removed) != 0 {
+	if res.Backup != "" || len(res.Rewritten) != 0 {
 		t.Fatalf("expected no-op for missing file, got %+v", res)
 	}
 }
@@ -232,8 +231,8 @@ func TestAnalyze_MatchesClean(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if len(lines) != 2 {
-		t.Fatalf("Analyze lines = %v, want 2", lines)
+	if len(lines) != 1 {
+		t.Fatalf("Analyze lines = %v, want 1", lines)
 	}
 	// Analyze must not touch the file.
 	after, err := os.ReadFile(path)
@@ -245,49 +244,75 @@ func TestAnalyze_MatchesClean(t *testing.T) {
 	}
 }
 
-// A registry URL with an explicit port still names the host the auth line
-// belongs to, and an empty value is not a reason to keep the line.
+func TestHost(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".npmrc")
+
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("@rise-x:registry=https://npm.pkg.github.com\n")
+	if got, err := Host(path); err != nil || got != "npm.pkg.github.com" {
+		t.Fatalf("Host = %q, %v, want npm.pkg.github.com", got, err)
+	}
+
+	write("@rise-x:registry=https://registry.npmjs.org/\n")
+	if got, err := Host(path); err != nil || got != "" {
+		t.Fatalf("Host = %q, %v, want \"\"", got, err)
+	}
+
+	if got, err := Host(filepath.Join(dir, "missing")); err != nil || got != "" {
+		t.Fatalf("Host(missing) = %q, %v, want \"\"", got, err)
+	}
+}
+
+// A registry URL with an explicit port still names the host the message and
+// the mask apply to, and an empty value is not npmjs either.
 func TestClean_RegistryValueEdges(t *testing.T) {
 	cases := []struct {
-		name    string
-		in      string
-		out     string
-		removed int
+		name      string
+		in        string
+		out       string
+		rewritten int
 	}{
 		{
-			name:    "explicit port still matches the auth line",
-			in:      "@rise-x:registry=https://npm.pkg.github.com:443\n//npm.pkg.github.com/:_authToken=x\n",
-			out:     "",
-			removed: 2,
+			name:      "explicit port still matches, auth line untouched",
+			in:        "@rise-x:registry=https://npm.pkg.github.com:443\n//npm.pkg.github.com/:_authToken=x\n",
+			out:       "@rise-x:registry=https://registry.npmjs.org/\n//npm.pkg.github.com/:_authToken=x\n",
+			rewritten: 1,
 		},
 		{
-			name:    "empty value is not npmjs, so it goes",
-			in:      "@rise-x:registry=\nkeep=1\n",
-			out:     "keep=1\n",
-			removed: 1,
+			name:      "empty value is not npmjs, so it is rewritten",
+			in:        "@rise-x:registry=\nkeep=1\n",
+			out:       "@rise-x:registry=https://registry.npmjs.org/\nkeep=1\n",
+			rewritten: 1,
 		},
 		{
-			name:    "npmjs with an explicit port is kept",
-			in:      "@rise-x:registry=https://registry.npmjs.org:443\n",
-			out:     "@rise-x:registry=https://registry.npmjs.org:443\n",
-			removed: 0,
+			name:      "npmjs with an explicit port is kept",
+			in:        "@rise-x:registry=https://registry.npmjs.org:443\n",
+			out:       "@rise-x:registry=https://registry.npmjs.org:443\n",
+			rewritten: 0,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, removed := clean(tc.in)
+			out, rewritten := clean(tc.in)
 			if out != tc.out {
 				t.Errorf("output = %q, want %q", out, tc.out)
 			}
-			if len(removed) != tc.removed {
-				t.Errorf("removed = %v, want %d lines", removed, tc.removed)
+			if len(rewritten) != tc.rewritten {
+				t.Errorf("rewritten = %v, want %d lines", rewritten, tc.rewritten)
 			}
 		})
 	}
 }
 
-// The backup holds the very credentials this action removes, so it must not be
-// created more readable than the file it copies.
+// The backup holds the pre-fix file, so it must not be created more readable
+// than the file it copies.
 func TestClean_PreservesFileMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".npmrc")

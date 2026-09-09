@@ -522,8 +522,8 @@ func (s *Server) handleNpmrcClean(w http.ResponseWriter, body actionBody) {
 		httpError(w, http.StatusBadRequest, "confirm:true is required")
 		return
 	}
-	// res.Removed is masked by the npmrc package: the response says which
-	// host and key went, never the credential itself.
+	// res.Rewritten is masked by the npmrc package: the response says which
+	// line changed, never a credential (registry lines never carry one).
 	var res npmrc.Result
 	err := s.withWriteSlot("npmrc.clean", func() (err error) {
 		res, err = npmrc.Clean(s.npmrcPath)
@@ -535,7 +535,7 @@ func (s *Server) handleNpmrcClean(w http.ResponseWriter, body actionBody) {
 	}
 	s.npmrcCache.invalidate()
 	s.invalidateGather()
-	writeJSON(w, map[string]any{"removed": res.Removed, "backup": res.Backup})
+	writeJSON(w, map[string]any{"removed": res.Rewritten, "backup": res.Backup})
 }
 
 // withWriteSlot runs fn while holding the jobs store's one running-job slot.
