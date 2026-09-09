@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/buildinfo"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/claudemd"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/instance"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/server"
 )
 
@@ -35,11 +37,34 @@ func main() {
 	claudeDir := flag.String("claude-dir", defaultClaudeDir(), "Claude Code config directory")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	printToken := flag.Bool("print-token", false, "print the API token on stdout (for scripting against the API by hand)")
+	writeClaudeMD := flag.Bool("write-claude-md", false, "add the \"how to open Rise-X Kit\" block to ~/.claude/CLAUDE.md and exit")
+	removeClaudeMD := flag.Bool("remove-claude-md", false, "take that block back out and exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println(buildinfo.String())
 		return
+	}
+
+	if *writeClaudeMD || *removeClaudeMD {
+		if err := applyClaudeMD(*claudeDir, *removeClaudeMD); err != nil {
+			log.Fatalf("claude.md: %v", err)
+		}
+		return
+	}
+
+	// A partner who closed the tab has no way back to a port that was picked at
+	// random, so a second launch reopens the running window rather than leaving
+	// another server behind. An explicit -port asks for a server on that port,
+	// so it overrides this.
+	if !portRequested() {
+		if url := instance.Running(); url != "" {
+			fmt.Println(url)
+			if !*noBrowser {
+				openBrowser(url)
+			}
+			return
+		}
 	}
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
@@ -60,9 +85,15 @@ func main() {
 		Version:   buildinfo.Version,
 	})
 
+	// Recorded before the browser opens, so the next launch finds this window.
+	if err := instance.Record(actualPort, buildinfo.Version); err != nil {
+		log.Printf("could not record this instance, so a second launch will start its own: %v", err)
+	}
+	defer instance.Clear()
+
 	// Printing the token is opt-in: stdout lands in scrollback and launcher
 	// logs, and the page gets it injected into index.html anyway.
-	url := fmt.Sprintf("http://127.0.0.1:%d/", actualPort)
+	url := instance.URL(actualPort)
 	fmt.Println(url)
 	if *printToken {
 		fmt.Println("token:", token)
@@ -98,6 +129,35 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	_ = httpServer.Shutdown(ctx)
+}
+
+// portRequested reports whether -port was given, as opposed to defaulted.
+func portRequested() bool {
+	set := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "port" {
+			set = true
+		}
+	})
+	return set
+}
+
+// applyClaudeMD is the installer's step: it teaches a Claude Code session how
+// to open the app, and says what it changed.
+func applyClaudeMD(claudeDir string, remove bool) error {
+	apply := claudemd.Apply
+	if remove {
+		apply = claudemd.Remove
+	}
+	res, err := apply(claudeDir)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s: %s\n", res.Path, res.Action)
+	if res.Backup != "" {
+		fmt.Println("previous file saved at", res.Backup)
+	}
+	return nil
 }
 
 func defaultClaudeDir() string {

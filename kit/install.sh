@@ -114,6 +114,10 @@ cp "$tmp/rise-x-kit" "$dest"
 chmod +x "$dest"
 xattr -d com.apple.quarantine "$dest" 2>/dev/null || true
 
+# Teach Claude Code how to open the app, so "open Rise-X Kit" works in a
+# session. Idempotent, and the previous CLAUDE.md is backed up first.
+"$dest" -write-claude-md || echo "note: could not update ~/.claude/CLAUDE.md" >&2
+
 echo "Installed rise-x-kit ${VERSION}. Run: rise-x-kit"
 
 if [ "${RISE_X_KIT_RUN:-}" = "1" ]; then

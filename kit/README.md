@@ -12,6 +12,23 @@ finds.
 
 ## Install (partners)
 
+### Ask Claude to do it
+
+If you already have Claude Code Desktop, the quickest route is to paste this
+into a Claude session and let it run the install for you:
+
+```
+Install Rise-X Kit on this machine. It's a desktop helper from the public
+Rise-X marketplace. On macOS run:
+curl -fsSL https://raw.githubusercontent.com/rise-x/rise-x-ai-public-marketplace/main/kit/install.sh | sh
+On Windows run:
+irm https://raw.githubusercontent.com/rise-x/rise-x-ai-public-marketplace/main/kit/install.ps1 | iex
+Pick the one for my operating system, run it, then start the app with
+rise-x-kit and tell me the address it prints.
+```
+
+### Or run it yourself
+
 **macOS** — open Terminal and run:
 
 ```
@@ -32,8 +49,19 @@ and type `rise-x-kit`. On Windows, open the Start menu and select **Rise-X
 Kit**.
 
 Rise-X Kit opens its page in your default browser, at a local address such as
-`http://127.0.0.1:53210/`. Closing that browser tab doesn't stop the app — click
-**Quit** in the page when you're done.
+`http://127.0.0.1:53210/`.
+
+Closing that browser tab doesn't stop the app: a skill install can take minutes
+and shouldn't die with the tab. To get the window back, start Rise-X Kit again
+the same way you did the first time. It reopens the window of the instance
+already running instead of starting a second one. Click **Quit** in the page
+when you're done.
+
+You can also just ask Claude: the installer adds a short "how to open Rise-X
+Kit" note to your global `~/.claude/CLAUDE.md`, so **open Rise-X Kit** works as
+an instruction in any Claude Code session. Your own file is backed up first, and
+the note sits between two `rise-x-kit` markers. Delete them and it stays gone,
+or run `rise-x-kit -remove-claude-md`.
 
 **What it needs:**
 

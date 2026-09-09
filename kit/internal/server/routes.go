@@ -16,6 +16,7 @@ import (
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/claudecli"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/doctor"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/instance"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/jobs"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/npmrc"
@@ -115,6 +116,9 @@ func (s *Server) requireHost(next http.Handler) http.Handler {
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
+	// A second launch probes for this before deciding to reopen this window
+	// instead of starting a rival server.
+	h.Set(instance.HeaderName, s.version)
 	// The page carries the CSRF token, so no cache may keep a copy of it.
 	h.Set("Cache-Control", "no-store")
 	_, _ = w.Write(web.Index(s.token))

@@ -118,6 +118,14 @@ try {
     $shortcut.WorkingDirectory = $installDir
     $shortcut.Save()
 
+    # Teach Claude Code how to open the app, so "open Rise-X Kit" works in a
+    # session. Idempotent, and the previous CLAUDE.md is backed up first.
+    try {
+        & $exePath -write-claude-md
+    } catch {
+        Write-Warning "Could not update the global CLAUDE.md: $_"
+    }
+
     Write-Host "Installed rise-x-kit $version."
     Write-Host "Run: rise-x-kit"
 } finally {
