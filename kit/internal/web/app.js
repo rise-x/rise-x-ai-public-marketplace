@@ -49,7 +49,7 @@
  *   Job actions respond {jobId} and stream their log via GET /api/jobs/{id}:
  *     marketplace.add, marketplace.update, cli.install, node.install,
  *     plugin.install / plugin.uninstall {name},
- *     plugin.update {name, marketplace?}, mcp.login {server},
+ *     plugin.update {name, marketplace?},
  *     mcp.fix {name, scope, projectPath?} - or {} for every fixable connection
  *   400 = a bad Host, an unreadable body, or an argument the server refused.
  *   403 = a bad or missing token. 409 = a job is already running (the two sync
@@ -270,7 +270,6 @@ const JOB_TITLES = {
   "plugin.uninstall": (b) => `Remove ${skillLabel(b.name)}`,
   "cli.install": () => "Install Claude Code",
   "node.install": () => "Install Node.js",
-  "mcp.login": () => "Sign in to Rise-X",
   "mcp.fix": (b) =>
     b.name ? `Update the address for ${b.name}` : "Update old Rise-X addresses",
 };
@@ -879,24 +878,6 @@ function staleRows(stale) {
     .join("");
 }
 
-/**
- * signInTarget is the connector `claude mcp login` should be pointed at: the
- * one the last check said needs signing in, else the first. The server only
- * accepts the bare .mcp.json names; mcp.servers carries the prefixed session
- * names (plugin:rise-x-mcp:...), which it rejects.
- */
-function signInTarget(mcp) {
-  const configured = (mcp.configured || []).map((s) => s.name).filter(Boolean);
-  const needsAuth = (mcp.servers || []).find((server) =>
-    /^\s*!/.test(server.status || ""),
-  );
-  if (needsAuth) {
-    const bare = String(needsAuth.name || "").replace(/^plugin:[^:]+:/, "");
-    if (configured.includes(bare)) return bare;
-  }
-  return configured[0] || "";
-}
-
 function renderConnection() {
   const mcp = overview.mcp || { verdict: "unknown" };
   const [label, variant] = CONNECTION[mcp.verdict] || CONNECTION.unknown;
@@ -904,7 +885,6 @@ function renderConnection() {
 
   const rows = connectionRows(mcp);
   const managed = mcp.verdict === "managed";
-  const signIn = managed ? "" : signInTarget(mcp);
 
   const guide = managed
     ? `<div class="rounded-lg bg-fill-0 p-3.5">
@@ -957,19 +937,6 @@ function renderConnection() {
     ${body}
     <div class="flex items-center gap-2">
       ${btn(`${ICON.refresh}Recheck`, { act: "recheck", variant: "outline", size: "sm" })}
-      ${btn("Try sign-in from here", {
-        act: "mcp-login",
-        variant: "ghost",
-        size: "sm",
-        data: { server: signIn || "" },
-        disabled: !signIn,
-        title: signIn
-          ? ""
-          : managed
-            ? "Claude Desktop manages these connections."
-            : "Install the Rise-X skill first.",
-      })}
-      ${badge("outline", "Experimental", { cls: "text-subtle" })}
     </div>
     ${
       mcp.raw
@@ -1549,8 +1516,6 @@ const ACTIONS = {
     }),
   "catalog-update": simple("marketplace.update"),
   "marketplace-add": simple("marketplace.add"),
-  "mcp-login": (button) =>
-    runAction("mcp.login", { server: button.dataset.server }, button),
   "mcp-fix": (button) => {
     const { name, scope, project } = button.dataset;
     return runAction(

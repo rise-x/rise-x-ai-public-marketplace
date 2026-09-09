@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -30,7 +29,6 @@ const (
 	pluginJobTimeout      = 10 * time.Minute // install/update/uninstall a plugin
 	cliInstallJobTimeout  = 10 * time.Minute // curl | bash, over the partner's link
 	marketplaceJobTimeout = 3 * time.Minute  // a shallow clone or a git fetch
-	mcpLoginJobTimeout    = 2 * time.Minute  // an interactive OAuth round trip
 	mcpFixJobTimeout      = 2 * time.Minute  // a remove plus an add per connection
 	nodeInstallJobTimeout = 10 * time.Minute // nvm or winget, plus the download
 )
@@ -180,7 +178,6 @@ func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 type actionBody struct {
 	Name        string `json:"name"`
 	Marketplace string `json:"marketplace"`
-	Server      string `json:"server"`
 	Scope       string `json:"scope"`
 	ProjectPath string `json:"projectPath"`
 	// Enabled is a pointer so "not sent" and false are different things.
@@ -257,8 +254,6 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		// Like cli.install, this one puts a missing tool on the machine, so
 		// it must run without a claude CLI.
 		s.handleNodeInstall(w, ctx, name)
-	case "mcp.login":
-		s.handleMcpLogin(w, ctx, name, body)
 	case "mcp.fix":
 		s.handleMcpFix(w, ctx, name, body)
 	case "cli.rescan":
@@ -320,38 +315,6 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, ctx context.Context, 
 		default:
 			return client.PluginUninstall(jctx, pluginName, onLine)
 		}
-	})
-}
-
-// handleMcpLogin validates the target against the server names the rise-x-mcp
-// plugin actually declares in its .mcp.json, so nothing a page sends can shape
-// the claude argv.
-func (s *Server) handleMcpLogin(w http.ResponseWriter, ctx context.Context, name string, body actionBody) {
-	target := body.Server
-	if target == "" {
-		httpError(w, http.StatusBadRequest, "server is required")
-		return
-	}
-	if _, ok := s.client(ctx); !ok {
-		httpError(w, http.StatusBadRequest, "claude CLI not found")
-		return
-	}
-	configured := s.configuredMcpServers(ctx)
-	if !slices.ContainsFunc(configured, func(cs mcp.ConfiguredServer) bool { return cs.Name == target }) {
-		valid := make([]string, len(configured))
-		for i, cs := range configured {
-			valid[i] = cs.Name
-		}
-		httpError(w, http.StatusBadRequest,
-			"unknown MCP server target; expected one of: "+strings.Join(valid, ", "))
-		return
-	}
-	s.startJob(w, ctx, name, needsCLI, mcpLoginJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
-		client, ok := s.client(jctx)
-		if !ok {
-			return -1, claudecli.ErrNotFound
-		}
-		return client.McpLogin(jctx, target, onLine)
 	})
 }
 
@@ -456,20 +419,6 @@ func (s *Server) updatableFromPublic(ctx context.Context, name string) bool {
 	}
 	_, synced := pickSynced(s.synced(), name)
 	return !synced
-}
-
-// configuredMcpServers reads the rise-x-mcp plugin's bundled .mcp.json, the
-// same source /api/overview reports as mcp.configured.
-func (s *Server) configuredMcpServers(ctx context.Context) []mcp.ConfiguredServer {
-	client, ok := s.client(ctx)
-	if !ok {
-		return nil
-	}
-	res, err := client.PluginListAvailable(ctx)
-	if err != nil {
-		return nil
-	}
-	return riseXMcpConfig(res.Installed)
 }
 
 func (s *Server) marketplaceRegistered(ctx context.Context) bool {

@@ -164,11 +164,3 @@ func (c *Client) McpRemove(ctx context.Context, dir, name, scope string, onLine 
 func (c *Client) McpAdd(ctx context.Context, dir, name, url, scope string, onLine func(string)) (int, error) {
 	return c.streamIn(ctx, dir, []string{"mcp", "add", "--transport", "http", name, url, "-s", scope}, onLine)
 }
-
-// McpLogin runs `claude mcp login plugin:rise-x-mcp:<server>` (experimental:
-// the Desktop app's own credential store may or may not pick up the result).
-// The deadline is the caller's: this waits on an interactive OAuth flow, and
-// the job that starts it already carries mcpLoginJobTimeout.
-func (c *Client) McpLogin(ctx context.Context, server string, onLine func(string)) (int, error) {
-	return c.stream(ctx, []string{"mcp", "login", "plugin:rise-x-mcp:" + server}, onLine)
-}

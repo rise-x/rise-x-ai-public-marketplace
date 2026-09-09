@@ -432,41 +432,6 @@ func TestHandler_MarketplaceAdd_RequiresCLI(t *testing.T) {
 	}
 }
 
-// mcp.login's target must be one of the servers the plugin declares, so
-// nothing a page sends can shape the claude argv.
-func TestHandler_McpLogin_TargetValidation(t *testing.T) {
-	installPath := t.TempDir()
-	mcpJSON := `{"mcpServers":{"rise-x":{"type":"http","url":"https://mcp.rise-x.io/mcp"}}}`
-	if err := os.WriteFile(filepath.Join(installPath, ".mcp.json"), []byte(mcpJSON), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	pluginList := `{
-  "installed": [{"id":"rise-x-mcp@rise-x-public","version":"1.3.1","scope":"user","enabled":true,"installPath":"` + installPath + `"}],
-  "available": [{"pluginId":"rise-x-mcp@rise-x-public","name":"rise-x-mcp","marketplaceName":"rise-x-public","source":"./plugins/rise-x-mcp"}]
-}`
-	fake := newFakeCLI(pluginList)
-	fake.Set(fakeCLIPath, []string{"mcp", "login", "plugin:rise-x-mcp:rise-x"}, runnertest.Result{Stdout: "ok\n"})
-	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
-
-	bad := post(t, baseURL+"/api/actions/mcp.login", token, map[string]any{"server": "--help --dangerously"})
-	bad.Body.Close()
-	if bad.StatusCode != http.StatusBadRequest {
-		t.Fatalf("arbitrary target status = %d, want 400", bad.StatusCode)
-	}
-
-	missing := post(t, baseURL+"/api/actions/mcp.login", token, nil)
-	missing.Body.Close()
-	if missing.StatusCode != http.StatusBadRequest {
-		t.Fatalf("missing target status = %d, want 400", missing.StatusCode)
-	}
-
-	ok := post(t, baseURL+"/api/actions/mcp.login", token, map[string]any{"server": "rise-x"})
-	defer ok.Body.Close()
-	if ok.StatusCode != http.StatusOK {
-		t.Fatalf("configured target status = %d, want 200", ok.StatusCode)
-	}
-}
-
 // The doctor's rows are the partner-facing copy; they must stay plain
 // sentences with no engineering caveats.
 func TestHandler_Doctor_PlainMessages(t *testing.T) {

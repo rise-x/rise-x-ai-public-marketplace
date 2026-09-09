@@ -104,39 +104,6 @@ func jobID(t *testing.T, resp *http.Response) string {
 	return out.JobID
 }
 
-// mcp.login takes the bare names from the plugin's .mcp.json. The page sends
-// overview.mcp.configured[].name, which is exactly those; the prefixed session
-// name from `claude mcp list` is not a valid target.
-func TestHandler_McpLogin_AcceptsBareConfiguredNames(t *testing.T) {
-	fake := newFakeCLI(mcpPluginList(t))
-	for _, server := range []string{"rise-x", "rise-x-test"} {
-		fake.Set(fakeCLIPath, []string{"mcp", "login", "plugin:rise-x-mcp:" + server},
-			runnertest.Result{Stdout: "ok\n"})
-	}
-	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
-
-	for _, server := range []string{"rise-x", "rise-x-test"} {
-		resp := post(t, baseURL+"/api/actions/mcp.login", token, map[string]any{"server": server})
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			t.Fatalf("%s status = %d, want 200", server, resp.StatusCode)
-		}
-		// One job at a time, so let this one land before starting the next.
-		if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "succeeded" {
-			t.Fatalf("%s job status = %q", server, status)
-		}
-	}
-
-	resp := post(t, baseURL+"/api/actions/mcp.login", token, map[string]any{"server": "plugin:rise-x-mcp:rise-x"})
-	if resp.StatusCode != http.StatusBadRequest {
-		resp.Body.Close()
-		t.Fatalf("prefixed target status = %d, want 400", resp.StatusCode)
-	}
-	if got := errorMessage(t, resp); got != "unknown MCP server target; expected one of: rise-x, rise-x-test" {
-		t.Fatalf("error = %q", got)
-	}
-}
-
 // catalogNamesServer serves the marketplace manifest GitHub would.
 func catalogNamesServer(t *testing.T, names ...string) *catalog.Catalog {
 	t.Helper()

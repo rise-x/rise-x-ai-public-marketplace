@@ -212,15 +212,17 @@ func TestClient_PluginInstall_ArgvAndLog(t *testing.T) {
 	}
 }
 
-func TestClient_McpLogin_RedactsSecrets(t *testing.T) {
+// Everything a streamed command prints reaches the job log, so it goes through
+// Redact on the way.
+func TestClient_Stream_RedactsSecrets(t *testing.T) {
 	f := runnertest.NewFake()
-	args := []string{"mcp", "login", "plugin:rise-x-mcp:rise-x"}
+	args := []string{"plugin", "install", "rise-x-mcp@rise-x-public"}
 	f.Set("claude", args, runnertest.Result{Stdout: "token=abc123secretvalue\n"})
 	c := New("claude", f)
 
 	var lines []string
-	if _, err := c.McpLogin(context.Background(), "rise-x", func(s string) { lines = append(lines, s) }); err != nil {
-		t.Fatalf("McpLogin: %v", err)
+	if _, err := c.PluginInstall(context.Background(), "rise-x-mcp", func(s string) { lines = append(lines, s) }); err != nil {
+		t.Fatalf("PluginInstall: %v", err)
 	}
 	for _, l := range lines {
 		if strings.Contains(l, "abc123secretvalue") {
