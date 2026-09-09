@@ -152,7 +152,7 @@ func TestLocalHEAD_Detached(t *testing.T) {
 	if err := os.MkdirAll(gitDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("badc0ffee0ddf00d\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("badc0ffee0ddf00d1234567890abcdef12345678\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -160,8 +160,8 @@ func TestLocalHEAD_Detached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LocalHEAD: %v", err)
 	}
-	if sha != "badc0ffee0ddf00d" {
-		t.Fatalf("sha = %q, want badc0ffee0ddf00d", sha)
+	if sha != "badc0ffee0ddf00d1234567890abcdef12345678" {
+		t.Fatalf("sha = %q, want the full object name", sha)
 	}
 }
 
@@ -279,4 +279,42 @@ func TestGet_RefusesAnOversizedBody(t *testing.T) {
 	if _, err := c.get(context.Background(), srv.URL); err == nil {
 		t.Fatal("a body past the cap was read whole")
 	}
+}
+
+// HEAD and packed-refs are trusted for where they sit, the same as the loose
+// ref, so neither may be followed into an unrelated file. A detached HEAD is
+// also checked rather than returned verbatim: without that, whatever the
+// first line happened to be was reported as the commit.
+func TestLocalHEAD_RefusesSymlinkedSiblingsAndNonSHAs(t *testing.T) {
+	t.Run("symlinked HEAD", func(t *testing.T) {
+		clone := t.TempDir()
+		gitDir := filepath.Join(clone, ".git")
+		if err := os.MkdirAll(gitDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		secret := filepath.Join(t.TempDir(), "secret")
+		if err := os.WriteFile(secret, []byte("badc0ffee0ddf00d1234567890abcdef12345678\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(secret, filepath.Join(gitDir, "HEAD")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if sha, err := LocalHEAD(clone); err == nil {
+			t.Fatalf("followed the symlinked HEAD and returned %q", sha)
+		}
+	})
+
+	t.Run("detached HEAD holding something else", func(t *testing.T) {
+		clone := t.TempDir()
+		gitDir := filepath.Join(clone, ".git")
+		if err := os.MkdirAll(gitDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if sha, err := LocalHEAD(clone); err == nil {
+			t.Fatalf("reported %q as a commit", sha)
+		}
+	})
 }

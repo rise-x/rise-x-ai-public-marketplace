@@ -63,7 +63,7 @@ func versionCatalog(t *testing.T, version string) *catalog.Catalog {
 		case strings.HasSuffix(r.URL.Path, "marketplace.json"):
 			_, _ = w.Write([]byte(`{"name":"rise-x-public","plugins":[{"name":"rise-x-mcp"}]}`))
 		default:
-			_, _ = w.Write([]byte(`{"version":"` + version + `","sha":"deadbeef"}`))
+			_, _ = w.Write([]byte(`{"version":"` + version + `","sha":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}`))
 		}
 	}))
 	t.Cleanup(srv.Close)

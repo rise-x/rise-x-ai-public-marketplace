@@ -92,22 +92,28 @@ func pathVersion(path string) string {
 	return ""
 }
 
-// versionSuffix reads "1.10.0" out of "app-1.10.0" or "1.10.0", and returns ""
-// for a segment that carries no dotted number.
+// versionSuffix reads the version out of a directory name: "1.10.0" from
+// "app-1.10.0", "app-1.10.0-beta.2" or "1.10.0", and "" from a name carrying
+// no dotted number. It takes the first dotted-numeric run and stops there, so
+// a pre-release suffix orders with its own release version instead of sorting
+// last, and nothing non-numeric reaches semver, whose comparison does not
+// order pre-releases anyway.
 func versionSuffix(segment string) string {
-	if i := strings.LastIndexAny(segment, "-_"); i >= 0 {
-		segment = segment[i+1:]
-	}
-	segment = strings.TrimPrefix(segment, "v")
-	if segment == "" || !strings.Contains(segment, ".") {
-		return ""
-	}
-	for _, r := range segment {
-		if (r < '0' || r > '9') && r != '.' {
-			return ""
+	for i := 0; i < len(segment); i++ {
+		if segment[i] < '0' || segment[i] > '9' {
+			continue
 		}
+		end := i
+		for end < len(segment) && (segment[end] == '.' || (segment[end] >= '0' && segment[end] <= '9')) {
+			end++
+		}
+		run := strings.TrimRight(segment[i:end], ".")
+		if strings.Contains(run, ".") {
+			return run
+		}
+		i = end // this run held no dot; keep looking past it
 	}
-	return segment
+	return ""
 }
 
 func walkForFile(env Env, root, filename string, maxDepth int) []string {

@@ -3,9 +3,11 @@
 package runner
 
 import (
+	"context"
 	"os/exec"
 	"strconv"
 	"syscall"
+	"time"
 )
 
 // setProcAttr hides the console window that would otherwise flash up when we
@@ -30,13 +32,22 @@ func killTree(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	kill := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid))
+	// Bounded: killGuard holds its mutex across this call and stop() waits on
+	// the same mutex, so an unbounded taskkill would make cmd.Wait's return
+	// path wait for it.
+	ctx, cancel := context.WithTimeout(context.Background(), killTimeout)
+	defer cancel()
+	kill := exec.CommandContext(ctx, "taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid))
 	kill.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := kill.Run(); err != nil {
-		return cmd.Process.Kill() // taskkill missing or refused
+		return cmd.Process.Kill() // taskkill missing, refused or too slow
 	}
 	return nil
 }
+
+// killTimeout bounds taskkill. It is a local process listing a process tree,
+// so seconds is generous.
+const killTimeout = 5 * time.Second
 
 // killAfterReap is false on Windows. killTree names the child by pid, and once
 // cmd.Wait has returned the process handle is released, so that pid may

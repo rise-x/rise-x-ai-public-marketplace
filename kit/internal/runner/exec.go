@@ -135,8 +135,8 @@ func (Exec) StreamDir(ctx context.Context, dir, name string, args []string, onLi
 	// the full WaitDelay before the group gets killed. Watch ctx ourselves
 	// so the kill is unconditional and immediate.
 	//
-	// The guard is what keeps that watcher inside the window where the group
-	// is still ours. Once Wait has returned on the normal exit path no member
+	// The guard narrows that watcher to the window where the group is still
+	// ours; it cannot close it, since the check cannot be atomic with wait4. Once Wait has returned on the normal exit path no member
 	// of the group is left, the kernel is free to reuse the pid, and killing
 	// the group would signal whatever took it.
 	var guard killGuard

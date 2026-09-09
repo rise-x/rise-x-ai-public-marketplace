@@ -296,13 +296,30 @@ func (c *Catalog) get(ctx context.Context, url string) ([]byte, error) {
 // maxBodyBytes caps one API response.
 const maxBodyBytes = 8 << 20
 
+// isSHA reports whether s is a git object name: 40 hex characters, or the 64
+// of sha256 repositories.
+func isSHA(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
 // LocalHEAD reads the marketplace clone's current commit SHA from .git,
 // handling a symbolic-ref HEAD (normal branch checkout), a detached HEAD
 // (bare SHA), and a ref that only exists in packed-refs (shallow clones
 // often pack the branch ref instead of writing a loose ref file).
 func LocalHEAD(installLocation string) (string, error) {
 	gitDir := filepath.Join(installLocation, ".git")
-	head, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
+	// Every file read here is trusted only because of where it sits, so none
+	// of them follows a link: the loose ref got that treatment first, and its
+	// two siblings reach the same verdict by the same route.
+	head, err := fsutil.ReadNoFollow(filepath.Join(gitDir, "HEAD"))
 	if err != nil {
 		return "", err
 	}
@@ -310,7 +327,13 @@ func LocalHEAD(installLocation string) (string, error) {
 
 	ref, isSymbolic := strings.CutPrefix(line, "ref: ")
 	if !isSymbolic {
-		return line, nil // detached HEAD: a bare SHA
+		// Detached HEAD: the file holds the SHA itself. Checked rather than
+		// returned verbatim, so an unrelated file's first line cannot pass
+		// for a commit.
+		if !isSHA(line) {
+			return "", fmt.Errorf("HEAD holds %q, which is not a commit", line)
+		}
+		return line, nil
 	}
 	// A ref is a path under .git; anything else is not one, and joining it
 	// would read a file elsewhere and report its first line as a commit.
@@ -325,7 +348,7 @@ func LocalHEAD(installLocation string) (string, error) {
 		return strings.TrimSpace(string(data)), nil
 	}
 
-	packed, err := os.ReadFile(filepath.Join(gitDir, "packed-refs"))
+	packed, err := fsutil.ReadNoFollow(filepath.Join(gitDir, "packed-refs"))
 	if err != nil {
 		return "", fmt.Errorf("ref %s not found as a loose or packed ref", ref)
 	}

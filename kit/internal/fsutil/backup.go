@@ -13,6 +13,9 @@ import (
 
 // ErrNotDurable reports that a write landed and only its durability barrier
 // did not: the rename succeeded, the directory entry could not be flushed.
+// It is a unix-only condition in practice, since SyncDir is a no-op on
+// Windows - there the barrier is absent rather than reported, which is the
+// weaker of the two guarantees.
 // The file on disk holds the new bytes, so a caller must not treat this as
 // "nothing happened" - undoing it, or dropping the backup that describes the
 // state before it, is the wrong move. Directory fsync is unsupported on some
@@ -59,6 +62,12 @@ func Backup(path string, data []byte, mode os.FileMode) (string, error) {
 			return "", fmt.Errorf("backup %s: %w", path, err)
 		}
 		if err := write(f, name, data, mode); err != nil {
+			if errors.Is(err, ErrNotDurable) {
+				// The copy exists and is complete; only its directory entry
+				// is unflushed. The name goes back with the error because
+				// that file is exactly what the caller must keep.
+				return name, fmt.Errorf("backup %s: %w", path, err)
+			}
 			return "", fmt.Errorf("backup %s: %w", path, err)
 		}
 		return name, nil
@@ -91,7 +100,14 @@ func write(f *os.File, name string, data []byte, mode os.FileMode) error {
 	if err := f.Close(); err != nil {
 		return fail(err)
 	}
-	return SyncDir(filepath.Dir(name))
+	// The backup's own bytes are on disk by here, so a failed directory flush
+	// is a durability warning about its *name*, not a reason to delete it -
+	// fail() would remove a complete copy at the moment the caller needs one.
+	// Reported the way WriteAtomic reports the same condition.
+	if err := SyncDir(filepath.Dir(name)); err != nil {
+		return fmt.Errorf("%w: %v", ErrNotDurable, err)
+	}
+	return nil
 }
 
 // WriteAtomic replaces path with data through a temp file in the same

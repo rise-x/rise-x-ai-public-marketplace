@@ -288,3 +288,24 @@ func TestLocate_WindowsProbe_HighestVersionFirst(t *testing.T) {
 		t.Errorf("Path = %q, want the newest %q", cli.Path, newest)
 	}
 }
+
+// A version directory carrying a pre-release suffix must still order by its
+// release version. Taking everything after the last separator read
+// "app-1.10.0-beta.2" as "beta.2", which is not a version, so that directory
+// sorted last and an older sibling was adopted instead.
+func TestVersionSuffix(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"app-1.10.0", "1.10.0"},
+		{"app-1.9.0", "1.9.0"},
+		{"app-1.10.0-beta.2", "1.10.0"},
+		{"2.1.258-nightly.1", "2.1.258"},
+		{"app-v2.1.3", "2.1.3"},
+		{"1.2.3", "1.2.3"},
+		{"app", ""},
+		{"Claude", ""},
+	} {
+		if got := versionSuffix(tc.in); got != tc.want {
+			t.Errorf("versionSuffix(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

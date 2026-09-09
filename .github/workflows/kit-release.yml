@@ -106,6 +106,9 @@ jobs:
   build-mac:
     needs: version
     runs-on: macos-14
+    # notarytool --wait is the step that can hang; without this it runs at
+    # the 6-hour job default on the most expensive runner in the matrix.
+    timeout-minutes: 45
     env:
       # `secrets` isn't a legal context in a step `if:`, and the Apple secret
       # *values* no longer sit in job-level env (they used to leak into `go
@@ -204,6 +207,7 @@ jobs:
   build-windows:
     needs: version
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       VERSION: ${{ needs.version.outputs.version }}
     defaults:
@@ -240,6 +244,7 @@ jobs:
   release:
     needs: [version, build-mac, build-windows]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       # write, because this job creates the tag and the release, not just the
       # assets.

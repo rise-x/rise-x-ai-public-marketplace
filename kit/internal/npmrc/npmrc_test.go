@@ -467,3 +467,43 @@ func requirePOSIXModes(t *testing.T) {
 		t.Skip("permission bits are not modelled on Windows")
 	}
 }
+
+// On a mount where a directory fsync is unsupported, every write went through
+// Backup and Backup failed hard, so Clean, Apply and the settings toggle were
+// all impossible there. The backup it had already written was left on disk
+// and reported as "". Now the copy comes back with the error and the rewrite
+// goes ahead.
+func TestClean_UnflushableDirectoryStillRewrites(t *testing.T) {
+	real := fsutil.SyncDir
+	fsutil.SyncDir = func(string) error { return errors.New("fsync: operation not supported") }
+	t.Cleanup(func() { fsutil.SyncDir = real })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".npmrc")
+	body := "@rise-x:registry=https://packages.example.com/_packaging/Example/npm/registry/\n" +
+		"//packages.example.com/_packaging/Example/npm/registry/:_authToken=keep-me\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Clean(path)
+	if err != nil {
+		t.Fatalf("err = %v, want the rewrite to go ahead", err)
+	}
+	if res.Backup == "" {
+		t.Fatal("no backup reported, but one was written")
+	}
+	if _, serr := os.Stat(res.Backup); serr != nil {
+		t.Fatalf("the reported backup is not on disk: %v", serr)
+	}
+	got, rerr := os.ReadFile(path)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if !strings.Contains(string(got), "registry.npmjs.org") {
+		t.Fatalf(".npmrc = %q, want the rewrite", got)
+	}
+	if !strings.Contains(string(got), "_authToken=keep-me") {
+		t.Fatalf(".npmrc lost its auth line: %q", got)
+	}
+}

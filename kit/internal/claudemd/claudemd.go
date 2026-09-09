@@ -92,7 +92,7 @@ func Apply(claudeDir string) (Result, error) {
 		return res, err
 	}
 	if exists {
-		if res.Backup, err = fsutil.Backup(path, original, mode); err != nil {
+		if res.Backup, err = fsutil.Backup(path, original, mode); err != nil && !errors.Is(err, fsutil.ErrNotDurable) {
 			return res, err
 		}
 	}
@@ -130,10 +130,10 @@ func Remove(claudeDir string) (Result, error) {
 	if fi, serr := os.Stat(path); serr == nil {
 		mode = fi.Mode().Perm()
 	}
-	if res.Backup, err = fsutil.Backup(path, original, mode); err != nil {
+	if res.Backup, err = fsutil.Backup(path, original, mode); err != nil && !errors.Is(err, fsutil.ErrNotDurable) {
 		return res, err
 	}
-	if err := fsutil.WriteAtomic(path, []byte(join(before, after)), mode); err != nil {
+	if err := fsutil.WriteAtomic(path, []byte(join(before, after)), mode); err != nil && !errors.Is(err, fsutil.ErrNotDurable) {
 		return res, writeError(path, res.Backup, err)
 	}
 	res.Action = "removed"

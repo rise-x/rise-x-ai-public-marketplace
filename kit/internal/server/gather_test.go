@@ -56,7 +56,7 @@ func marketplaceClone(t *testing.T, withGit bool) string {
 		if err := os.MkdirAll(gitDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("deadbeef\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -82,7 +82,7 @@ func statusCatalog(t *testing.T, code int) *catalog.Catalog {
 			w.WriteHeader(code)
 			return
 		}
-		_, _ = w.Write([]byte(`{"sha":"deadbeef"}`))
+		_, _ = w.Write([]byte(`{"sha":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}`))
 	}))
 	t.Cleanup(srv.Close)
 	c := catalog.New(claudecli.MarketplaceRepo)
@@ -225,7 +225,7 @@ func TestHandler_ConcurrentOverviewAndDoctor_GatherOnce(t *testing.T) {
 			atomic.AddInt64(&versionFetches, 1)
 		}
 		time.Sleep(50 * time.Millisecond) // a real GitHub round trip
-		_, _ = w.Write([]byte(`{"version":"1.5.0","sha":"deadbeef"}`))
+		_, _ = w.Write([]byte(`{"version":"1.5.0","sha":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}`))
 	}))
 	t.Cleanup(srv.Close)
 	cat := catalog.New(claudecli.MarketplaceRepo)

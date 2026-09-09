@@ -103,7 +103,7 @@ func Clean(path string) (Result, error) {
 	}
 
 	backup, err := fsutil.Backup(path, data, mode)
-	if err != nil {
+	if err != nil && !errors.Is(err, fsutil.ErrNotDurable) {
 		return Result{}, err
 	}
 	if err := fsutil.WriteAtomic(path, []byte(kept), mode); err != nil && !errors.Is(err, fsutil.ErrNotDurable) {

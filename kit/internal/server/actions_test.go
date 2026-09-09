@@ -105,7 +105,7 @@ func catalogNamesServer(t *testing.T, names ...string) *catalog.Catalog {
 			_, _ = w.Write([]byte(manifest))
 			return
 		}
-		_, _ = w.Write([]byte(`{"version":"1.5.0","sha":"deadbeef"}`))
+		_, _ = w.Write([]byte(`{"version":"1.5.0","sha":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}`))
 	}))
 	t.Cleanup(srv.Close)
 	c := catalog.New(claudecli.MarketplaceRepo)

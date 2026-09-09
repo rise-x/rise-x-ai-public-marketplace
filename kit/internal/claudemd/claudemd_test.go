@@ -293,3 +293,37 @@ func requirePOSIXModes(t *testing.T) {
 		t.Skip("permission bits are not modelled on Windows")
 	}
 }
+
+// Remove had no ErrNotDurable guard, so it took the block out and then
+// reported failure and exited non-zero.
+func TestRemove_UnflushableDirectoryReportsSuccess(t *testing.T) {
+	real := fsutil.SyncDir
+	calls := 0
+	fsutil.SyncDir = func(dir string) error {
+		calls++
+		if calls == 1 { // the backup's own flush
+			return real(dir)
+		}
+		return errors.New("fsync: operation not supported")
+	}
+	t.Cleanup(func() { fsutil.SyncDir = real })
+
+	dir := t.TempDir()
+	if _, err := Apply(dir); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	res, err := Remove(dir)
+	if err != nil {
+		t.Fatalf("Remove err = %v, want success: the block was taken out", err)
+	}
+	if res.Action != "removed" {
+		t.Fatalf("action = %q, want removed", res.Action)
+	}
+	body, rerr := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if rerr != nil && !os.IsNotExist(rerr) {
+		t.Fatal(rerr)
+	}
+	if strings.Contains(string(body), startMarker) {
+		t.Fatalf("the block is still there: %q", body)
+	}
+}

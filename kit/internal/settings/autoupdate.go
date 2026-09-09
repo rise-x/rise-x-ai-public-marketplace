@@ -176,7 +176,12 @@ func (w *Writer) setOnce(target, name, repo string, enabled bool) (backupPath st
 		return "", err
 	}
 	if exists && !w.backedUp {
-		if backupPath, err = fsutil.Backup(target, original, mode); err != nil {
+		// A backup whose directory entry could not be flushed is still a
+		// complete copy on disk, and Backup hands its name back with the
+		// error. Refusing there would make the toggle impossible on a mount
+		// that cannot flush a directory, which is the case the tolerance
+		// below exists for.
+		if backupPath, err = fsutil.Backup(target, original, mode); err != nil && !errors.Is(err, fsutil.ErrNotDurable) {
 			return "", err
 		}
 		w.backedUp = true
