@@ -107,7 +107,7 @@ fixes arrive in the background instead of waiting for a manual update.
 | Each skill | Whether it's installed, enabled, and current, and where it came from: the public marketplace, another marketplace, or your organisation | Installs or updates that skill — never one your organisation or another marketplace delivered |
 | Catalog freshness | Whether the local marketplace clone matches GitHub | Refreshes the marketplace |
 | Rise-X addresses | Whether any MCP connection still points at an address Rise-X has moved off | Removes the connection and adds it back at the current address, in the same scope |
-| Node.js | Whether Node.js 20 or later is available (only the app-building skill needs it) | None — links to nodejs.org |
+| Node.js | Whether Node.js 20 or later is available (only the app-building skill needs it) | Installs or updates Node.js to the current LTS release — with nvm on macOS and Linux, winget on Windows. Where neither is available, links to nodejs.org instead |
 | `.npmrc` | Whether a leftover `@rise-x:registry` line still points `@rise-x` packages at their old host — they're on the public npm registry now — and whether any auth line for that same host is still around. **Show lines** lists them, masked | Backs up `~/.npmrc` first, then removes only those lines |
 | Git (Windows only) | Whether `git` is on `PATH` | None — Claude Code Desktop prompts to install it |
 | Auto-updater environment | Whether your Claude Code settings' `env` block is blocking plugin auto-updates | None — informational only |
@@ -125,7 +125,10 @@ by running `claude mcp remove` and `claude mcp add`, never by editing
 `~/.claude.json`, which Kit only reads. Kit reads `~/.npmrc` to find
 leftover Rise-X registry lines, shows them masked, and backs up the file with its
 original permissions before removing those lines. It never sends the file's
-contents anywhere. The automatic-updates switch writes a documented Claude Code
+contents anywhere. The Node.js fix runs nvm's own installer (a pinned release,
+checked against its sha256 before it runs) or winget, and lets that tool edit
+your shell profile the way it normally does, so new shells find Node.
+The automatic-updates switch writes a documented Claude Code
 setting; whether Claude Code honors that setting at user scope isn't confirmed
 yet. Signing in to Rise-X always happens in Claude and your browser, never
 inside Rise-X Kit.

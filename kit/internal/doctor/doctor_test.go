@@ -288,6 +288,51 @@ func TestRun_NodeMissingMessage(t *testing.T) {
 	}
 }
 
+// The fix button says what it does, and only appears where the kit has an
+// installer to run.
+func TestRun_NodeFix(t *testing.T) {
+	cases := []struct {
+		name    string
+		found   bool
+		version string
+		label   string
+	}{
+		{"missing", false, "", "Install Node.js"},
+		{"too old", true, "16.20.0", "Update Node.js"},
+		{"below 20", true, "18.19.0", "Update Node.js"},
+		{"current", true, "24.18.0", ""},
+	}
+	for _, tc := range cases {
+		f := baseFacts()
+		f.CanInstallNode = true
+		f.NodeFound, f.NodeVersion = tc.found, tc.version
+		c := findCheck(t, Run(f), "node")
+		if tc.label == "" {
+			if c.Fix != "" {
+				t.Errorf("node(%s) offers %q, want no fix", tc.name, c.Fix)
+			}
+			continue
+		}
+		if c.Fix != "node.install" || c.FixLabel != tc.label {
+			t.Errorf("node(%s) = fix %q %q, want node.install %q", tc.name, c.Fix, c.FixLabel, tc.label)
+		}
+		if c.FixTitle != nodeFixTitle {
+			t.Errorf("node(%s) title = %q, want the install explanation", tc.name, c.FixTitle)
+		}
+	}
+}
+
+// Windows without winget: nothing to run, so the row keeps its nodejs.org link.
+func TestRun_NodeFixAbsentWhenNoInstaller(t *testing.T) {
+	f := baseFacts()
+	f.NodeFound = false
+	f.CanInstallNode = false
+	c := findCheck(t, Run(f), "node")
+	if c.Fix != "" || c.FixLabel != "" {
+		t.Errorf("node = fix %q %q, want none", c.Fix, c.FixLabel)
+	}
+}
+
 func TestRun_NpmrcMessage(t *testing.T) {
 	f := baseFacts()
 	f.NpmrcOffendingLines = []string{"a", "b", "c"}

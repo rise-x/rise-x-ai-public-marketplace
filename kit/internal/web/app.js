@@ -30,10 +30,11 @@
  *
  * GET /api/doctor -> 200
  *   { checks: [{ id, status: "ok"|"warn"|"fail"|"skip", title, message,
- *                detail?, fix?, fixArgs? }] }
+ *                detail?, fix?, fixLabel?, fixTitle?, fixArgs? }] }
  *   fix is the action name to POST; detail is the newline-separated lines the
- *   fix would change, shown behind "Show lines". npmrc.clean has no fixArgs
- *   but the server demands {confirm:true}, so the page adds it.
+ *   fix would change, shown behind "Show lines". fixLabel replaces the
+ *   button's "Fix" label and fixTitle is its tooltip. npmrc.clean has no
+ *   fixArgs but the server demands {confirm:true}, so the page adds it.
  *
  * POST /api/actions/{name}  body: JSON (may be empty) -> 200 | 400 | 403 | 409 | 422
  *   Sync actions respond immediately:
@@ -42,7 +43,7 @@
  *     cli.rescan {} -> {found}  |  quit {} -> {ok: true}
  *     reload-hint.dismiss {} -> {ok: true}
  *   Job actions respond {jobId} and stream their log via GET /api/jobs/{id}:
- *     marketplace.add, marketplace.update, cli.install,
+ *     marketplace.add, marketplace.update, cli.install, node.install,
  *     plugin.install / plugin.uninstall {name},
  *     plugin.update {name, marketplace?}, mcp.login {server},
  *     mcp.fix {name, scope, projectPath?} - or {} for every fixable connection
@@ -264,6 +265,7 @@ const JOB_TITLES = {
   "plugin.update": (b) => `Update ${skillLabel(b.name)}`,
   "plugin.uninstall": (b) => `Remove ${skillLabel(b.name)}`,
   "cli.install": () => "Install Claude Code",
+  "node.install": () => "Install Node.js",
   "mcp.login": () => "Sign in to Rise-X",
   "mcp.fix": (b) =>
     b.name ? `Update the address for ${b.name}` : "Update old Rise-X addresses",
@@ -286,6 +288,7 @@ async function runAction(name, body, button) {
     if (result && result.jobId) {
       jobs.unshift({
         id: result.jobId,
+        action: name,
         title: (JOB_TITLES[name] || (() => name))(payload),
         subtitle: payload.name || "",
         lines: [],
@@ -338,7 +341,9 @@ function startPolling(job) {
       stopPolling(job);
       if (job.status === "failed")
         notice("error", job.error || `${job.title} did not finish.`);
-      refresh();
+      // A new Node.js lives somewhere the cached probe never looked, so this
+      // one job re-probes the machine instead of reading the cache.
+      refresh(job.action === "node.install");
     } catch (err) {
       stopPolling(job);
       job.status = "failed";
@@ -946,10 +951,11 @@ function renderConnection() {
 
 function checkAction(check) {
   if (check.fix) {
-    return btn("Fix", {
+    return btn(check.fixLabel || "Fix", {
       act: "fix",
       variant: "outline",
       cls: "shrink-0",
+      title: check.fixTitle || "",
       data: {
         fix: check.fix,
         args: JSON.stringify(check.fixArgs || {}),
@@ -1281,6 +1287,14 @@ function runFix(button) {
       : "Remove the old Rise-X registry lines from ~/.npmrc?";
     if (!confirm(question)) return undefined;
     args.confirm = true;
+  } else if (name === "node.install") {
+    if (
+      !confirm(
+        "Install Node.js? This downloads the current LTS release and may take a few minutes.",
+      )
+    ) {
+      return undefined;
+    }
   } else if (name === "mcp.fix") {
     const detail = button.dataset.detail;
     const question = detail

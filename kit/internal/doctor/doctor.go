@@ -27,9 +27,14 @@ type Check struct {
 	Message string `json:"message"`
 	// Detail is the newline-separated lines behind the row's "Show lines"
 	// disclosure: the exact entries the Fix would change.
-	Detail  string         `json:"detail,omitempty"`
-	Fix     string         `json:"fix,omitempty"`
-	FixArgs map[string]any `json:"fixArgs,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	Fix    string `json:"fix,omitempty"`
+	// FixLabel replaces the button's default "Fix" label where the row needs
+	// to say what pressing it does; FixTitle is the sentence behind its
+	// tooltip.
+	FixLabel string         `json:"fixLabel,omitempty"`
+	FixTitle string         `json:"fixTitle,omitempty"`
+	FixArgs  map[string]any `json:"fixArgs,omitempty"`
 }
 
 // Where a plugin on this machine came from. An empty InstallSource means it
@@ -99,6 +104,9 @@ type Facts struct {
 
 	NodeFound   bool
 	NodeVersion string // e.g. "20.11.0"
+	// CanInstallNode is whether this platform has an installer the kit can
+	// drive: nvm on macOS and Linux, winget on Windows.
+	CanInstallNode bool
 
 	NpmrcOffendingLines []string
 
@@ -337,11 +345,14 @@ const (
 	nodeTooOldMessage = "Version %s is too old. Rise-X Apps needs Node 18.19 or newer."
 )
 
+// nodeFixTitle explains what the Node.js fix does before you press it.
+const nodeFixTitle = "Installs the current LTS release. Skip this if you only use the Rise-X connection."
+
 func nodeCheck(f Facts) Check {
 	const id = "node"
 	if !f.NodeFound {
-		return Check{ID: id, Status: StatusWarn, Title: "Node.js",
-			Message: "Not found. Needed only for Rise-X Apps."}
+		return withNodeFix(f, Check{ID: id, Status: StatusWarn, Title: "Node.js",
+			Message: "Not found. Needed only for Rise-X Apps."}, "Install Node.js")
 	}
 	version := semver.Short(strings.TrimPrefix(strings.TrimSpace(f.NodeVersion), "v"))
 	major, minor := parseNodeVersion(f.NodeVersion)
@@ -349,12 +360,22 @@ func nodeCheck(f Facts) Check {
 	case major >= prefNodeMajor:
 		return Check{ID: id, Status: StatusOK, Title: "Node.js", Message: fmt.Sprintf("Version %s.", version)}
 	case major > minNodeMajor || (major == minNodeMajor && minor >= minNodeMinor):
-		return Check{ID: id, Status: StatusWarn, Title: "Node.js",
-			Message: fmt.Sprintf("Version %s. Rise-X Apps works best on Node 20 or newer.", version)}
+		return withNodeFix(f, Check{ID: id, Status: StatusWarn, Title: "Node.js",
+			Message: fmt.Sprintf("Version %s. Rise-X Apps works best on Node 20 or newer.", version)}, "Update Node.js")
 	default:
-		return Check{ID: id, Status: StatusWarn, Title: "Node.js",
-			Message: fmt.Sprintf(nodeTooOldMessage, version)}
+		return withNodeFix(f, Check{ID: id, Status: StatusWarn, Title: "Node.js",
+			Message: fmt.Sprintf(nodeTooOldMessage, version)}, "Update Node.js")
 	}
+}
+
+// withNodeFix adds the install button, on the platforms that have an
+// installer to offer.
+func withNodeFix(f Facts, c Check, label string) Check {
+	if !f.CanInstallNode {
+		return c
+	}
+	c.Fix, c.FixLabel, c.FixTitle = "node.install", label, nodeFixTitle
+	return c
 }
 
 func parseNodeVersion(v string) (major, minor int) {

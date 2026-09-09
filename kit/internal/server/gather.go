@@ -16,6 +16,7 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/claudecli"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/doctor"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/nodeinstall"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/npmrc"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/semver"
@@ -116,6 +117,7 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 		return nodeProbe{version: v, found: ok}, !ok
 	})
 	facts.NodeFound, facts.NodeVersion = node.found, node.version
+	facts.CanInstallNode = nodeinstall.CanInstall(s.nodeInstallEnv())
 
 	facts.NpmrcOffendingLines = s.npmrcCache.getOrFail(func() ([]string, bool) {
 		lines, err := npmrc.Analyze(s.npmrcPath)

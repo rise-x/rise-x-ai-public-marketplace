@@ -31,6 +31,7 @@ const (
 	marketplaceJobTimeout = 3 * time.Minute  // a shallow clone or a git fetch
 	mcpLoginJobTimeout    = 2 * time.Minute  // an interactive OAuth round trip
 	mcpFixJobTimeout      = 2 * time.Minute  // a remove plus an add per connection
+	nodeInstallJobTimeout = 10 * time.Minute // nvm or winget, plus the download
 )
 
 // maxActionBody caps an action's JSON body; every one of them is a couple of
@@ -243,6 +244,10 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			}
 			return code, err
 		})
+	case "node.install":
+		// Like cli.install, this one puts a missing tool on the machine, so
+		// it must run without a claude CLI.
+		s.handleNodeInstall(w, ctx, name)
 	case "mcp.login":
 		s.handleMcpLogin(w, ctx, name, body)
 	case "mcp.fix":
