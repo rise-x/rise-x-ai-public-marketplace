@@ -85,6 +85,27 @@
     pointer-events: none;
   }
 
+  /* Activity strip toggle — ds-btn without the :active press scale, which
+     reads as a strange "pressed button" effect on a full-width bar. */
+  .kit-activity-toggle {
+    cursor: pointer;
+    user-select: none;
+    outline: none;
+    transition:
+      background-color 0.15s var(--ease),
+      border-color 0.15s var(--ease),
+      color 0.15s var(--ease);
+  }
+  .kit-activity-toggle:focus-visible {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring-control) 35%, transparent);
+  }
+  .kit-activity-toggle > svg {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+  }
+
   /* Badge — base lifted from data-slot="badge" */
   .ds-badge {
     display: inline-flex;
