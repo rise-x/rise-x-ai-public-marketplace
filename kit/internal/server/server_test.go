@@ -519,17 +519,23 @@ func waitForJob(t *testing.T, baseURL, token, id string) string {
 	return ""
 }
 
-// withInstallLocation puts a real path into a JSON fixture. A Windows temp
-// path is full of backslashes, and dropping those into a JSON string literal
-// raw produces invalid escapes ("invalid character 'U' in string escape
-// code"), so the whole marketplace list then fails to parse and every test
-// that depends on it fails somewhere far from the cause.
-func withInstallLocation(t *testing.T, fixture, path string) string {
+// jsonSafe escapes a real filesystem path for embedding inside a JSON string
+// literal in a fixture. A Windows temp path is full of backslashes, and
+// dropping those in raw produces invalid escapes ("invalid character 'U' in
+// string escape code"), so the whole document fails to parse and every test
+// that reads it fails somewhere far from the cause.
+func jsonSafe(t *testing.T, path string) string {
 	t.Helper()
 	quoted, err := json.Marshal(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Marshal quotes the string; the fixture already has the quotes.
-	return strings.ReplaceAll(fixture, "INSTALL_LOCATION", string(quoted[1:len(quoted)-1]))
+	// Marshal adds the quotes; the fixture already has its own.
+	return string(quoted[1 : len(quoted)-1])
+}
+
+// withInstallLocation puts a real clone path into a marketplace-list fixture.
+func withInstallLocation(t *testing.T, fixture, path string) string {
+	t.Helper()
+	return strings.ReplaceAll(fixture, "INSTALL_LOCATION", jsonSafe(t, path))
 }

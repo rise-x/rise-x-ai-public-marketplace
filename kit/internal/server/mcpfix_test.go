@@ -34,7 +34,7 @@ func staleServer(t *testing.T) (baseURL, token, projectPath string, fake *runner
 	t.Helper()
 	projectPath = t.TempDir()
 	path := filepath.Join(t.TempDir(), ".claude.json")
-	body := []byte(strings.ReplaceAll(staleClaudeJSON, "PROJECT_PATH", projectPath))
+	body := []byte(strings.ReplaceAll(staleClaudeJSON, "PROJECT_PATH", jsonSafe(t, projectPath)))
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestHandler_McpFix_All(t *testing.T) {
 func TestHandler_McpFix_All_SkipsMissingProjectDir(t *testing.T) {
 	projectPath := filepath.Join(t.TempDir(), "deleted-project")
 	path := filepath.Join(t.TempDir(), ".claude.json")
-	body := []byte(strings.ReplaceAll(staleClaudeJSON, "PROJECT_PATH", projectPath))
+	body := []byte(strings.ReplaceAll(staleClaudeJSON, "PROJECT_PATH", jsonSafe(t, projectPath)))
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
