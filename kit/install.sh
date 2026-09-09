@@ -112,6 +112,10 @@ fi
 dest="$dest_dir/rise-x-kit"
 cp "$tmp/rise-x-kit" "$dest"
 chmod +x "$dest"
+# Only defensible while the builds are unsigned: this is what lets an ad-hoc
+# signed binary run at all. Once APPLE_CERT_P12 exists and kit-release.yml
+# notarises, this line discards the Gatekeeper check that pays for, and a
+# binary that failed it runs anyway. Remove it with the signing, not after.
 xattr -d com.apple.quarantine "$dest" 2>/dev/null || true
 
 # Teach Claude Code how to open the app, so "open Rise-X Kit" works in a

@@ -87,6 +87,10 @@ try {
     Move-Item -Path $extractDir -Destination $installDir
 
     $exePath = Join-Path $installDir 'rise-x-kit.exe'
+    # Strips the mark of the web, which is the only reason an unsigned exe
+    # runs past SmartScreen. Once Azure Trusted Signing is wired up
+    # (kit-release.yml still signs with a no-op), this hides a failed
+    # signature instead of an absent one. Remove it with the signing.
     Unblock-File -Path $exePath
 
     # [Environment]::SetEnvironmentVariable always writes REG_SZ, which would
