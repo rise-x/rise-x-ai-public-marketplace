@@ -198,7 +198,7 @@ func mirrorServer(t *testing.T) (baseURL, token string, fake *runnertest.Fake) {
 	t.Helper()
 	fake = newFakeCLI(mirrorPluginList)
 	fake.Set(fakeCLIPath, []string{"plugin", "marketplace", "list", "--json"},
-		runnertest.Result{Stdout: strings.ReplaceAll(mirrorMarketplaceList, "INSTALL_LOCATION", t.TempDir())})
+		runnertest.Result{Stdout: withInstallLocation(t, mirrorMarketplaceList, t.TempDir())})
 	fake.Set(fakeCLIPath, []string{"plugin", "update", "rise-x-mcp@rise-x"},
 		runnertest.Result{Stdout: "updated\n"})
 	baseURL, token = newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath),
@@ -258,7 +258,7 @@ func TestHandler_AutoUpdateSet_OtherMarketplace(t *testing.T) {
 	claudeDir := t.TempDir()
 	fake := newFakeCLI(mirrorPluginList)
 	fake.Set(fakeCLIPath, []string{"plugin", "marketplace", "list", "--json"},
-		runnertest.Result{Stdout: strings.ReplaceAll(mirrorMarketplaceList, "INSTALL_LOCATION", t.TempDir())})
+		runnertest.Result{Stdout: withInstallLocation(t, mirrorMarketplaceList, t.TempDir())})
 	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath),
 		Catalog: versionCatalog(t, "1.3.4"), ClaudeDir: claudeDir})
 

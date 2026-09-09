@@ -656,12 +656,16 @@ func TestSetAutoUpdate_BackupRefusesAPlantedSymlink(t *testing.T) {
 	if got, _ := os.ReadFile(backup); !strings.Contains(string(got), "apiKeyHelper") {
 		t.Fatalf("backup = %q, want the original settings", got)
 	}
-	fi, err := os.Stat(backup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := fi.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("backup mode = %v, want the source's 0600", perm)
+	// The refusal itself is what this test is for, and it holds on both
+	// platforms; only the mode assertion is unix-only.
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(backup)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("backup mode = %v, want the source's 0600", perm)
+		}
 	}
 }
 

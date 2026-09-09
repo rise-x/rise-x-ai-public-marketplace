@@ -188,7 +188,7 @@ func TestHandler_PluginInstall_EmptyAvailableUsesLocalClone(t *testing.T) {
 
 	fake := newFakeCLI(`{"installed": [], "available": []}`)
 	fake.Set(fakeCLIPath, []string{"plugin", "marketplace", "list", "--json"}, runnertest.Result{
-		Stdout: strings.ReplaceAll(marketplaceListFixture, "INSTALL_LOCATION", installLocation)})
+		Stdout: withInstallLocation(t, marketplaceListFixture, installLocation)})
 	fake.Set(fakeCLIPath, []string{"plugin", "install", "rise-x-newthing@rise-x-public"},
 		runnertest.Result{Stdout: "installed\n"})
 	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath),

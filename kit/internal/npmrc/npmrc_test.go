@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -333,6 +334,7 @@ func TestClean_RegistryValueEdges(t *testing.T) {
 // The backup holds the pre-fix file, so it must not be created more readable
 // than the file it copies.
 func TestClean_PreservesFileMode(t *testing.T) {
+	requirePOSIXModes(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".npmrc")
 	body := "registry=https://registry.npmjs.org/\n" +
@@ -453,5 +455,15 @@ func TestClean_LateFlushFailureIsNotAFailedWrite(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "registry.npmjs.org") {
 		t.Fatalf(".npmrc = %q, want the rewrite the rename installed", got)
+	}
+}
+
+// requirePOSIXModes skips a test that asserts exact permission bits. Windows
+// models only the read-only flag, so os.FileMode there is 0666 or 0444 and
+// these assertions cannot hold; the behaviour they pin is a unix one.
+func requirePOSIXModes(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not modelled on Windows")
 	}
 }

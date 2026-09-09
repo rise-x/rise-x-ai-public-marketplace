@@ -518,3 +518,18 @@ func waitForJob(t *testing.T, baseURL, token, id string) string {
 	t.Fatal("job never finished")
 	return ""
 }
+
+// withInstallLocation puts a real path into a JSON fixture. A Windows temp
+// path is full of backslashes, and dropping those into a JSON string literal
+// raw produces invalid escapes ("invalid character 'U' in string escape
+// code"), so the whole marketplace list then fails to parse and every test
+// that depends on it fails somewhere far from the cause.
+func withInstallLocation(t *testing.T, fixture, path string) string {
+	t.Helper()
+	quoted, err := json.Marshal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Marshal quotes the string; the fixture already has the quotes.
+	return strings.ReplaceAll(fixture, "INSTALL_LOCATION", string(quoted[1:len(quoted)-1]))
+}

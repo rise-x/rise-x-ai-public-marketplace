@@ -69,7 +69,7 @@ func serverWithClone(t *testing.T, installLocation string, cat *catalog.Catalog)
 	t.Helper()
 	fake := newFakeCLI(installedPluginList)
 	fake.Set(fakeCLIPath, []string{"plugin", "marketplace", "list", "--json"}, runnertest.Result{
-		Stdout: strings.ReplaceAll(marketplaceListFixture, "INSTALL_LOCATION", installLocation)})
+		Stdout: withInstallLocation(t, marketplaceListFixture, installLocation)})
 	return newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath), Catalog: cat})
 }
 
@@ -233,7 +233,7 @@ func TestHandler_ConcurrentOverviewAndDoctor_GatherOnce(t *testing.T) {
 
 	fake := newFakeCLI(installedPluginList)
 	fake.Set(fakeCLIPath, []string{"plugin", "marketplace", "list", "--json"}, runnertest.Result{
-		Stdout: strings.ReplaceAll(marketplaceListFixture, "INSTALL_LOCATION", marketplaceClone(t, true))})
+		Stdout: withInstallLocation(t, marketplaceListFixture, marketplaceClone(t, true))})
 	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath), Catalog: cat})
 
 	var wg sync.WaitGroup
@@ -409,7 +409,7 @@ func TestHandler_PluginInstall_DoesNotWaitOnGather(t *testing.T) {
 
 	fake := newFakeCLI(pluginListFixture)
 	fake.Set(fakeCLIPath, []string{"plugin", "marketplace", "list", "--json"},
-		runnertest.Result{Stdout: strings.ReplaceAll(marketplaceListFixture, "INSTALL_LOCATION", clone)})
+		runnertest.Result{Stdout: withInstallLocation(t, marketplaceListFixture, clone)})
 	fake.Set(fakeCLIPath, []string{"plugin", "install", "rise-x-apps@rise-x-public"},
 		runnertest.Result{Stdout: "installed\n"})
 	baseURL, token := newServer(t, Config{

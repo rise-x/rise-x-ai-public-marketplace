@@ -158,10 +158,10 @@ const maxReadBytes = 1 << 20
 
 // ReadNoFollow reads path, refusing to follow a symlink at its last element.
 // It is for files trusted only because of where they sit: following a link
-// planted there would report some unrelated file's bytes instead. O_NOFOLLOW
-// has no Windows equivalent, so the refusal is unix-only.
+// planted there would report some unrelated file's bytes instead. Both
+// platforms refuse; see openNoFollow for how each does it.
 func ReadNoFollow(path string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|oNoFollow, 0)
+	f, err := openNoFollow(path)
 	if err != nil {
 		return nil, err
 	}

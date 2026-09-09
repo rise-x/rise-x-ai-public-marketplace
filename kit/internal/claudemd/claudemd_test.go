@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -118,6 +119,7 @@ func TestApply_ReplacesAnOldBlockInPlace(t *testing.T) {
 }
 
 func TestApply_KeepsFileMode(t *testing.T) {
+	requirePOSIXModes(t)
 	dir := t.TempDir()
 	path := write(t, dir, "# mine\n", 0o600)
 	if _, err := Apply(dir); err != nil {
@@ -202,6 +204,7 @@ func TestApply_MalformedMarkers_LeaveTheFileAlone(t *testing.T) {
 // The backup must not be writable through a symlink somebody planted at the
 // predictable name, and must not silently replace an earlier one.
 func TestApply_BackupIsSafe(t *testing.T) {
+	requirePOSIXModes(t)
 	dir := t.TempDir()
 	write(t, dir, "# mine\n", 0o600)
 	victim := filepath.Join(dir, "VICTIM.txt")
@@ -278,5 +281,15 @@ func TestWriteError_NamesTheBackup(t *testing.T) {
 	bare := writeError("/home/p/.claude/CLAUDE.md", "", os.ErrPermission)
 	if strings.Contains(bare.Error(), "backed up") {
 		t.Fatalf("error = %q, want no backup clause when there is no backup", bare)
+	}
+}
+
+// requirePOSIXModes skips a test that asserts exact permission bits. Windows
+// models only the read-only flag, so os.FileMode there is 0666 or 0444 and
+// these assertions cannot hold; the behaviour they pin is a unix one.
+func requirePOSIXModes(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not modelled on Windows")
 	}
 }

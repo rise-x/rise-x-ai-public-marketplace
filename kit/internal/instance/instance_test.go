@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,6 +110,7 @@ func TestRunning_UnreadableRecord(t *testing.T) {
 // The record holds no token: reopening needs the address, and the page is
 // served the token by the server itself.
 func TestRecord_KeepsNoSecretAndIsOwnerOnly(t *testing.T) {
+	requirePOSIXModes(t)
 	cacheHome(t)
 	if err := Record(12345); err != nil {
 		t.Fatal(err)
@@ -322,4 +324,14 @@ func TestLock_NeverTwoHoldersUnderChurn(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// requirePOSIXModes skips a test that asserts exact permission bits. Windows
+// models only the read-only flag, so os.FileMode there is 0666 or 0444 and
+// these assertions cannot hold; the behaviour they pin is a unix one.
+func requirePOSIXModes(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not modelled on Windows")
+	}
 }
