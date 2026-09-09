@@ -97,6 +97,22 @@ func (Exec) StreamDir(ctx context.Context, dir, name string, args []string, onLi
 		return -1, err
 	}
 
+	// exec.CommandContext only invokes cmd.Cancel if ctx.Done() wins a race
+	// against cmd.Process.Wait() returning. A wrapper like `claude` can exit
+	// on its own well before ctx is done, leaving a grandchild holding
+	// stdout - in that case the stdlib never calls Cancel and we'd sit out
+	// the full WaitDelay before the group gets killed. Watch ctx ourselves
+	// so the kill is unconditional and immediate.
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = killTree(cmd)
+		case <-watchDone:
+		}
+	}()
+
 	err := cmd.Wait()
 	if errors.Is(err, exec.ErrWaitDelay) {
 		// Only here is the process reaped while something still holds its
