@@ -166,13 +166,14 @@ warning. Canonical names you'll use most: `input-text`, `input-select`,
 | Deploy a federated-app bundle, release a new app version, list/update/delete apps in the registry, or inspect an app's dependencies (the flows, asset types, and agents it uses) (`request_bundle_upload` → PUT zip → `deploy_app`; `list_apps`, `get_app`, `update_app`, `delete_app`) | `references/managing-apps.md` |
 | Configure, import, inspect, or test an integration (external API + endpoints called from `JsonEndPoint` activities) | `references/integrations.md` for read-only inspection (domain shape, lifecycle, pitfalls). For any *mutating* integration call (`update_integration`, `update_integration_endpoint`, `import_integrations`, `delete_integration`, `delete_integration_endpoint`, `test_integration_endpoint`, `test_integration_endpoint_in_flow`), load `references/integration-authoring.md` BEFORE calling the tool — it enforces the slot-filling + secrets protocol. Vendor/auth worked recipes (API key, Bearer, OAuth2 client credentials, webhooks, Postman imports) live in `references/integration-patterns.md`. |
 | Create, list, update, or delete AI agent configurations (name, system prompt, model, MCP servers, hosted OpenAI tools) | `references/managing-agents.md` |
+| Create, upload files to, check, renew, rename, rebuild, or delete a vector store; wire a corpus into `file_search` or an agent run (vector store, file search, upload documents for an agent, corpus) | `references/managing-vector-stores.md` |
 | Look up a tool's exact name, signature, or per-tool caveats | `references/tool-inventory.md` |
 | Diagnose an error, a warning, or an edit that didn't take effect | `references/troubleshooting.md` |
 | Check the numbered pitfall list before a first write, or after a surprising result | `references/common-pitfalls.md` |
 
 ## Common Pitfalls
 
-57 traps with the fix for each, in 64 numbered slots (7 are retired stubs kept so
+59 traps with the fix for each, in 66 numbered slots (7 are retired stubs kept so
 the numbering stays stable — other references cite these entries by number) —
 draft/publish lifecycle, ID confusion, component and dashboard authoring,
 search/filter semantics, exports, card layouts:
@@ -193,8 +194,8 @@ doesn't show up in the UI.
 
 ## Tool Inventory
 
-All 90 tools grouped by category (Session, Flow, Flow Structure, Flow Config,
+All 96 tools grouped by category (Session, Flow, Flow Structure, Flow Config,
 Columns, Layout, Component, Schema, Compare, Work, Search, Asset, Apps,
-Dashboard, Integration, Agent), with signatures and per-tool caveats:
+Dashboard, Integration, Agent, Vector Store), with signatures and per-tool caveats:
 `references/tool-inventory.md`. Load it when you need an exact tool name or
 argument shape.
