@@ -53,6 +53,25 @@ func (c *probeCache[T]) get(probe func() T) T {
 // getOrFail memoizes a probe that can fail; failed is the probe's own verdict
 // on whether its answer is usable.
 func (c *probeCache[T]) getOrFail(probe func() (val T, failed bool)) T {
+	return c.memo(func() (T, bool, bool) {
+		val, failed := probe()
+		return val, failed, true
+	})
+}
+
+// getOrForget is getOrFail for a probe that can be interrupted: an answer
+// whose error is context.Canceled is returned but never remembered, so a
+// probe that was cut short cannot stand in for the real one for probeFailTTL.
+func (c *probeCache[T]) getOrForget(probe func() (val T, err error)) T {
+	return c.memo(func() (T, bool, bool) {
+		val, err := probe()
+		return val, err != nil, !errors.Is(err, context.Canceled)
+	})
+}
+
+// memo is the shared body: keep says whether the answer may be remembered at
+// all, failed whether it may only be remembered for probeFailTTL.
+func (c *probeCache[T]) memo(probe func() (val T, failed, keep bool)) T {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ttl := probeTTL
@@ -62,7 +81,11 @@ func (c *probeCache[T]) getOrFail(probe func() (val T, failed bool)) T {
 	if c.set && time.Since(c.at) < ttl {
 		return c.val
 	}
-	c.val, c.failed = probe()
+	val, failed, keep := probe()
+	if !keep {
+		return val
+	}
+	c.val, c.failed = val, failed
 	c.at, c.set = time.Now(), true
 	return c.val
 }
@@ -144,6 +167,9 @@ func (s *Server) gatherClaude(ctx context.Context, client *claudecli.Client, set
 	var mp *claudecli.Marketplace
 	if err == nil {
 		mp = findMarketplace(marketplaces, claudecli.MarketplaceName)
+	} else {
+		facts.MarketplaceListError = cliCheckError(err)
+		overview.Marketplace.CheckError = facts.MarketplaceListError
 	}
 	facts.MarketplaceRegistered = mp != nil
 	overview.Marketplace.Registered = mp != nil
@@ -248,6 +274,12 @@ func (s *Server) gatherPlugins(ctx context.Context, installLocation string, plRe
 			}
 		}
 
+		if plErr != nil && !pi.Installed {
+			// The list that would have said so could not be read, and no
+			// synced manifest answered instead: not installed is a guess.
+			pi.CheckError = cliCheckError(plErr)
+		}
+
 		localVersion, localDescription, localErr := s.catalog.LocalVersion(installLocation, name)
 
 		v, err := s.catalog.RemoteVersion(ctx, name)
@@ -331,6 +363,19 @@ func unreachable(err error) bool {
 		errors.As(err, &netErr)
 }
 
+// cliCheckError turns a failed read-only claude command into the cause the
+// doctor and the page name. A deadline is the common one and says nothing
+// worth quoting, so it gets a sentence of its own.
+func cliCheckError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return "Claude Code did not answer in time"
+	}
+	return oneLine(err.Error())
+}
+
 // checkErrorReason turns a catalog failure into the short phrase the doctor
 // shows in parentheses.
 func checkErrorReason(err error) string {
@@ -406,9 +451,9 @@ func (s *Server) gatherHead(ctx context.Context, mp *claudecli.Marketplace, over
 func (s *Server) gatherMcp(ctx context.Context, client *claudecli.Client, plResult claudecli.PluginListResult, plErr error, overview *OverviewResponse) {
 	info := &McpInfo{Verdict: string(mcp.VerdictUnknown), Stale: s.staleMcp()}
 
-	res := s.mcpCache.getOrFail(func() (mcpListResult, bool) {
+	res := s.mcpCache.getOrForget(func() (mcpListResult, error) {
 		raw, err := client.McpList(ctx)
-		return mcpListResult{raw: raw, err: err}, err != nil
+		return mcpListResult{raw: raw, err: err}, err
 	})
 	if res.err == nil {
 		info.Servers = mcp.RiseXServers(mcp.Parse(res.raw))

@@ -71,6 +71,10 @@ type PluginFact struct {
 	// PublicCheckError is why the public version could not be read when the
 	// repo did answer, e.g. "HTTP 404".
 	PublicCheckError string `json:"publicCheckError,omitempty"`
+	// CheckError is why the CLI's own plugin list could not be read, when no
+	// other source said whether this plugin is installed. Installed is
+	// meaningless while it is set.
+	CheckError string `json:"checkError,omitempty"`
 	// UpdateAvailable is LocalVersion behind PublicVersion. The server fills
 	// it so the page never compares versions itself.
 	UpdateAvailable bool `json:"updateAvailable,omitempty"`
@@ -85,6 +89,12 @@ type Facts struct {
 	CLIVersion string
 
 	MarketplaceRegistered bool
+	// MarketplaceListError is why `claude plugin marketplace list` could not
+	// be read, collapsed to one line. While it is set, what that command
+	// would have answered is unknown rather than absent, so
+	// MarketplaceRegistered carries no information. The same failure of
+	// `claude plugin list --available` is per-plugin, in PluginFact.CheckError.
+	MarketplaceListError string
 
 	AutoUpdatePresent bool
 	AutoUpdateEnabled bool
@@ -163,10 +173,21 @@ func cliCheck(f Facts) Check {
 		Message: "Not found. Install it to manage skills.", Fix: "cli.install"}
 }
 
+// notChecked is the row for a check a claude command could not answer.
+// Unknown is not the same as missing, so it carries no Fix: there is nothing
+// yet to fix.
+func notChecked(id, title, cause string) Check {
+	return Check{ID: id, Status: StatusSkip, Title: title,
+		Message: fmt.Sprintf("Could not check right now: %s.", strings.TrimRight(cause, "."))}
+}
+
 func marketplaceRegisteredCheck(f Facts) Check {
 	if allFromOrg(f.Plugins) {
 		return Check{ID: "marketplace.registered", Status: StatusOK, Title: "Rise-X marketplace",
 			Message: "Skills come from your organisation."}
+	}
+	if f.MarketplaceListError != "" {
+		return notChecked("marketplace.registered", "Rise-X marketplace", f.MarketplaceListError)
 	}
 	if f.MarketplaceRegistered {
 		return Check{ID: "marketplace.registered", Status: StatusOK, Title: "Rise-X marketplace",
@@ -184,6 +205,9 @@ func autoUpdateCheck(f Facts) Check {
 	if allFromOrg(f.Plugins) {
 		return Check{ID: id, Status: StatusOK, Title: "Automatic updates",
 			Message: "Your organisation delivers skill updates automatically."}
+	}
+	if f.MarketplaceListError != "" {
+		return notChecked(id, "Automatic updates", f.MarketplaceListError)
 	}
 	if !f.MarketplaceRegistered {
 		return Check{ID: id, Status: StatusSkip, Title: "Automatic updates", Message: waitingForMarketplace}
@@ -229,6 +253,11 @@ const pluginTitle = "Skill versions"
 
 func pluginCheck(p PluginFact) Check {
 	id := "plugin." + p.Name
+	// Set only when nothing else said whether this skill is installed, so an
+	// organisation-synced copy still reports below on its own.
+	if p.CheckError != "" {
+		return notChecked(id, pluginTitle, p.CheckError)
+	}
 	if !p.Installed {
 		return Check{ID: id, Status: StatusFail, Title: pluginTitle, Message: "Not installed.",
 			Fix: "plugin.install", FixArgs: map[string]any{"name": p.Name}}
@@ -318,6 +347,9 @@ func mcpStaleCheck(f Facts) Check {
 
 func headCheck(f Facts) Check {
 	const id = "marketplace.head"
+	if f.MarketplaceListError != "" {
+		return notChecked(id, "Skill catalog", f.MarketplaceListError)
+	}
 	if !f.MarketplaceRegistered {
 		return Check{ID: id, Status: StatusSkip, Title: "Skill catalog", Message: waitingForMarketplace}
 	}

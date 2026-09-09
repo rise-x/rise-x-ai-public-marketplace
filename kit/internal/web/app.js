@@ -12,10 +12,14 @@
  *       autoUpdate?: bool,   // absent = key not set in settings.json
  *       autoUpdateMarketplace?: string, // absent = rise-x-public
  *       headStale?: bool,   // absent = GitHub unreachable, skipped
- *       settingsError?: bool }, // true = settings.json is not valid JSON
+ *       settingsError?: bool, // true = settings.json is not valid JSON
+ *       checkError?: string }, // set = the marketplace list could not be
+ *                              // read, so registered says nothing
  *     plugins?: [{ name, description?, installed, enabled, localVersion?,
  *       publicVersion?, versionUnknown?, offline?, publicCheckError?,
  *       updateAvailable?,
+ *       // set = the plugin list could not be read, so installed says nothing
+ *       checkError?,
  *       // absent = not installed; "desktop" = synced by Claude Desktop, so
  *       // the CLI cannot install, update or remove that copy
  *       installSource?: "public"|"marketplace"|"desktop"|"organisation",
@@ -378,6 +382,16 @@ const SUMMARY_TONES = {
   error: ["border-error/25 bg-error/8", "alert"],
 };
 
+/** cliCheckFailed reports whether a claude command the checks depend on could
+ * not be read. Those rows are skips, so nothing in the counts below would
+ * otherwise say the answer is unknown. */
+function cliCheckFailed() {
+  return (
+    !!(overview.marketplace || {}).checkError ||
+    (overview.plugins || []).some((plugin) => plugin.checkError)
+  );
+}
+
 /** checkLink turns one doctor row's title into a jump to that row. */
 const checkLink = (check) =>
   `<a href="#check-${esc(check.id)}" data-act="jump" data-check="${esc(check.id)}" class="text-foreground underline decoration-border-strong underline-offset-2 hover:decoration-foreground">${esc(check.title)}</a>`;
@@ -416,6 +430,14 @@ function summaryState() {
       glyph: dot("bg-error mt-1.5", "Not working"),
       title: "Rise-X is not ready yet",
       body: [`Start with: ${esc(fails[0].title)}.`, links],
+    };
+  }
+  if (cliCheckFailed()) {
+    return {
+      tone: "warning",
+      glyph: dot("bg-warning mt-1.5", "Needs attention"),
+      title: "Some checks could not run",
+      body: ["Try Run again.", links].filter(Boolean),
     };
   }
   if (warns.length) {
@@ -571,6 +593,16 @@ function skillStatus(plugin) {
     });
   const remove = skillBtn("Remove", "uninstall", "destructive");
 
+  // The list that says whether this skill is installed could not be read, so
+  // the row has nothing to offer: installing over an existing copy would
+  // leave two.
+  if (plugin.checkError) {
+    return {
+      badge: badge("default", "Not checked", { title: plugin.checkError }),
+      actions: "",
+    };
+  }
+
   if (!plugin.installed) {
     return {
       badge: badge("outline", "Not installed"),
@@ -702,6 +734,9 @@ function catalogStatus(marketplace) {
     variant: "outline",
   });
 
+  if (marketplace.checkError) {
+    return `<span class="inline-flex items-center gap-1.5" title="${esc(marketplace.checkError)}">${dot("bg-fill-3", "Not checked")} Kit could not check the catalog just now</span>`;
+  }
   if (!marketplace.registered) {
     return `<span class="inline-flex items-center gap-2">
       <span class="inline-flex items-center gap-1.5">${dot("bg-error", "Not set up")} The Rise-X catalog is not set up yet</span>

@@ -170,6 +170,11 @@ func (s *Server) cachedGather(ctx context.Context) (OverviewResponse, doctor.Fac
 	if err != nil {
 		return overview, facts, err
 	}
+	// A gather that was cut short saw only part of the machine, so caching it
+	// would serve those partial facts for gatherTTL.
+	if err := ctx.Err(); err != nil {
+		return overview, facts, err
+	}
 	s.gatherOv, s.gatherFacts, s.gatherAt, s.gatherOK = overview, facts, time.Now(), true
 	return overview, facts, nil
 }

@@ -127,7 +127,10 @@ func (s *Server) gatherFor(r *http.Request) (OverviewResponse, doctor.Facts, err
 	if r.URL.Query().Get("fresh") == "1" {
 		s.invalidateProbes()
 	}
-	return s.cachedGather(r.Context())
+	// Detached from the request: a browser reload mid-gather would otherwise
+	// kill the claude child it is waiting on and cache that as a real answer.
+	// Every command still carries its own timeout.
+	return s.cachedGather(context.WithoutCancel(r.Context()))
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +207,9 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	// Detached from the request for the same reason as gatherFor: an action's
+	// pre-flight probes write to the same caches.
+	ctx := context.WithoutCancel(r.Context())
 	switch name {
 	case "marketplace.add":
 		s.startJob(w, ctx, name, needsCLI, marketplaceJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
@@ -253,7 +258,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	case "mcp.fix":
 		s.handleMcpFix(w, ctx, name, body)
 	case "cli.rescan":
-		cli, _ := s.relocate(r.Context())
+		cli, _ := s.relocate(ctx)
 		s.nodeCache.invalidate()
 		s.npmrcCache.invalidate()
 		s.invalidateClaudeProbes()

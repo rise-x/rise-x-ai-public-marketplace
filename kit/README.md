@@ -202,10 +202,11 @@ and notarization activate once the Apple signing secrets are set on the repo.
 The Windows binary is unsigned until Azure Trusted Signing is wired up.
 
 **Tag protection (one-time GitHub setting):**
-`.github/rulesets/kit-tags.json` restricts who can create a `kit-v*` tag to
-GitHub Actions, so `kit-release.yml` stays the only path to a new tag. Import
-it once, under **Settings** > **Rules** > **Rulesets** > **New ruleset** >
-**New tag ruleset**. `.github/rulesets/protect-release-kit.json` is the
+`.github/rulesets/kit-tags.json` restricts creating, updating, and deleting
+`kit-v*` tags, and ships in **Evaluate** with an empty bypass list. Import it,
+add the bypass in the UI (**GitHub Actions** if offered, otherwise the
+`rise-x-marketplace-approvers` team), then switch it to **Active** after the
+first release shows the tag was created. `.github/rulesets/protect-release-kit.json` is the
 matching branch ruleset for `release-kit/*`: pull request, code-owner
 approval, a passing `kit-ci.yml`, no force-push. Whether the enterprise
 policy lets GitHub Actions create tags and releases at all is unconfirmed. If

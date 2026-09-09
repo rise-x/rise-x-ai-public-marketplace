@@ -200,8 +200,12 @@ raise `kit/VERSION`.
 
 **GitHub settings to import once**, from `.github/rulesets/`:
 `protect-release-kit.json` (pull request, code-owner approval, a passing
-`kit-ci.yml`, no force-push) on `release-kit/*`, and `kit-tags.json` (only
-GitHub Actions can create a `kit-v*` tag). Do not make `kit-ci.yml` a
+`kit-ci.yml`, no force-push) on `release-kit/*`, and `kit-tags.json`, which
+restricts creating, updating, and deleting `kit-v*` tags and ships in
+**Evaluate** with an empty bypass list. Import it, add the bypass in the UI
+(**GitHub Actions** if offered, otherwise the `rise-x-marketplace-approvers`
+team), then switch it to **Active** after the first release shows the tag was
+created. Do not make `kit-ci.yml` a
 required check on `main`: it runs only when a PR touches `kit/**`, and a
 required check that never reports leaves every plugin release PR pending.
 The version bump is enforced by `kit-ci.yml` running on the PR itself.

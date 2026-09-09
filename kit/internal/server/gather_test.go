@@ -732,3 +732,210 @@ func TestGather_NoCLI_ReportsSettingsError(t *testing.T) {
 		t.Fatalf("marketplace = %+v, want registered false with no CLI", got.Marketplace)
 	}
 }
+
+// notCheckedPrefix is what every row a claude command could not answer opens
+// with; the doctor package owns the rest of the sentence.
+const notCheckedPrefix = "Could not check right now:"
+
+// An older CLI rejects --available with exit 1, and a wedged one hits the read
+// timeout. Neither says the skills are missing, so no row may read "Not
+// installed" or offer to install one on top of a copy that might be there.
+func TestGather_PluginListUnreadable_SkillRowsAreNotChecked(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		res  runnertest.Result
+	}{
+		{"exit 1", runnertest.Result{ExitCode: 1, Stderr: "error: unknown option '--available'"}},
+		{"deadline", runnertest.Result{Err: context.DeadlineExceeded}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeCLI(installedPluginList)
+			fake.Set(fakeCLIPath, []string{"plugin", "list", "--json", "--available"}, tc.res)
+			baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
+
+			var ov OverviewResponse
+			getJSON(t, baseURL+"/api/overview", token, &ov)
+			if len(ov.Plugins) == 0 {
+				t.Fatal("no skill rows at all")
+			}
+			for _, p := range ov.Plugins {
+				if p.CheckError == "" {
+					t.Errorf("%s: checkError is empty, so the page cannot tell unknown from missing", p.Name)
+				}
+				if p.Installed {
+					t.Errorf("%s: reported installed off a list that could not be read", p.Name)
+				}
+			}
+
+			var got DoctorResponse
+			getJSON(t, baseURL+"/api/doctor", token, &got)
+			for _, c := range got.Checks {
+				// The banner reads its tone off the fail count, so an
+				// unreadable list must leave no failure behind.
+				if c.Status == doctor.StatusFail {
+					t.Errorf("%s failed on an unreadable list: %s", c.ID, c.Message)
+				}
+				if !strings.HasPrefix(c.ID, "plugin.") {
+					continue
+				}
+				if c.Status != doctor.StatusSkip {
+					t.Errorf("%s status = %q, want skip: %s", c.ID, c.Status, c.Message)
+				}
+				if c.Fix != "" {
+					t.Errorf("%s offers fix %q for something it could not check", c.ID, c.Fix)
+				}
+				if !strings.HasPrefix(c.Message, notCheckedPrefix) {
+					t.Errorf("%s message = %q, want it to open with %q", c.ID, c.Message, notCheckedPrefix)
+				}
+			}
+		})
+	}
+}
+
+// The same for `claude plugin marketplace list`: a read that failed is not a
+// marketplace that is missing, and "Set it up" would register a second copy.
+func TestGather_MarketplaceListUnreadable_MarketplaceRowsAreNotChecked(t *testing.T) {
+	fake := newFakeCLI(installedPluginList)
+	fake.Set(fakeCLIPath, []string{"plugin", "marketplace", "list", "--json"},
+		runnertest.Result{Err: context.DeadlineExceeded})
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
+
+	var ov OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &ov)
+	if ov.Marketplace == nil || ov.Marketplace.CheckError == "" {
+		t.Fatalf("marketplace.checkError is empty: %+v", ov.Marketplace)
+	}
+
+	for _, id := range []string{"marketplace.registered", "marketplace.autoupdate", "marketplace.head"} {
+		c := doctorCheck(t, baseURL, token, id)
+		if c.Status != doctor.StatusSkip {
+			t.Errorf("%s status = %q, want skip: %s", c.ID, c.Status, c.Message)
+		}
+		if c.Fix != "" {
+			t.Errorf("%s offers fix %q for something it could not check", c.ID, c.Fix)
+		}
+		if !strings.HasPrefix(c.Message, notCheckedPrefix) {
+			t.Errorf("%s message = %q, want it to open with %q", c.ID, c.Message, notCheckedPrefix)
+		}
+	}
+}
+
+// An organisation-synced copy is proof on its own: the CLI's list never
+// mentions it, so its row stays ok even when that list could not be read.
+func TestGather_SyncedPlugin_StaysOKWhenPluginListFails(t *testing.T) {
+	fake := newFakeCLI(`{"installed": [], "available": []}`)
+	fake.Set(fakeCLIPath, []string{"plugin", "list", "--json", "--available"},
+		runnertest.Result{ExitCode: 1, Stderr: "error: unknown option '--available'"})
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath),
+		Catalog: versionCatalog(t, "1.3.1"), DesktopDataDir: syncedDesktopDir(t, "1.3.1")})
+
+	p := pluginInfo(t, baseURL, token, riseXMcpPlugin)
+	if p.CheckError != "" {
+		t.Errorf("checkError = %q, want empty: the synced manifest answered instead", p.CheckError)
+	}
+	if !p.Installed || p.InstallSource != doctor.SourceOrganisation {
+		t.Fatalf("plugin = %+v, want installed by the organisation", p)
+	}
+	if c := doctorCheck(t, baseURL, token, "plugin."+riseXMcpPlugin); c.Status != doctor.StatusOK {
+		t.Errorf("status = %q, want ok: %s", c.Status, c.Message)
+	}
+}
+
+// gateRunner delegates to a Fake but holds `claude mcp list` open until the
+// test releases it, so a request can be cancelled at a known point mid-gather.
+type gateRunner struct {
+	*runnertest.Fake
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	// killed records that a caller's context ended the wait, which is what a
+	// real runner would have killed the child process over.
+	killed atomic.Bool
+}
+
+func newGateRunner(fake *runnertest.Fake) *gateRunner {
+	return &gateRunner{Fake: fake, started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (g *gateRunner) Run(ctx context.Context, name string, args []string) (string, string, int, error) {
+	if strings.Join(args, " ") == "mcp list" {
+		g.once.Do(func() { close(g.started) })
+		select {
+		case <-g.release:
+		case <-ctx.Done():
+			g.killed.Store(true)
+			return "", "", -1, ctx.Err()
+		}
+	}
+	return g.Fake.Run(ctx, name, args)
+}
+
+// A browser reload mid-probe must not kill the claude child nor leave its
+// death cached: the next load has to see the real answer.
+func TestGather_RequestCancelledMidGather_DoesNotCacheAFailure(t *testing.T) {
+	r := newGateRunner(newFakeCLI(installedPluginList))
+	baseURL, token := newServer(t, Config{Runner: r, LocateEnv: locateAt(fakeCLIPath)})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/overview", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-RiseX-Token", token)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
+
+	select {
+	case <-r.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the gather never reached `claude mcp list`")
+	}
+	cancel()
+	<-done
+	close(r.release) // the detached gather is still waiting on it
+	if r.killed.Load() {
+		t.Error("the client disconnect ended `claude mcp list`")
+	}
+
+	var ov OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &ov)
+	if ov.Mcp == nil {
+		t.Fatal("no mcp block")
+	}
+	if ov.Mcp.Message != "" {
+		t.Errorf("mcp.message = %q, want empty: the cancelled probe was cached", ov.Mcp.Message)
+	}
+	if ov.Marketplace == nil || !ov.Marketplace.Registered {
+		t.Errorf("marketplace = %+v, want registered: partial facts were cached", ov.Marketplace)
+	}
+}
+
+// The failure of a probe that was cut short is not the machine's answer, so it
+// must not stand in for one until probeFailTTL runs out.
+func TestProbeCache_CancelledAnswerIsNotRemembered(t *testing.T) {
+	var c probeCache[int]
+	calls := 0
+	cancelled := func() (int, error) {
+		calls++
+		return calls, context.Canceled
+	}
+
+	if got := c.getOrForget(cancelled); got != 1 {
+		t.Fatalf("first answer = %d, want 1", got)
+	}
+	if got := c.getOrForget(cancelled); got != 2 {
+		t.Errorf("second answer = %d, want 2: the cancelled one was remembered", got)
+	}
+
+	if got := c.getOrForget(func() (int, error) { return 7, nil }); got != 7 {
+		t.Fatalf("real answer = %d, want 7", got)
+	}
+	if got := c.getOrForget(func() (int, error) { t.Fatal("re-probed a good answer"); return 0, nil }); got != 7 {
+		t.Errorf("cached answer = %d, want 7", got)
+	}
+}

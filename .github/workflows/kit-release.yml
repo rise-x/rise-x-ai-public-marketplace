@@ -20,8 +20,10 @@ name: kit-release
 #   gh release create "kit-v${v}" artifacts/* kit/install.sh kit/install.ps1 \
 #     --repo rise-x/rise-x-ai-public-marketplace --generate-notes
 # The kit-tags ruleset (.github/rulesets/kit-tags.json) restricts who may
-# create a kit-v* tag and bypasses the GitHub Actions app for this workflow, so
-# a hand-pushed tag needs a maintainer with bypass rights.
+# create a kit-v* tag. It ships in Evaluate with an empty bypass list: import
+# it, add the bypass in the UI (GitHub Actions if offered, otherwise the
+# marketplace approvers team), then switch it to Active after the first release
+# shows the tag was created.
 
 on:
   push:
