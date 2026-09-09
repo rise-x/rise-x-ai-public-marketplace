@@ -38,6 +38,17 @@ on:
 permissions:
   contents: read
 
+# One release at a time. Two runs - a workflow_dispatch retry alongside the
+# push that triggered it, or two merges touching kit/VERSION in quick
+# succession - would both pass the tag check below before either had created
+# the tag, and both would then try to publish it. Queued rather than
+# cancelled: a cancelled run can stop between creating the release and
+# uploading its assets, which is the state this workflow works hardest to
+# avoid.
+concurrency:
+  group: kit-release
+  cancel-in-progress: false
+
 env:
   GO_MODULE: github.com/rise-x/rise-x-ai-public-marketplace/kit
 
@@ -57,6 +68,8 @@ jobs:
 
       - name: Read kit/VERSION and check the tag is free
         id: read
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF_NAME" != "main" ]]; then
@@ -72,9 +85,19 @@ jobs:
           # A re-run, or a merge that set kit/VERSION back to a shipped value,
           # would otherwise rebuild everything and fail at publish time with
           # artifacts already uploaded. Refuse up front instead.
+          #
+          # Except when the tag is a draft's: the release is published as a
+          # draft and only flipped once every asset is up, so a tag with a
+          # draft behind it is a publish that died halfway. Refusing that is
+          # what made the documented "run by hand to retry" impossible, since
+          # the tag the failed run created blocked every re-run.
           if [[ -n "$(git ls-remote --tags origin "refs/tags/${tag}")" ]]; then
-            echo "::error::tag ${tag} already exists; raise kit/VERSION for a new kit release"
-            exit 1
+            state="$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+            if [[ "$state" != "true" ]]; then
+              echo "::error::tag ${tag} already exists; raise kit/VERSION for a new kit release"
+              exit 1
+            fi
+            echo "::notice::${tag} exists as a draft from an unfinished publish; this run will replace and finish it"
           fi
           echo "version=v${raw}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
@@ -250,13 +273,28 @@ jobs:
       # Asset names are unchanged from the tag-driven version of this workflow:
       # kit/install.sh and install.ps1 look for rise-x-kit_<version>_* and
       # checksums.txt by name.
-      - name: Publish release
+      #
+      # Published as a draft, then flipped below. The action creates the
+      # release - and with it the tag - before it uploads anything, so a
+      # publish that dies mid-upload would otherwise leave /releases/latest
+      # pointing at a release whose assets are missing, and install.sh 404s on
+      # every new partner install until someone intervenes by hand.
+      - name: Publish release (draft)
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
+          draft: true
           files: |
             artifacts/*
             kit/install.sh
             kit/install.ps1
+
+      # Every asset is up by here, so the release becomes the one install.sh
+      # and install.ps1 resolve through /releases/latest.
+      - name: Mark the release published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --latest

@@ -3,6 +3,7 @@
 package instance
 
 import (
+	"errors"
 	"os"
 	"syscall"
 	"unsafe"
@@ -30,3 +31,16 @@ func lockFile(f *os.File) error {
 	}
 	return nil
 }
+
+// heldByAnother separates "somebody else has it" from "this machine cannot be
+// locked". LockFileEx with LOCKFILE_FAIL_IMMEDIATELY reports contention as
+// ERROR_LOCK_VIOLATION; anything else is a filesystem or handle problem a
+// launch must not read as "wait for the other kit".
+func heldByAnother(err error) bool {
+	return errors.Is(err, syscall.Errno(errorLockViolation)) || errors.Is(err, syscall.Errno(errorSharingViolation))
+}
+
+const (
+	errorSharingViolation = 32
+	errorLockViolation    = 33
+)

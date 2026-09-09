@@ -3,12 +3,27 @@
 package fsutil
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
 )
+
+// ErrNotDurable reports that a write landed and only its durability barrier
+// did not: the rename succeeded, the directory entry could not be flushed.
+// The file on disk holds the new bytes, so a caller must not treat this as
+// "nothing happened" - undoing it, or dropping the backup that describes the
+// state before it, is the wrong move. Directory fsync is unsupported on some
+// network and FUSE mounts, which is where this shows up.
+var ErrNotDurable = errors.New("the write landed but the directory entry could not be flushed")
+
+// SyncDir flushes a directory entry. It is a variable rather than a plain
+// function so a test can make the flush fail: what happens after the rename
+// is the part worth pinning, and no filesystem available to the tests refuses
+// this on demand.
+var SyncDir = syncDirOS
 
 // BackupPath names the backup copy of path: "<path>.bak-<UTC timestamp>".
 // Its granularity is one second, so Backup, not this, is what guarantees a
@@ -110,7 +125,12 @@ func WriteAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := os.Rename(name, path); err != nil {
 		return err
 	}
-	return SyncDir(dir)
+	// Past the rename the change is installed. Anything that fails from here
+	// is a durability warning, not a failed write, and says so.
+	if err := SyncDir(dir); err != nil {
+		return fmt.Errorf("%w: %v", ErrNotDurable, err)
+	}
+	return nil
 }
 
 // Resolve follows a symlinked path to the real file it names, so a dotfiles

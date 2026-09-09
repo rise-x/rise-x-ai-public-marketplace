@@ -231,8 +231,17 @@ async function api(path, options) {
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
-    const err = new Error((body && body.error) || `HTTP ${res.status}`);
+    // The token is minted per process and injected into this page, so a 403
+    // means the kit restarted under a tab still holding the old one. Every
+    // later request would fail the same way, and the page never recovers on
+    // its own: say what happened instead of "forbidden".
+    const message =
+      res.status === 403
+        ? "Rise-X Kit restarted, so this page is out of date. Reload it to carry on."
+        : (body && body.error) || `HTTP ${res.status}`;
+    const err = new Error(message);
     err.status = res.status;
+    if (res.status === 403) staleToken = true;
     throw err;
   }
   return body;
@@ -243,6 +252,13 @@ async function api(path, options) {
 let overview = null;
 let checks = null;
 let doctorError = ""; // set when /api/doctor itself failed, for the summary banner
+// overviewError is the same for /api/overview. The summary is a verdict on
+// both answers, so it must not report "everything is set up" from the checks
+// alone while every card above it is still a skeleton.
+let overviewError = "";
+// staleToken latches once a 403 says this page outlived the kit that served
+// it. Nothing it offers can work again until it is reloaded.
+let staleToken = false;
 const jobs = []; // newest first
 let drawerOpen = false;
 
@@ -404,6 +420,22 @@ const checkLink = (check) =>
  * point on its own line.
  */
 function summaryState() {
+  if (staleToken) {
+    return {
+      tone: "error",
+      glyph: dot("bg-error mt-1.5", "Not working"),
+      title: "Rise-X Kit restarted",
+      body: ["Reload this page to carry on."],
+    };
+  }
+  if (overviewError) {
+    return {
+      tone: "error",
+      glyph: dot("bg-error mt-1.5", "Not working"),
+      title: "Could not read this machine.",
+      body: [esc(overviewError)],
+    };
+  }
   if (doctorError) {
     return {
       tone: "error",
@@ -1195,13 +1227,44 @@ function clearBusy() {
 /* load */
 
 async function loadOverview(fresh) {
-  overview = await api(fresh ? "/api/overview?fresh=1" : "/api/overview");
+  try {
+    overview = await api(fresh ? "/api/overview?fresh=1" : "/api/overview");
+    overviewError = "";
+  } catch (err) {
+    overviewError = err.message;
+    throw err;
+  }
+  adoptRunningJob();
   renderVersion();
   renderBanner();
   renderCli();
   renderSkills();
   renderConnection();
   syncRefreshControls();
+}
+
+/** adoptRunningJob picks up a job this page did not start. A reload during a
+ * ten-minute install leaves the drawer empty while the server still holds the
+ * slot, so every button 409s with "another change is still running" and
+ * nothing on screen is running. The server names it on the overview. */
+function adoptRunningJob() {
+  const running = overview && overview.runningJob;
+  if (!running || jobs.some((job) => job.id === running.id)) return;
+  const job = {
+    id: running.id,
+    action: running.action,
+    title: (JOB_TITLES[running.action] || (() => running.action))({}),
+    subtitle: "",
+    lines: [],
+    rendered: 0,
+    since: 0,
+    status: "running",
+    startedAt: new Date().toISOString(),
+  };
+  jobs.unshift(job);
+  drawerOpen = true;
+  renderJobs();
+  startPolling(job);
 }
 
 /** doctorLoading paints the "still working" state a fresh re-probe needs,
@@ -1331,10 +1394,17 @@ async function refresh(fresh, act) {
       await loadOverview(true);
       await loadDoctor();
     } else {
-      await Promise.all([loadOverview(), loadDoctor()]);
+      // allSettled, not all: Promise.all rejects on the first failure, which
+      // skipped the renderSummary below and left loadDoctor to paint the
+      // banner on its own - a green "everything is set up" over cards that
+      // never loaded.
+      const [ov, doc] = await Promise.allSettled([loadOverview(), loadDoctor()]);
+      const failed = [ov, doc].find((r) => r.status === "rejected");
+      if (failed) throw failed.reason;
     }
     renderSummary();
   } catch (err) {
+    renderSummary();
     notice("error", `Could not read this machine: ${err.message}`);
   } finally {
     refreshing = false;

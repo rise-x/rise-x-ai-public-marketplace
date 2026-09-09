@@ -54,11 +54,24 @@ type Stale struct {
 	ProjectPath  string `json:"projectPath,omitempty"`
 	URL          string `json:"url"`
 	SuggestedURL string `json:"suggestedUrl"`
+	// Transport is the entry's own "type", so an sse server is put back as
+	// sse rather than silently rewritten as http.
+	Transport string `json:"transport,omitempty"`
+	// HasHeaders marks an entry carrying static headers, an Authorization
+	// among them for a hand-added server. `claude mcp add` as the fix runs it
+	// cannot put those back, and the fix is a remove followed by an add, so
+	// repointing one here would destroy a credential that may exist nowhere
+	// else. Reported, never fixed from the kit.
+	HasHeaders bool `json:"hasHeaders,omitempty"`
 }
 
+// Fixable reports whether the kit may repoint this entry itself.
+func (s Stale) Fixable() bool { return s.Scope != ScopeDesktop && !s.HasHeaders }
+
 type configuredEntry struct {
-	Type string `json:"type,omitempty"`
-	URL  string `json:"url,omitempty"`
+	Type    string            `json:"type,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 type claudeJSON struct {
@@ -98,8 +111,13 @@ func staleIn(servers map[string]configuredEntry, scope, projectPath string) []St
 		if !remoteEntry(entry) || !isStale(name, entry.URL) {
 			continue
 		}
+		transport := strings.ToLower(entry.Type)
+		if transport == "" {
+			transport = "http"
+		}
 		out = append(out, Stale{Name: name, Scope: scope, ProjectPath: projectPath,
-			URL: entry.URL, SuggestedURL: SuggestedURL(entry.URL)})
+			URL: entry.URL, SuggestedURL: SuggestedURL(entry.URL),
+			Transport: transport, HasHeaders: len(entry.Headers) > 0})
 	}
 	return out
 }

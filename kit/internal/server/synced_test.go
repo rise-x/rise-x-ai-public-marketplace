@@ -426,3 +426,59 @@ func TestHandler_PluginUpdate_PublicCopy_Allowed(t *testing.T) {
 		t.Fatalf("job status = %q", status)
 	}
 }
+
+// The same guard has to cover install and remove, not just update: all three
+// verbs run against @rise-x-public, and the page's own buttons are hidden on
+// a render that may already be stale. This shipped guarded for update only.
+func TestHandler_PluginInstallAndUninstall_ForeignCopy_400(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		server func(t *testing.T) (string, string)
+		want   string
+	}{
+		{"desktop", func(t *testing.T) (string, string) { return desktopSyncedServer(t, "1.3.3", "1.3.5") },
+			"did not come from the public marketplace"},
+		{"organisation", func(t *testing.T) (string, string) { return syncedServer(t, "1.3.3", "1.3.5") },
+			"did not come from the public marketplace"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			baseURL, token := tc.server(t)
+
+			resp := post(t, baseURL+"/api/actions/plugin.uninstall", token, map[string]any{"name": "rise-x-mcp"})
+			if resp.StatusCode != http.StatusBadRequest {
+				resp.Body.Close()
+				t.Fatalf("uninstall status = %d, want 400", resp.StatusCode)
+			}
+			if got := errorMessage(t, resp); !strings.Contains(got, tc.want) {
+				t.Fatalf("uninstall error = %q", got)
+			}
+
+			resp = post(t, baseURL+"/api/actions/plugin.install", token, map[string]any{"name": "rise-x-mcp"})
+			if resp.StatusCode != http.StatusBadRequest {
+				resp.Body.Close()
+				t.Fatalf("install status = %d, want 400", resp.StatusCode)
+			}
+			if got := errorMessage(t, resp); !strings.Contains(got, "already installed from somewhere else") {
+				t.Fatalf("install error = %q", got)
+			}
+		})
+	}
+}
+
+// The other half of the same guard: a copy installed from a mirror is not the
+// public marketplace's to remove either. This branch reads the CLI's own
+// list, so it only answers once a page load has paid for one.
+func TestHandler_PluginUninstall_MirrorCopy_400(t *testing.T) {
+	baseURL, token, _ := mirrorServer(t)
+	// The page load the partner necessarily did before pressing anything.
+	pluginInfo(t, baseURL, token, "rise-x-mcp")
+
+	resp := post(t, baseURL+"/api/actions/plugin.uninstall", token, map[string]any{"name": "rise-x-mcp"})
+	if resp.StatusCode != http.StatusBadRequest {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if got := errorMessage(t, resp); !strings.Contains(got, "did not come from the public marketplace") {
+		t.Fatalf("error = %q", got)
+	}
+}

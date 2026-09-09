@@ -337,8 +337,8 @@ func TestDoctor_NoCLI_StillReportsMachineFacts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settingsBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	npmrcBody := "@rise-x:registry=https://rise-x.pkgs.visualstudio.com/_packaging/npm/registry/\n" +
-		"//rise-x.pkgs.visualstudio.com/_packaging/npm/registry/:_authToken=secret\n"
+	npmrcBody := "@rise-x:registry=https://packages.example.com/_packaging/npm/registry/\n" +
+		"//packages.example.com/_packaging/npm/registry/:_authToken=secret\n"
 	if err := os.WriteFile(filepath.Join(home, ".npmrc"), []byte(npmrcBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -639,8 +639,8 @@ func TestGather_McpRawIsRedacted(t *testing.T) {
 func npmrcServer(t *testing.T) (baseURL, token, npmrcPath string) {
 	t.Helper()
 	npmrcPath = filepath.Join(t.TempDir(), ".npmrc")
-	body := "@rise-x:registry=https://rise-x.pkgs.visualstudio.com/_packaging/npm/registry/\n" +
-		"//rise-x.pkgs.visualstudio.com/_packaging/npm/registry/:_authToken=supersecrettoken\n" +
+	body := "@rise-x:registry=https://packages.example.com/_packaging/npm/registry/\n" +
+		"//packages.example.com/_packaging/npm/registry/:_authToken=supersecrettoken\n" +
 		"registry=https://registry.npmjs.org/\n"
 	if err := os.WriteFile(npmrcPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -651,7 +651,7 @@ func npmrcServer(t *testing.T) (baseURL, token, npmrcPath string) {
 }
 
 // The doctor names the registry line it would rewrite, never a credential:
-// the detail is shown on the page and copied into bug reports, and the ADO
+// the detail is shown on the page and copied into bug reports, and the private-feed
 // auth line stays a legitimate credential either way.
 func TestDoctor_NpmrcDetailIsMasked(t *testing.T) {
 	baseURL, token, _ := npmrcServer(t)
@@ -669,7 +669,7 @@ func TestDoctor_NpmrcDetailIsMasked(t *testing.T) {
 }
 
 // npmrc.clean end to end: the leftover @rise-x:registry line is rewritten to
-// point at the public npm registry, the ADO auth line is untouched, and a
+// point at the public npm registry, the private-feed auth line is untouched, and a
 // backup is left next to the file.
 func TestHandler_NpmrcClean_RewritesTheRegistryLine(t *testing.T) {
 	baseURL, token, path := npmrcServer(t)
@@ -702,7 +702,7 @@ func TestHandler_NpmrcClean_RewritesTheRegistryLine(t *testing.T) {
 		t.Fatalf("~/.npmrc still points @rise-x away from public npm: %s", kept)
 	}
 	if !strings.Contains(string(kept), "supersecrettoken") {
-		t.Fatalf("~/.npmrc lost its ADO auth line: %s", kept)
+		t.Fatalf("~/.npmrc lost its private-feed auth line: %s", kept)
 	}
 	if !strings.Contains(string(kept), "registry=https://registry.npmjs.org/") {
 		t.Fatalf("~/.npmrc lost its npmjs line: %s", kept)

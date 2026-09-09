@@ -1,8 +1,10 @@
 package fsutil
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -57,6 +59,7 @@ func TestBackup_DoesNotOverwriteAnEarlierBackup(t *testing.T) {
 // The backup of a 0600 secrets file must not be readable by anyone else, and
 // O_CREATE's perm argument is masked by the umask.
 func TestBackup_KeepsTheSourceMode(t *testing.T) {
+	requirePOSIXModes(t)
 	dir := t.TempDir()
 	src := filepath.Join(dir, ".npmrc")
 	name, err := Backup(src, []byte("_authToken=x\n"), 0o600)
@@ -74,6 +77,7 @@ func TestBackup_KeepsTheSourceMode(t *testing.T) {
 
 // An interrupted write must leave the original readable, not truncated.
 func TestWriteAtomic_ReplacesAndKeepsMode(t *testing.T) {
+	requirePOSIXModes(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
@@ -174,5 +178,47 @@ func TestReadNoFollow_RefusesASymlink(t *testing.T) {
 	got, err := ReadNoFollow(plain)
 	if err != nil || string(got) != "abc123\n" {
 		t.Fatalf("ReadNoFollow(plain) = %q, %v", got, err)
+	}
+}
+
+// failSyncDir makes the post-rename directory flush fail for one test.
+func failSyncDir(t *testing.T) {
+	t.Helper()
+	real := SyncDir
+	SyncDir = func(string) error { return errors.New("fsync: operation not supported") }
+	t.Cleanup(func() { SyncDir = real })
+}
+
+// A flush that fails after the rename means the change is on disk. Reporting
+// it as a failed write is what made callers offer to restore a backup over a
+// write that had already landed.
+func TestWriteAtomic_LateFlushFailureStillWrote(t *testing.T) {
+	failSyncDir(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := WriteAtomic(path, []byte("new"), 0o600)
+	if !errors.Is(err, ErrNotDurable) {
+		t.Fatalf("err = %v, want ErrNotDurable", err)
+	}
+	got, rerr := os.ReadFile(path)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(got) != "new" {
+		t.Fatalf("file = %q, want the new bytes: the rename landed before the flush", got)
+	}
+}
+
+// requirePOSIXModes skips a test that asserts exact permission bits. Windows
+// models only the read-only flag, so os.FileMode there is 0666 or 0444 and
+// these assertions cannot hold; the behaviour they pin is a unix one.
+func requirePOSIXModes(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not modelled on Windows")
 	}
 }

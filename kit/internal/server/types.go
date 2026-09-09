@@ -13,6 +13,16 @@ type OverviewResponse struct {
 	Plugins     []PluginInfo     `json:"plugins,omitempty"`
 	Mcp         *McpInfo         `json:"mcp,omitempty"`
 	ReloadHint  bool             `json:"reloadHint"`
+	// RunningJob is the job holding the jobs slot when the overview was read,
+	// so a page that reloaded mid-install re-attaches to it instead of
+	// showing an idle drawer and 409ing every button.
+	RunningJob *RunningJob `json:"runningJob,omitempty"`
+}
+
+// RunningJob is enough for the page to resume polling one.
+type RunningJob struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
 }
 
 type CLIInfo struct {

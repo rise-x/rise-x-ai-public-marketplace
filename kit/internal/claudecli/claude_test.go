@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner/runnertest"
 )
 
@@ -228,5 +229,43 @@ func TestClient_Stream_RedactsSecrets(t *testing.T) {
 		if strings.Contains(l, "abc123secretvalue") {
 			t.Fatalf("secret leaked into log: %q", l)
 		}
+	}
+}
+
+// A CLI or its Node wrapper may print a notice around its JSON. Unmarshal
+// rejects both a leading line and trailing bytes, so one such notice turned
+// the whole overview into "invalid character 'U'".
+func TestDecodeJSON_ToleratesNoticesAroundTheValue(t *testing.T) {
+	for _, tc := range []struct {
+		name, stdout string
+	}{
+		{"clean", `[{"name":"rise-x-public"}]`},
+		{"preamble", "Update available: 2.1.9\n[{\"name\":\"rise-x-public\"}]"},
+		{"trailer", "[{\"name\":\"rise-x-public\"}]\nRun `claude doctor` for details\n"},
+		{"both", "notice\n[{\"name\":\"rise-x-public\"}]\nnotice\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out []Marketplace
+			if err := decodeJSON("marketplace list", tc.stdout, &out); err != nil {
+				t.Fatalf("decodeJSON: %v", err)
+			}
+			if len(out) != 1 || out[0].Name != "rise-x-public" {
+				t.Fatalf("out = %+v", out)
+			}
+		})
+	}
+}
+
+// Truncated output is a prefix of the answer, not the answer, and must say so
+// rather than surfacing a JSON syntax error the partner cannot act on.
+func TestDecodeJSON_NamesTruncationAndEmptyOutput(t *testing.T) {
+	var out []Marketplace
+	err := decodeJSON("marketplace list", `[{"name":"a"}`+"\n"+runner.OutputTruncationMarker+"\n", &out)
+	if err == nil || !strings.Contains(err.Error(), "more output than") {
+		t.Fatalf("err = %v, want the truncation to be named", err)
+	}
+	if err := decodeJSON("marketplace list", "   \n", &out); err == nil ||
+		!strings.Contains(err.Error(), "printed nothing") {
+		t.Fatalf("err = %v, want the empty output to be named", err)
 	}
 }

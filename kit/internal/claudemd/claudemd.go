@@ -96,7 +96,7 @@ func Apply(claudeDir string) (Result, error) {
 			return res, err
 		}
 	}
-	if err := fsutil.WriteAtomic(path, []byte(out), mode); err != nil {
+	if err := fsutil.WriteAtomic(path, []byte(out), mode); err != nil && !errors.Is(err, fsutil.ErrNotDurable) {
 		// The backup is what the partner needs precisely now, and the error is
 		// the only thing the caller keeps on a failure, so name it there too.
 		return res, writeError(path, res.Backup, err)

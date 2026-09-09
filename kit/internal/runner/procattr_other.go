@@ -25,3 +25,9 @@ func killTree(cmd *exec.Cmd) error {
 	}
 	return nil
 }
+
+// killAfterReap says whether killTree may still be called once cmd.Wait has
+// returned. On unix it may: the signal goes to the process group, and the
+// kernel keeps that pgid reserved while any member of it remains, which is
+// exactly the descendant still holding the pipes.
+const killAfterReap = true

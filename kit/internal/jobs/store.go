@@ -202,6 +202,63 @@ func (s *Store) Start(action string, timeout time.Duration, fn Func) (string, er
 	return id, nil
 }
 
+// Hold takes the running slot for a caller that does the work itself on its
+// own goroutine, and returns the func that finishes the job and frees the
+// slot. Unlike Start there is no deadline, deliberately: Start frees the slot
+// at its timeout even while fn runs on, which is right for a wedged claude
+// child but wrong for the synchronous file writers - freeing the slot under
+// one of them lets a claude job rewrite the same file, which is the reason
+// they take the slot at all. They are a read, a render and a rename, with no
+// subprocess to wedge on.
+//
+// The returned func is idempotent, so a caller can defer it and still report
+// its own error. CancelAll cannot reach a held job: there is no context to
+// cancel, and a shutdown waits it out through WaitIdle instead.
+func (s *Store) Hold(action string) (release func(err error), err error) {
+	s.mu.Lock()
+	if s.runningID != "" {
+		s.mu.Unlock()
+		return nil, ErrBusy
+	}
+	id := newID()
+	j := &job{job: Job{ID: id, Action: action, Status: StatusRunning, StartedAt: time.Now()}}
+	work := make(chan struct{})
+	s.jobs[id] = j
+	s.runningID = id
+	s.runningCancel, s.runningWork = nil, work
+	s.mu.Unlock()
+
+	var once sync.Once
+	return func(err error) {
+		once.Do(func() {
+			code := 0
+			if err != nil {
+				code = -1
+			}
+			s.release(id)
+			j.finish(code, err)
+			close(work)
+		})
+	}, nil
+}
+
+// Running names the job holding the slot, if any. A page that reloaded while
+// a ten-minute install was going has no record of it in memory, and would
+// otherwise show "nothing yet" while every action it offers 409s.
+func (s *Store) Running() (id, action string, ok bool) {
+	s.mu.Lock()
+	id = s.runningID
+	j := s.jobs[id]
+	s.mu.Unlock()
+	if id == "" || j == nil {
+		return "", "", false
+	}
+	j.mu.Lock()
+	action = j.job.Action
+	j.mu.Unlock()
+	return id, action, true
+}
+
 // release clears the running slot and evicts the oldest finished jobs.
 func (s *Store) release(id string) {
 	s.mu.Lock()

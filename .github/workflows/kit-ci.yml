@@ -27,9 +27,20 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Windows and macOS run the tests too, not just a cross-compile: the
+    # single-instance lock, the process-tree kill, the no-follow open and the
+    # directory flush all have per-platform implementations, and until this
+    # matrix existed none of the Windows ones had ever executed anywhere.
+    # Only the ubuntu leg gates the version bump, so the check runs once.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     defaults:
       run:
+        shell: bash
         working-directory: kit
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -44,7 +55,7 @@ jobs:
       # branch is collecting work for a release that has not happened, so it
       # needs no bump and this step skips.
       - name: Check kit version bump
-        if: github.base_ref == 'main'
+        if: github.base_ref == 'main' && matrix.os == 'ubuntu-latest'
         working-directory: ${{ github.workspace }}
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -64,6 +75,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: kit

@@ -91,6 +91,12 @@ type Server struct {
 	// plugin name in an action handler costs at most one claude spawn a
 	// minute.
 	installLocCache probeCache[string]
+	// plListCache and mpListCache hold the two read-only CLI lists an action
+	// handler checks its target against. An action handler must not wait on a
+	// gather, and an uncached list is the same wait by another name: one
+	// spawn, up to defaultReadTimeout, before the job id comes back.
+	plListCache probeCache[pluginListProbe]
+	mpListCache probeCache[marketplaceListProbe]
 
 	// gatherMu serializes gather itself, so two concurrent requests share one
 	// pass instead of each spawning its own claude processes.
@@ -201,7 +207,50 @@ func (s *Server) invalidateClaudeProbes() {
 	s.syncedCache.invalidate()
 	s.staleCache.invalidate()
 	s.installLocCache.invalidate()
+	s.plListCache.invalidate()
+	s.mpListCache.invalidate()
 	s.invalidateGather()
+}
+
+// pluginListProbe and marketplaceListProbe pair a list with the error that
+// stopped it being read, so the cache can remember a failure for probeFailTTL
+// the way every other probe does.
+type pluginListProbe struct {
+	res claudecli.PluginListResult
+	err error
+}
+
+type marketplaceListProbe struct {
+	list []claudecli.Marketplace
+	err  error
+}
+
+// pluginList is `claude plugin list --json --available`, memoized. gather
+// calls the client directly because it wants the answer it just paid for;
+// the action handlers come through here.
+func (s *Server) pluginList(ctx context.Context) (claudecli.PluginListResult, error) {
+	p := s.plListCache.getOrForget(func() (pluginListProbe, error) {
+		client, ok := s.client(ctx)
+		if !ok {
+			return pluginListProbe{err: claudecli.ErrNotFound}, claudecli.ErrNotFound
+		}
+		res, err := client.PluginListAvailable(ctx)
+		return pluginListProbe{res: res, err: err}, err
+	})
+	return p.res, p.err
+}
+
+// marketplaceList is `claude plugin marketplace list --json`, memoized.
+func (s *Server) marketplaceList(ctx context.Context) ([]claudecli.Marketplace, error) {
+	p := s.mpListCache.getOrForget(func() (marketplaceListProbe, error) {
+		client, ok := s.client(ctx)
+		if !ok {
+			return marketplaceListProbe{err: claudecli.ErrNotFound}, claudecli.ErrNotFound
+		}
+		list, err := client.MarketplaceList(ctx)
+		return marketplaceListProbe{list: list, err: err}, err
+	})
+	return p.list, p.err
 }
 
 // invalidateProbes drops every cached probe of the machine, so the next gather
@@ -360,11 +409,7 @@ func (s *Server) marketplaceNames(ctx context.Context, installLocation string) [
 // plugin marketplace list --json`, or "" when there is none.
 func (s *Server) installLocation(ctx context.Context) string {
 	return s.installLocCache.get(func() string {
-		client, ok := s.client(ctx)
-		if !ok {
-			return ""
-		}
-		list, err := client.MarketplaceList(ctx)
+		list, err := s.marketplaceList(ctx)
 		if err != nil {
 			return ""
 		}

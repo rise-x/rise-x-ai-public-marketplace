@@ -66,8 +66,48 @@ func locateWindowsProbes(env Env) []string {
 	out = append(out, walkForFile(env, filepath.Join(env.LocalAppData, "Programs", "Claude"), "claude.exe", 4)...)
 	out = append(out, walkForFile(env, filepath.Join(env.LocalAppData, "AnthropicClaude"), "claude.exe", 4)...)
 
-	sort.Sort(sort.Reverse(sort.StringSlice(out)))
+	// Newest first by version, not by string: reverse-lexical puts app-1.9.0
+	// above app-1.10.0, so the probe adopted the older CLI and the UI then
+	// reported its version. Ties fall back to the path so the order is stable.
+	sort.Slice(out, func(i, j int) bool {
+		vi, vj := pathVersion(out[i]), pathVersion(out[j])
+		if vi != vj {
+			return semver.VersionLess(vj, vi)
+		}
+		return out[i] > out[j]
+	})
 	return out
+}
+
+// pathVersion pulls the version out of an install path like
+// ...\Programs\Claude\app-1.10.0\claude.exe. The segment nearest the binary
+// wins, and a path with no version-looking segment sorts as 0.
+func pathVersion(path string) string {
+	segments := strings.Split(filepath.ToSlash(path), "/")
+	for i := len(segments) - 1; i >= 0; i-- {
+		if v := versionSuffix(segments[i]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// versionSuffix reads "1.10.0" out of "app-1.10.0" or "1.10.0", and returns ""
+// for a segment that carries no dotted number.
+func versionSuffix(segment string) string {
+	if i := strings.LastIndexAny(segment, "-_"); i >= 0 {
+		segment = segment[i+1:]
+	}
+	segment = strings.TrimPrefix(segment, "v")
+	if segment == "" || !strings.Contains(segment, ".") {
+		return ""
+	}
+	for _, r := range segment {
+		if (r < '0' || r > '9') && r != '.' {
+			return ""
+		}
+	}
+	return segment
 }
 
 func walkForFile(env Env, root, filename string, maxDepth int) []string {

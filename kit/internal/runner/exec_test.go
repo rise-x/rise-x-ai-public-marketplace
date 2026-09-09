@@ -405,13 +405,13 @@ func TestExecRun_CapsTotalOutput(t *testing.T) {
 		c.line(line)
 	}
 	got := c.String()
-	if len(got) > maxRunBytes+len(outputTruncationMarker)+1 {
+	if len(got) > maxRunBytes+len(OutputTruncationMarker)+1 {
 		t.Fatalf("kept %d bytes, want no more than the %d-byte cap", len(got), maxRunBytes)
 	}
-	if !strings.HasSuffix(got, outputTruncationMarker+"\n") {
+	if !strings.HasSuffix(got, OutputTruncationMarker+"\n") {
 		t.Fatal("the cap was hit but nothing said so")
 	}
-	if strings.Count(got, outputTruncationMarker) != 1 {
+	if strings.Count(got, OutputTruncationMarker) != 1 {
 		t.Fatal("the marker repeats once per dropped line")
 	}
 }

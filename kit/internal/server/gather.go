@@ -69,6 +69,23 @@ func (c *probeCache[T]) getOrForget(probe func() (val T, err error)) T {
 	})
 }
 
+// peek returns a remembered answer without running the probe. An action
+// handler uses it where the probe is a claude spawn: it must answer a click,
+// so a cold cache means "no opinion" rather than a wait.
+func (c *probeCache[T]) peek() (T, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ttl := probeTTL
+	if c.failed {
+		ttl = probeFailTTL
+	}
+	if !c.set || time.Since(c.at) >= ttl {
+		var zero T
+		return zero, false
+	}
+	return c.val, !c.failed
+}
+
 // memo is the shared body: keep says whether the answer may be remembered at
 // all, failed whether it may only be remembered for probeFailTTL.
 func (c *probeCache[T]) memo(probe func() (val T, failed, keep bool)) T {
@@ -159,6 +176,9 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 	facts.DisableAutoupdater, facts.ForceAutoupdatePlugins = autoupdaterEnv(set)
 
 	overview.ReloadHint = s.getReloadHint()
+	if id, action, ok := s.jobs.Running(); ok {
+		overview.RunningJob = &RunningJob{ID: id, Action: action}
+	}
 	return overview, facts, nil
 }
 
@@ -175,7 +195,10 @@ func (s *Server) gatherClaude(ctx context.Context, client *claudecli.Client, set
 	facts.MarketplaceRegistered = mp != nil
 	overview.Marketplace.Registered = mp != nil
 
-	plResult, plErr := client.PluginListAvailable(ctx)
+	// Through the cache, so an action handler checking its target against
+	// this same list a moment later is answered from the page load that just
+	// paid for it rather than spawning claude again.
+	plResult, plErr := s.pluginList(ctx)
 
 	// The skills are gathered whether or not the public marketplace is
 	// registered: an organisation-managed machine gets its skills from the

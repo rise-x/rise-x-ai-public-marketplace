@@ -1,11 +1,12 @@
 // Package npmrc finds and repoints leftover Rise-X `@rise-x:registry` lines
 // in ~/.npmrc: developer setup once pointed the scope at a private registry,
 // and that line is a leftover now that @rise-x packages are public. Auth
-// lines are never touched, whatever host they name — the ADO credentials
-// @diana/* still needs and a GitHub Packages token are both legitimate.
+// lines are never touched, whatever host they name: the credentials another
+// private scope still needs and a GitHub Packages token are both legitimate.
 package npmrc
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -105,7 +106,7 @@ func Clean(path string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if err := fsutil.WriteAtomic(path, []byte(kept), mode); err != nil {
+	if err := fsutil.WriteAtomic(path, []byte(kept), mode); err != nil && !errors.Is(err, fsutil.ErrNotDurable) {
 		// The backup is the whole point of the failure path: the auth lines
 		// this file keeps may exist nowhere else, so name it even here.
 		return Result{Backup: backup}, fmt.Errorf("write %s (your file is backed up at %s): %w", path, backup, err)

@@ -49,13 +49,13 @@ func TestScan(t *testing.T) {
 		writeFixture(t, "claude_desktop_config.json", desktopJSONFixture))
 
 	want := []Stale{
-		{Name: "rise-x", Scope: ScopeUser,
+		{Name: "rise-x", Scope: ScopeUser, Transport: "http",
 			URL:          "https://mcp-server-prod.bluesea.eastus.azurecontainerapps.io/mcp",
 			SuggestedURL: "https://mcp.rise-x.io/mcp"},
-		{Name: "risex-test", Scope: ScopeLocal, ProjectPath: "/Users/p/one",
+		{Name: "risex-test", Scope: ScopeLocal, ProjectPath: "/Users/p/one", Transport: "http",
 			URL:          "https://mcp-server-test.bluesea.eastus.azurecontainerapps.io/mcp",
 			SuggestedURL: "https://mcp-test.rise-x.io/mcp"},
-		{Name: "Rise_X", Scope: ScopeDesktop,
+		{Name: "Rise_X", Scope: ScopeDesktop, Transport: "http",
 			URL:          "https://mcp-old.bluesea.eastus.azurecontainerapps.io/mcp",
 			SuggestedURL: "https://mcp.rise-x.io/mcp"},
 	}
@@ -136,7 +136,7 @@ func TestIsStale(t *testing.T) {
 		{"rise-x-mcp-local", "https:/0.0.0.0:8080/mcp", false},
 		{"rise-x-mcp-local", "http://127.0.0.1:8080/mcp", false},
 		{"rise-x", "http://192.168.1.9:8080/mcp", false},
-		{"rise-x", "https://diana-npm.local:3000/mcp", false},
+		{"rise-x", "https://internal-npm.local:3000/mcp", false},
 		// An exact known host flags on its own, no rise-x hint in the name.
 		{"mcp-dev", "https://mcp-server.bluefield-efc1f90d.australiaeast.azurecontainerapps.io/mcp", true},
 		{"mcp-prod", "https://mcp-server.lemonmeadow-b9fe5140.australiaeast.azurecontainerapps.io/mcp", true},
@@ -145,5 +145,30 @@ func TestIsStale(t *testing.T) {
 		if got := isStale(c.name, c.url); got != c.want {
 			t.Errorf("isStale(%q, %q) = %v, want %v", c.name, c.url, got, c.want)
 		}
+	}
+}
+
+// An sse entry must be put back as sse, and an entry carrying its own headers
+// must not be repointed at all: the fix is a remove plus an add, and the add
+// cannot recreate a header the partner set by hand.
+func TestScan_TransportAndHeaderBoundEntries(t *testing.T) {
+	const body = `{
+  "mcpServers": {
+    "rise-x-sse": {"type": "sse", "url": "https://mcp-server-prod.bluesea.eastus.azurecontainerapps.io/mcp"},
+    "rise-x-auth": {"type": "http", "url": "https://mcp-server-prod.bluesea.eastus.azurecontainerapps.io/mcp",
+                    "headers": {"Authorization": "Bearer nowhere-else"}}
+  }
+}`
+	got := Scan(writeFixture(t, ".claude.json", body), "")
+	if len(got) != 2 {
+		t.Fatalf("scanned %d, want 2: %+v", len(got), got)
+	}
+	byName := map[string]Stale{got[0].Name: got[0], got[1].Name: got[1]}
+
+	if sse := byName["rise-x-sse"]; sse.Transport != "sse" || !sse.Fixable() {
+		t.Errorf("sse entry = %+v, want transport sse and fixable", sse)
+	}
+	if auth := byName["rise-x-auth"]; !auth.HasHeaders || auth.Fixable() {
+		t.Errorf("header-bound entry = %+v, want hasHeaders and not fixable", auth)
 	}
 }

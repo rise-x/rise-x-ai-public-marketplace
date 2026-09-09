@@ -41,7 +41,10 @@ const (
 	// memory. Stream, which the jobs drawer uses, is capped by the store.
 	maxRunBytes = 4 * 1024 * 1024
 
-	outputTruncationMarker = "[output truncated]"
+	// OutputTruncationMarker is appended in place of the output Run dropped.
+	// A parser that finds it in what it was handed is looking at a prefix of
+	// the answer, not the answer.
+	OutputTruncationMarker = "[output truncated]"
 
 	// stderrTailLines is how much stderr a returned error quotes.
 	stderrTailLines = 3
@@ -72,7 +75,7 @@ func (c *capped) line(text string) {
 	}
 	if c.b.Len()+len(text)+1 > maxRunBytes {
 		c.full = true
-		c.b.WriteString(outputTruncationMarker + "\n")
+		c.b.WriteString(OutputTruncationMarker + "\n")
 		return
 	}
 	c.b.WriteString(text)
@@ -149,7 +152,7 @@ func (Exec) StreamDir(ctx context.Context, dir, name string, args []string, onLi
 	err := cmd.Wait()
 	guard.stop()
 	close(watchDone)
-	if errors.Is(err, exec.ErrWaitDelay) {
+	if errors.Is(err, exec.ErrWaitDelay) && killAfterReap {
 		// The child is reaped by now and a descendant still holds the pipes,
 		// so this signals a pgid whose leader has already exited. The kernel
 		// keeps that pid reserved while any member of the group remains, and
@@ -157,6 +160,10 @@ func (Exec) StreamDir(ctx context.Context, dir, name string, args []string, onLi
 		// still ours. The residual case is a holder that left the group by
 		// its own setsid; there the pid could in principle have been reused,
 		// and the alternative is leaking the descendant, so we accept it.
+		//
+		// None of that reasoning holds on Windows, where the kill is by pid
+		// and the pid is free the moment Wait returns, so killAfterReap is
+		// false there.
 		_ = killTree(cmd)
 	}
 	outW.Close()

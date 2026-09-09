@@ -50,6 +50,30 @@ func cmdError(argv string, err error, stderr string) error {
 	return fmt.Errorf("%s: %w", argv, err)
 }
 
+// decodeJSON parses a --json answer into v, tolerating what a CLI legitimately
+// puts around it. json.Unmarshal rejects both a leading line and any trailing
+// bytes, so one update notice on stdout turned the whole overview into
+// "invalid character 'U'".
+func decodeJSON(what, stdout string, v any) error {
+	if strings.Contains(stdout, runner.OutputTruncationMarker) {
+		return fmt.Errorf("parse %s: the command produced more output than one read can hold", what)
+	}
+	body := strings.TrimSpace(stdout)
+	// A preamble is anything before the value itself starts.
+	if i := strings.IndexAny(body, "{["); i > 0 {
+		body = body[i:]
+	}
+	if body == "" {
+		return fmt.Errorf("parse %s: the command printed nothing", what)
+	}
+	// A Decoder reads one value and ignores whatever follows it, so a notice
+	// printed after the JSON is not an error either.
+	if err := json.NewDecoder(strings.NewReader(body)).Decode(v); err != nil {
+		return fmt.Errorf("parse %s: %w", what, err)
+	}
+	return nil
+}
+
 // Version runs `claude --version` and returns just the number.
 func (c *Client) Version(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -72,8 +96,8 @@ func (c *Client) MarketplaceList(ctx context.Context) ([]Marketplace, error) {
 		return nil, err
 	}
 	var out []Marketplace
-	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
-		return nil, fmt.Errorf("parse marketplace list: %w", err)
+	if err := decodeJSON("marketplace list", stdout, &out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -88,8 +112,8 @@ func (c *Client) PluginListAvailable(ctx context.Context) (PluginListResult, err
 		return PluginListResult{}, err
 	}
 	var out PluginListResult
-	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
-		return PluginListResult{}, fmt.Errorf("parse plugin list: %w", err)
+	if err := decodeJSON("plugin list", stdout, &out); err != nil {
+		return PluginListResult{}, err
 	}
 	return out, nil
 }
@@ -162,7 +186,12 @@ func (c *Client) McpRemove(ctx context.Context, dir, name, scope string, onLine 
 	return c.streamIn(ctx, dir, []string{"mcp", "remove", name, "-s", scope}, onLine)
 }
 
-// McpAdd runs `claude mcp add --transport http <name> <url> -s <scope>` in dir.
-func (c *Client) McpAdd(ctx context.Context, dir, name, url, scope string, onLine func(string)) (int, error) {
-	return c.streamIn(ctx, dir, []string{"mcp", "add", "--transport", "http", name, url, "-s", scope}, onLine)
+// McpAdd runs `claude mcp add --transport <transport> <name> <url> -s <scope>`
+// in dir. The transport is the entry's own, so repointing an sse server does
+// not quietly turn it into an http one; an empty transport means http.
+func (c *Client) McpAdd(ctx context.Context, dir, name, url, scope, transport string, onLine func(string)) (int, error) {
+	if transport == "" {
+		transport = "http"
+	}
+	return c.streamIn(ctx, dir, []string{"mcp", "add", "--transport", transport, name, url, "-s", scope}, onLine)
 }

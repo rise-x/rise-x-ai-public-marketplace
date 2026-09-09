@@ -350,3 +350,42 @@ func TestJobLog_KeepsATailWithMonotonicSeq(t *testing.T) {
 		t.Fatalf("?since=%d returned %d lines, want 3", emitted-3, len(rest.Log))
 	}
 }
+
+// A page that reloaded mid-install has no record of the job, while the store
+// still holds the slot and 409s everything. Running is what lets the overview
+// hand it back.
+func TestStore_RunningNamesTheHeldSlot(t *testing.T) {
+	s := NewStore()
+	if _, _, ok := s.Running(); ok {
+		t.Fatal("an idle store reported a running job")
+	}
+
+	release := make(chan struct{})
+	id, err := s.Start("plugin.install", time.Minute, func(ctx context.Context, _ func(string)) (int, error) {
+		<-release
+		return 0, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotID, action, ok := s.Running()
+	if !ok || gotID != id || action != "plugin.install" {
+		t.Fatalf("Running = %q, %q, %v; want %q, plugin.install, true", gotID, action, ok, id)
+	}
+	close(release)
+	waitUntil(t, func() bool { _, _, ok := s.Running(); return !ok })
+
+	// A held slot is reported the same way, so a synchronous file write is
+	// not invisible to a page that reloads over it.
+	done, err := s.Hold("npmrc.clean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, action, ok := s.Running(); !ok || action != "npmrc.clean" {
+		t.Fatalf("Running during Hold = %q, %v", action, ok)
+	}
+	done(nil)
+	if _, _, ok := s.Running(); ok {
+		t.Fatal("the slot was still held after release")
+	}
+}

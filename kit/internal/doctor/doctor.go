@@ -332,7 +332,10 @@ func mcpStaleCheck(f Facts) Check {
 	fixable := false
 	for i, st := range f.McpStale {
 		lines[i] = fmt.Sprintf("%s (%s): %s → %s", st.Name, st.Scope, st.URL, st.SuggestedURL)
-		if st.Scope != mcp.ScopeDesktop {
+		if st.HasHeaders {
+			lines[i] += " (has its own headers: repoint this one yourself)"
+		}
+		if st.Fixable() {
 			fixable = true
 		}
 	}

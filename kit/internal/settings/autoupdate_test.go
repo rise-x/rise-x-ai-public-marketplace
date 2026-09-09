@@ -3,8 +3,10 @@ package settings
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -237,6 +239,7 @@ func TestSetAutoUpdate_AddsSourceWhenAbsent(t *testing.T) {
 // settings.json can hold an apiKeyHelper and an env block; a 0600 file must
 // stay 0600, and so must its backup.
 func TestSetAutoUpdate_PreservesFileMode(t *testing.T) {
+	requirePOSIXModes(t)
 	path := filepath.Join(t.TempDir(), "settings.json")
 	write(t, path, `{"theme":"dark"}`, 0o600)
 
@@ -261,6 +264,7 @@ func TestSetAutoUpdate_PreservesFileMode(t *testing.T) {
 }
 
 func TestSetAutoUpdate_NewFileIsOwnerOnly(t *testing.T) {
+	requirePOSIXModes(t)
 	path := filepath.Join(t.TempDir(), "settings.json")
 	if _, err := NewWriter(path).SetAutoUpdate("rise-x-public", repo, true); err != nil {
 		t.Fatalf("SetAutoUpdate: %v", err)
@@ -681,5 +685,60 @@ func TestSetAutoUpdate_BackupDoesNotOverwriteAnEarlierOne(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(taken); string(got) != "an earlier backup\n" {
 		t.Fatalf("earlier backup was overwritten: %q", got)
+	}
+}
+
+// A directory flush that fails after the rename leaves the new settings on
+// disk. Treating that as a failed write deleted the backup and told the
+// partner nothing had happened, which was wrong on both counts.
+func TestSetAutoUpdate_LateFlushFailureKeepsTheBackup(t *testing.T) {
+	// Only the flush after the rename fails: the backup's own flush, on the
+	// same directory a moment earlier, succeeded. That is the shape a network
+	// or FUSE mount produces, and the only one that reaches this path, since
+	// a flush that always fails stops the write at the backup instead.
+	real := fsutil.SyncDir
+	calls := 0
+	fsutil.SyncDir = func(dir string) error {
+		calls++
+		if calls == 1 {
+			return real(dir)
+		}
+		return errors.New("fsync: operation not supported")
+	}
+	t.Cleanup(func() { fsutil.SyncDir = real })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	const before = `{"apiKeyHelper":"echo secret","extraKnownMarketplaces":{}}`
+	if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	backup, err := NewWriter(path).SetAutoUpdate("rise-x-public", "rise-x/rise-x-ai-public-marketplace", true)
+	if err != nil {
+		t.Fatalf("err = %v, want the write to count as done", err)
+	}
+	if backup == "" {
+		t.Fatal("no backup path reported")
+	}
+	if got, rerr := os.ReadFile(backup); rerr != nil || string(got) != before {
+		t.Fatalf("backup = %q, %v; want the pre-edit bytes still on disk", got, rerr)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `"autoUpdate": true`) {
+		t.Fatalf("settings.json = %q, want the change the rename installed", got)
+	}
+}
+
+// requirePOSIXModes skips a test that asserts exact permission bits. Windows
+// models only the read-only flag, so os.FileMode there is 0666 or 0444 and
+// these assertions cannot hold; the behaviour they pin is a unix one.
+func requirePOSIXModes(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not modelled on Windows")
 	}
 }

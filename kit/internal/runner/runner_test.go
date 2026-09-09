@@ -28,7 +28,7 @@ func TestRedact(t *testing.T) {
 		"ghp_0123456789abcdefghijklmnopqrstuvwxyz": "[redacted]",
 		"github_pat_11ABCDEFG0123456789":           "[redacted]",
 		"//npm.pkg.github.com/:_authToken=ghp_xxx": "//npm.pkg.github.com/:_auth[redacted]",
-		"//rise-x.pkgs.visualstudio.com/_packaging/x/npm/:_password=BASE64SECRET==": "//rise-x.pkgs.visualstudio.com/_packaging/x/npm/:_[redacted]",
+		"//packages.example.com/_packaging/x/npm/:_password=BASE64SECRET==": "//packages.example.com/_packaging/x/npm/:_[redacted]",
 
 		"plain line, nothing sensitive":                   "plain line, nothing sensitive",
 		"npx -y @upstash/context7-mcp":                    "npx -y @upstash/context7-mcp",

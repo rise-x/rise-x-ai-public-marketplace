@@ -168,17 +168,19 @@ func freePort(t *testing.T) int {
 // slot and the write slot are per-process.
 func TestLock_OnlyOneHolder(t *testing.T) {
 	cacheHome(t)
-	release, ok := Lock()
-	if !ok {
-		t.Fatal("first Lock did not take the lock")
+	release, err := Lock()
+	if release == nil {
+		t.Fatalf("first Lock did not take the lock: %v", err)
 	}
-	if _, ok := Lock(); ok {
+	if second, err := Lock(); second != nil {
 		t.Fatal("second Lock took a lock the first one holds")
+	} else if err != nil {
+		t.Fatalf("contention reported as a failure: %v", err)
 	}
 	release()
-	release2, ok := Lock()
-	if !ok {
-		t.Fatal("Lock did not free on release")
+	release2, err := Lock()
+	if release2 == nil {
+		t.Fatalf("Lock did not free on release: %v", err)
 	}
 	release2()
 }
@@ -209,7 +211,7 @@ func TestLock_ConcurrentLaunchesLeaveOneWinner(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			if release, ok := Lock(); ok {
+			if release, _ := Lock(); release != nil {
 				mu.Lock()
 				releases = append(releases, release)
 				mu.Unlock()
@@ -240,9 +242,9 @@ func TestLock_SurvivesADeadHolder(t *testing.T) {
 	if err := os.WriteFile(path+".lock", []byte("999999\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	release, ok := Lock()
-	if !ok {
-		t.Fatal("a lock file with no live holder still blocked the launch")
+	release, err := Lock()
+	if release == nil {
+		t.Fatalf("a lock file with no live holder still blocked the launch: %v", err)
 	}
 	release()
 }
@@ -261,4 +263,63 @@ func TestRunning_ReportsTheServedVersion(t *testing.T) {
 	if got == nil || got.Version != "0.1.0" {
 		t.Fatalf("Running = %+v, want version 0.1.0", got)
 	}
+}
+
+// Removing the lock file while still holding it let one launch lock the inode
+// being removed while the next created and locked a fresh one at the same
+// name, so two kits each thought they were the only one. The file is now left
+// in place, and this is the deterministic half of that: releasing must not
+// unlink it.
+func TestLock_ReleaseLeavesTheFileInPlace(t *testing.T) {
+	cacheHome(t)
+	path, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := Lock()
+	if release == nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	release()
+	if _, err := os.Stat(path + ".lock"); err != nil {
+		t.Fatalf("stat lock file after release: %v; removing it reopens the two-winner window", err)
+	}
+}
+
+// The other half: launches taking and dropping the lock while others arrive
+// must never overlap. Under -race this is also what catches a release path
+// that lets a second holder in.
+func TestLock_NeverTwoHoldersUnderChurn(t *testing.T) {
+	cacheHome(t)
+	var mu sync.Mutex
+	held := 0
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 60; j++ {
+				release, err := Lock()
+				if release == nil {
+					if err != nil {
+						t.Errorf("Lock: %v", err)
+						return
+					}
+					continue // somebody else has it, which is the point
+				}
+				mu.Lock()
+				held++
+				n := held
+				mu.Unlock()
+				if n != 1 {
+					t.Errorf("%d launches held the lock at once", n)
+				}
+				mu.Lock()
+				held--
+				mu.Unlock()
+				release()
+			}
+		}()
+	}
+	wg.Wait()
 }

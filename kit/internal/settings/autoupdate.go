@@ -182,6 +182,12 @@ func (w *Writer) setOnce(target, name, repo string, enabled bool) (backupPath st
 		w.backedUp = true
 	}
 	if err := writeAtomic(target, out, mode, original); err != nil {
+		if errors.Is(err, fsutil.ErrNotDurable) {
+			// The rename landed and only the flush did not, so this is the one
+			// error after which the backup is exactly the copy to keep: it
+			// describes the state before a change that is now on disk.
+			return backupPath, nil
+		}
 		// This attempt installed nothing, so its backup describes a state the
 		// next one will back up again. Leaving it would strand a copy of
 		// settings.json nothing reports.
@@ -343,5 +349,10 @@ func writeAtomic(path string, data []byte, mode os.FileMode, expect []byte) erro
 	if err := os.Rename(name, path); err != nil {
 		return err
 	}
-	return fsutil.SyncDir(filepath.Dir(path))
+	// Past the rename the change is installed; a failed directory flush is a
+	// durability warning, and setOnce must not read it as "nothing happened".
+	if err := fsutil.SyncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("%w: %v", fsutil.ErrNotDurable, err)
+	}
+	return nil
 }

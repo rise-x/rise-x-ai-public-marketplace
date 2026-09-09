@@ -75,7 +75,16 @@ func run() int {
 		// process, so a second one would write ~/.claude with neither aware of
 		// the other. The lock also covers the moment before a kit records
 		// itself, when the probe still sees nothing.
-		releaseLock, locked = instance.Lock()
+		var lockErr error
+		releaseLock, lockErr = instance.Lock()
+		locked = releaseLock != nil
+		if lockErr != nil {
+			// Not contention: nothing to wait for, and refusing would leave
+			// the partner with a kit that never starts on this machine. Say
+			// what failed and serve anyway, single-instance unenforced.
+			log.Printf("could not take the single-instance lock, so a second launch may start its own: %v", lockErr)
+			releaseLock, locked = func() {}, true
+		}
 		if !locked && found == nil {
 			// Whoever holds it may have finished starting since the probe.
 			found = instance.Running()
@@ -139,7 +148,18 @@ func run() int {
 		openBrowser(url)
 	}
 
-	httpServer := &http.Server{Handler: srv.Handler()}
+	httpServer := &http.Server{
+		Handler: srv.Handler(),
+		// A page in any browser can open a connection to this port and simply
+		// not finish its request; requireToken only refuses it once the header
+		// is read. Without these the connection is held forever and the
+		// partner's own tab loses its share of the browser's per-origin
+		// budget. WriteTimeout stays unset: starting a job legitimately takes
+		// seconds, and a gather behind it longer.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	serveErr := make(chan error, 1)
 	go func() {
 		if err := httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {

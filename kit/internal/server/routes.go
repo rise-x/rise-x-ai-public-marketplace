@@ -31,15 +31,15 @@ const (
 	marketplaceJobTimeout = 3 * time.Minute  // a shallow clone or a git fetch
 	mcpFixJobTimeout      = 2 * time.Minute  // a remove plus an add per connection
 	nodeInstallJobTimeout = 10 * time.Minute // nvm or winget, plus the download
+	// mcpRestoreTimeout bounds putting a connection back after a failed add.
+	// It runs on a context of its own, since the job's deadline expiring is
+	// one of the reasons the add can have failed.
+	mcpRestoreTimeout = 30 * time.Second
 )
 
 // maxActionBody caps an action's JSON body; every one of them is a couple of
 // short fields.
 const maxActionBody = 64 << 10
-
-// writeSlotTimeout bounds how long a synchronous file edit may hold the jobs
-// store's single-writer slot. Both edits are a read, a render and a rename.
-const writeSlotTimeout = 30 * time.Second
 
 // contentSecurityPolicy is sent with every response. The page carries the CSRF
 // token, so it must never be framed; font-src allows data: only for the design
@@ -290,11 +290,13 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, ctx context.Context, 
 			return
 		}
 		marketplace = from
-	case name == "plugin.update" && !s.updatableFromPublic(ctx, pluginName):
-		// A copy Claude Desktop or another marketplace owns must not be
-		// updated from the public marketplace: that installs a second copy.
-		httpError(w, http.StatusBadRequest,
-			"this copy of "+pluginName+" did not come from the public marketplace; update it where it was installed from")
+	case !s.ownedByPublic(ctx, pluginName):
+		// All three verbs run against @rise-x-public, so a copy Claude
+		// Desktop, the organisation or another marketplace owns has to be
+		// refused for every one of them: acting on it from here leaves the
+		// machine with two copies. The page hides these buttons, but one
+		// rendered before the synced probe caught up still offers them.
+		httpError(w, http.StatusBadRequest, refuseForeignCopy(name, pluginName))
 		return
 	}
 	s.startJob(w, ctx, name, needsCLI, pluginJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
@@ -334,12 +336,21 @@ func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action
 	}
 
 	var fixable []mcp.Stale
+	headerBound := false
 	for _, st := range targets {
-		if st.Scope != mcp.ScopeDesktop {
+		switch {
+		case st.Fixable():
 			fixable = append(fixable, st)
+		case st.HasHeaders:
+			headerBound = true
 		}
 	}
 	if len(fixable) == 0 {
+		if headerBound {
+			httpError(w, http.StatusBadRequest,
+				"this connection carries its own headers, which the fix cannot put back; repoint it yourself so its credentials are kept")
+			return
+		}
 		httpError(w, http.StatusBadRequest,
 			"nothing the CLI can change; update this one in Claude Desktop under Customize, Connectors")
 		return
@@ -361,12 +372,28 @@ func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action
 					continue
 				}
 			}
+			// The fix is a remove and an add, with no transaction around it.
+			// Print what is about to be taken away first, so a failure
+			// between the two leaves the partner the line they need to put it
+			// back by hand rather than just a failed job.
+			onLine(fmt.Sprintf("%s (%s): %s %s -> %s", st.Name, st.Scope, st.Transport, st.URL, st.SuggestedURL))
 			// A remove that exits non-zero has nothing to remove, which is no
 			// reason to skip the add.
 			if code, err := client.McpRemove(jctx, dir, st.Name, st.Scope, onLine); err != nil {
 				return code, err
 			}
-			if code, err := client.McpAdd(jctx, dir, st.Name, st.SuggestedURL, st.Scope, onLine); err != nil || code != 0 {
+			code, err := client.McpAdd(jctx, dir, st.Name, st.SuggestedURL, st.Scope, st.Transport, onLine)
+			if err != nil || code != 0 {
+				// The remove landed and the add did not, so the connection is
+				// gone. Put the original back before reporting, on a context
+				// of its own: the job's may be the reason the add failed.
+				onLine(fmt.Sprintf("restoring %s at its previous address", st.Name))
+				rctx, cancel := context.WithTimeout(context.WithoutCancel(jctx), mcpRestoreTimeout)
+				if rcode, rerr := client.McpAdd(rctx, dir, st.Name, st.URL, st.Scope, st.Transport, onLine); rerr != nil || rcode != 0 {
+					onLine(fmt.Sprintf("could not restore %s: add it again with: claude mcp add --transport %s %s %s -s %s",
+						st.Name, st.Transport, st.Name, st.URL, st.Scope))
+				}
+				cancel()
 				return code, err
 			}
 		}
@@ -388,11 +415,7 @@ func findStale(list []mcp.Stale, name, scope, projectPath string) *mcp.Stale {
 // knownMarketplace looks a marketplace name up in `claude plugin marketplace
 // list --json`, so an action can only name one Claude Code already knows.
 func (s *Server) knownMarketplace(ctx context.Context, name string) (*claudecli.Marketplace, bool) {
-	client, ok := s.client(ctx)
-	if !ok {
-		return nil, false
-	}
-	list, err := client.MarketplaceList(ctx)
+	list, err := s.marketplaceList(ctx)
 	if err != nil {
 		return nil, false
 	}
@@ -400,33 +423,50 @@ func (s *Server) knownMarketplace(ctx context.Context, name string) (*claudecli.
 	return mp, mp != nil
 }
 
-// updatableFromPublic reports whether name's copy on this machine is the one
-// `claude plugin update <name>@rise-x-public` would change: a CLI install
-// record from the public marketplace, or no install record at all (the
-// reinstall the page offers for a copy with no version stamp). A copy Claude
-// Desktop synced from the account is not the CLI's to update.
-func (s *Server) updatableFromPublic(ctx context.Context, name string) bool {
-	client, ok := s.client(ctx)
-	if !ok {
+// ownedByPublic reports whether name's copy on this machine is the one
+// `claude plugin <verb> <name>@rise-x-public` would change: a CLI install
+// record from the public marketplace, or no install record at all (a first
+// install, and the reinstall the page offers for a copy with no version
+// stamp). A copy Claude Desktop synced from the account is not the CLI's to
+// touch. The predicate mirrors how gather derives PluginFact.InstallSource,
+// so the guard and the badge can never disagree.
+func (s *Server) ownedByPublic(ctx context.Context, name string) bool {
+	// The Desktop and organisation copies, which are the ones this guard
+	// exists for, are answered by the synced manifest: a file read, already
+	// cached, no claude spawn.
+	if _, synced := pickSynced(s.synced(), name); synced {
 		return false
 	}
-	res, err := client.PluginListAvailable(ctx)
-	if err != nil {
-		return true // unreadable, not "wrong source": leave the update alone
+	// A copy installed from another marketplace needs the CLI's own list, and
+	// an action handler must not wait on a spawn to answer a click. Only a
+	// list the page load already paid for is consulted; with none, the action
+	// goes ahead, which is also the only state in which no rendered page
+	// exists to have offered the button.
+	res, ok := s.plListCache.peek()
+	if !ok || res.err != nil {
+		return true
 	}
-	if installed, market := findInstalled(res.Installed, name); installed != nil {
+	if installed, market := findInstalled(res.res.Installed, name); installed != nil {
 		return market == claudecli.MarketplaceName
 	}
-	_, synced := pickSynced(s.synced(), name)
-	return !synced
+	return true
+}
+
+// refuseForeignCopy says why the action was refused, in the terms of the verb
+// the partner pressed.
+func refuseForeignCopy(action, plugin string) string {
+	switch action {
+	case "plugin.install":
+		return plugin + " is already installed from somewhere else; installing it from the public marketplace would leave two copies"
+	case "plugin.uninstall":
+		return "this copy of " + plugin + " did not come from the public marketplace; remove it where it was installed from"
+	default:
+		return "this copy of " + plugin + " did not come from the public marketplace; update it where it was installed from"
+	}
 }
 
 func (s *Server) marketplaceRegistered(ctx context.Context) bool {
-	client, ok := s.client(ctx)
-	if !ok {
-		return false
-	}
-	marketplaces, err := client.MarketplaceList(ctx)
+	marketplaces, err := s.marketplaceList(ctx)
 	if err != nil {
 		return false
 	}
@@ -497,20 +537,23 @@ func (s *Server) handleNpmrcClean(w http.ResponseWriter, body actionBody) {
 // take the same slot every job takes instead of racing one. fn stays
 // synchronous; the slot is only there to keep the two writers apart.
 func (s *Server) withWriteSlot(action string, fn func() error) error {
-	release := make(chan struct{})
-	_, err := s.jobs.Start(action, writeSlotTimeout, func(jctx context.Context, _ func(string)) (int, error) {
-		select {
-		case <-release:
-			return 0, nil
-		case <-jctx.Done():
-			return -1, jctx.Err()
-		}
-	})
+	release, err := s.jobs.Hold(action)
 	if err != nil {
 		return err
 	}
-	defer close(release)
-	return fn()
+	// Deferred, so a panic in fn frees the slot rather than wedging every
+	// later action behind a 409, and records the job as failed rather than as
+	// a write that succeeded. Start's own fn gets the same treatment.
+	var werr error
+	defer func() {
+		if r := recover(); r != nil {
+			release(fmt.Errorf("%s panicked: %v", action, r))
+			panic(r)
+		}
+		release(werr)
+	}()
+	werr = fn()
+	return werr
 }
 
 // writeSlotError answers a refused write: 409 while a job holds the slot,

@@ -1,10 +1,13 @@
 package npmrc
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/fsutil"
 )
 
 // Golden input/output pairs, inline (not checked-in files) so git's line-
@@ -31,19 +34,19 @@ func TestClean_GoldenCases(t *testing.T) {
 				"//npm.pkg.github.com/:_authToken=ghp_xxx\n",
 		},
 		{
-			// The ADO feed still serves @diana/* packages internal developers
-			// need, so ADO auth lines are never touched, whatever host an
+			// The private feed still serves the scoped packages internal developers
+			// need, so private-feed auth lines are never touched, whatever host an
 			// @rise-x:registry line names.
-			name: "ADO auth lines alone, no registry line: nothing changes",
+			name: "private-feed auth lines alone, no registry line: nothing changes",
 			in: "registry=https://registry.npmjs.org/\n" +
 				"; begin auth token\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/Example/npm/registry/:username=rise-x\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/Example/npm/registry/:_password=abcdef\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:username=rise-x\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:_password=abcdef\n" +
 				"; end auth token\n",
 			out: "registry=https://registry.npmjs.org/\n" +
 				"; begin auth token\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/Example/npm/registry/:username=rise-x\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/Example/npm/registry/:_password=abcdef\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:username=rise-x\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:_password=abcdef\n" +
 				"; end auth token\n",
 		},
 		{
@@ -67,39 +70,39 @@ func TestClean_GoldenCases(t *testing.T) {
 		},
 		{
 			// Igor's shape: a leftover @rise-x:registry line pointing at GHP,
-			// six ADO auth lines (still legitimate — @diana/* stays on ADO),
+			// six private-feed auth lines (still legitimate: that scope stays on the private feed),
 			// and one GHP token. Only the registry line's value changes; every
 			// other byte, both sets of auth lines included, is untouched.
 			name: "Igor's shape: only the @rise-x:registry line changes",
 			in: "registry=https://registry.npmjs.org/\n" +
 				"@rise-x:registry=https://npm.pkg.github.com\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:username=rise-x\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:_password=p1\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:email=e@x.com\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:username=rise-x\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:_password=p2\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:email=e@x.com\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:username=rise-x\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:_password=p1\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:email=e@x.com\n" +
+				"//packages.example.com/_packaging/Example/npm/:username=rise-x\n" +
+				"//packages.example.com/_packaging/Example/npm/:_password=p2\n" +
+				"//packages.example.com/_packaging/Example/npm/:email=e@x.com\n" +
 				"//npm.pkg.github.com/:_authToken=ghp_xxx\n",
 			out: "registry=https://registry.npmjs.org/\n" +
 				"@rise-x:registry=https://registry.npmjs.org/\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:username=rise-x\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:_password=p1\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/registry/:email=e@x.com\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:username=rise-x\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:_password=p2\n" +
-				"//rise-x.pkgs.visualstudio.com/_packaging/diana/npm/:email=e@x.com\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:username=rise-x\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:_password=p1\n" +
+				"//packages.example.com/_packaging/Example/npm/registry/:email=e@x.com\n" +
+				"//packages.example.com/_packaging/Example/npm/:username=rise-x\n" +
+				"//packages.example.com/_packaging/Example/npm/:_password=p2\n" +
+				"//packages.example.com/_packaging/Example/npm/:email=e@x.com\n" +
 				"//npm.pkg.github.com/:_authToken=ghp_xxx\n",
 			rewritten: []string{"@rise-x:registry=https://npm.pkg.github.com"},
 		},
 		{
-			name: "ADO-pointed registry line is rewritten, ADO auth lines untouched",
+			name: "private-feed registry line is rewritten, private-feed auth lines untouched",
 			in: "registry=https://registry.npmjs.org/\n" +
-				"@rise-x:registry=https://rise-x.pkgs.visualstudio.com\n" +
-				"//rise-x.pkgs.visualstudio.com/:_password=abcdef\n",
+				"@rise-x:registry=https://packages.example.com\n" +
+				"//packages.example.com/:_password=abcdef\n",
 			out: "registry=https://registry.npmjs.org/\n" +
 				"@rise-x:registry=https://registry.npmjs.org/\n" +
-				"//rise-x.pkgs.visualstudio.com/:_password=abcdef\n",
-			rewritten: []string{"@rise-x:registry=https://rise-x.pkgs.visualstudio.com"},
+				"//packages.example.com/:_password=abcdef\n",
+			rewritten: []string{"@rise-x:registry=https://packages.example.com"},
 		},
 		{
 			name: "registry already points at npmjs: nothing changes",
@@ -144,8 +147,8 @@ func TestClean_WritesBackupAndFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".npmrc")
 	original := "registry=https://registry.npmjs.org/\n" +
-		"@rise-x:registry=https://rise-x.pkgs.visualstudio.com\n" +
-		"//rise-x.pkgs.visualstudio.com/:_password=x\n"
+		"@rise-x:registry=https://packages.example.com\n" +
+		"//packages.example.com/:_password=x\n"
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +181,7 @@ func TestClean_WritesBackupAndFile(t *testing.T) {
 	}
 	want := "registry=https://registry.npmjs.org/\n" +
 		"@rise-x:registry=https://registry.npmjs.org/\n" +
-		"//rise-x.pkgs.visualstudio.com/:_password=x\n"
+		"//packages.example.com/:_password=x\n"
 	if string(cleaned) != want {
 		t.Fatalf("cleaned file = %q, want %q", cleaned, want)
 	}
@@ -222,8 +225,8 @@ func TestAnalyze_MatchesClean(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".npmrc")
 	original := "registry=https://registry.npmjs.org/\n" +
-		"@rise-x:registry=https://rise-x.pkgs.visualstudio.com\n" +
-		"//rise-x.pkgs.visualstudio.com/:_password=x\n"
+		"@rise-x:registry=https://packages.example.com\n" +
+		"//packages.example.com/:_password=x\n"
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +240,7 @@ func TestAnalyze_MatchesClean(t *testing.T) {
 	}
 	// The masked line and the host come from the same scan, so a message built
 	// from one always describes the file the other was read from.
-	if report.Host != "rise-x.pkgs.visualstudio.com" {
+	if report.Host != "packages.example.com" {
 		t.Fatalf("Analyze host = %q", report.Host)
 	}
 	if want := "@rise-x:registry=…"; report.Lines[0] != want {
@@ -333,8 +336,8 @@ func TestClean_PreservesFileMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".npmrc")
 	body := "registry=https://registry.npmjs.org/\n" +
-		"@rise-x:registry=https://rise-x.pkgs.visualstudio.com\n" +
-		"//rise-x.pkgs.visualstudio.com/:_password=x\n"
+		"@rise-x:registry=https://packages.example.com\n" +
+		"//packages.example.com/:_password=x\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -364,9 +367,9 @@ func TestClean_PreservesFileMode(t *testing.T) {
 
 func TestMask(t *testing.T) {
 	cases := map[string]string{
-		"//npm.pkg.github.com/:_authToken=ghp_secret":   "//npm.pkg.github.com/:_authToken=…",
-		"//rise-x.pkgs.visualstudio.com/:_password=b64": "//rise-x.pkgs.visualstudio.com/:_password=…",
-		"@rise-x:registry=https://npm.pkg.github.com":   "@rise-x:registry=…",
+		"//npm.pkg.github.com/:_authToken=ghp_secret": "//npm.pkg.github.com/:_authToken=…",
+		"//packages.example.com/:_password=b64":       "//packages.example.com/:_password=…",
+		"@rise-x:registry=https://npm.pkg.github.com": "@rise-x:registry=…",
 		"//host/:key":  "//host/:…",
 		"nothing-here": "nothing-here",
 	}
@@ -412,5 +415,43 @@ func TestClean_KeepsASymlinkedNpmrcLinked(t *testing.T) {
 	got, _ := os.ReadFile(tracked)
 	if !strings.Contains(string(got), npmjsRegistryURL) {
 		t.Fatalf("tracked file = %q, want the rewritten line", got)
+	}
+}
+
+// The rewrite landed; only the directory flush after it failed. Reporting
+// that as a failed write pointed the partner at a backup and invited them to
+// restore it over a correct fix.
+func TestClean_LateFlushFailureIsNotAFailedWrite(t *testing.T) {
+	real := fsutil.SyncDir
+	calls := 0
+	fsutil.SyncDir = func(dir string) error {
+		calls++
+		if calls == 1 { // the backup's own flush
+			return real(dir)
+		}
+		return errors.New("fsync: operation not supported")
+	}
+	t.Cleanup(func() { fsutil.SyncDir = real })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".npmrc")
+	body := "@rise-x:registry=https://rise-x.pkgs.example.com/_packaging/Example/npm/registry/\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Clean(path)
+	if err != nil {
+		t.Fatalf("err = %v, want the rewrite to count as done", err)
+	}
+	if len(res.Rewritten) != 1 {
+		t.Fatalf("rewritten = %v, want the one line", res.Rewritten)
+	}
+	got, rerr := os.ReadFile(path)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if !strings.Contains(string(got), "registry.npmjs.org") {
+		t.Fatalf(".npmrc = %q, want the rewrite the rename installed", got)
 	}
 }

@@ -250,3 +250,41 @@ func TestLocate_NotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
+
+// Reverse-lexical order put app-1.9.0 above app-1.10.0, so the probe verified
+// and adopted the older CLI while the UI reported its version as the one in
+// use. The ordered bundle path two functions over always got this right.
+func TestLocate_WindowsProbe_HighestVersionFirst(t *testing.T) {
+	env := baseEnv(t, "windows")
+	env.LocalAppData = filepath.Join(env.Home, "AppData", "Local")
+	env.AppData = filepath.Join(env.Home, "AppData", "Roaming")
+
+	root := filepath.Join(env.LocalAppData, "Programs", "Claude")
+	var newest string
+	for _, v := range []string{"app-1.9.0", "app-1.10.0", "app-1.2.3"} {
+		bin := filepath.Join(root, v, "claude.exe")
+		if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(bin, []byte(""), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if v == "app-1.10.0" {
+			newest = bin
+		}
+	}
+
+	// Every candidate verifies, so only the order decides which is adopted.
+	f := env.Runner.(*runnertest.Fake)
+	for _, v := range []string{"app-1.9.0", "app-1.10.0", "app-1.2.3"} {
+		verifiedOK(f, filepath.Join(root, v, "claude.exe"))
+	}
+
+	cli, err := Locate(context.Background(), env)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if cli.Path != newest {
+		t.Errorf("Path = %q, want the newest %q", cli.Path, newest)
+	}
+}
