@@ -121,12 +121,13 @@ steps to connect them:
    **Continue connecting**, then sign in.
 
 A connector added this way lives in your Claude account, where `claude mcp
-list` cannot see it, so the skill's own copy of the connection keeps reporting
-"Needs authentication" in the raw check output; that copy only matters when
-you run `claude` in a terminal. Rise-X Kit instead reads the connectors Claude
-Desktop hands your Claude Code sessions, and shows **Connected in Claude
-Desktop** once a session has had them. If **Recheck** does not see them yet,
-open a Claude Code session in Claude Desktop first.
+list` cannot see it: that command only knows the skill's own copy of the
+connection, which uses Claude Code's own sign-in and only matters when you run
+`claude` in a terminal. Rise-X Kit instead reads the connectors Claude Desktop
+hands your Claude Code sessions, and shows **Connected in Claude Desktop** once
+a session has had them, without the raw check output that would still say the
+skill's copy needs a sign-in. If **Recheck** does not see them yet, open a
+Claude Code session in Claude Desktop first.
 
 Connectors added in Claude Desktop before Rise-X moved to `mcp.rise-x.io` still
 point at the old address. Rise-X Kit lists any it finds under **Old Rise-X
