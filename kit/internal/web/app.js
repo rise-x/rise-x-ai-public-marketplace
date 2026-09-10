@@ -871,10 +871,16 @@ function desktopNote(names) {
     <div class="text-xs font-medium text-foreground">Connected in Claude Desktop</div>
     <div class="mt-1 text-xs text-muted-foreground">
       Your latest Claude Code session in Claude Desktop had ${esc(names.join(", "))}.
-      The skill's own copy of the connection, in the raw check output below, asks for Claude Code's own sign-in; that only matters when you run <code class="font-mono">claude</code> in a terminal.
+      Claude Code's own check, below, cannot see connectors added in Claude Desktop.
     </div>
   </div>`;
 }
+
+/** CLI_CHECK_NOTE sits above `claude mcp list`'s output when the Desktop app
+ * made the connection, since that output still says the skill's own copy
+ * needs a sign-in. */
+const CLI_CHECK_NOTE =
+  '<code class="font-mono">claude mcp list</code> knows only the skill\'s own copy of the connection, which uses Claude Code\'s own sign-in. That copy reads Needs authentication here even while the connectors work in Claude Desktop; it only matters when you run <code class="font-mono">claude</code> in a terminal.';
 
 function connectionRows(mcp) {
   const configured = mcp.configured || [];
@@ -937,8 +943,9 @@ function renderConnection() {
 
   const rows = connectionRows(mcp);
   const managed = mcp.verdict === "managed";
+  const desktop = mcp.verdict === "desktop";
 
-  const guide = mcp.verdict === "desktop"
+  const guide = desktop
     ? desktopNote(mcp.desktopConnectors || [])
     : managed
     ? `<div class="rounded-lg bg-fill-0 p-3.5">
@@ -997,10 +1004,11 @@ function renderConnection() {
       mcp.raw
         ? `<details data-slot="collapsible" data-detail="mcp-raw">
              <summary data-slot="collapsible-trigger" class="${btnClass("ghost", "sm")} w-fit list-none">
-               Show raw check output
+               ${desktop ? "Show Claude Code's own check" : "Show raw check output"}
                <svg viewBox="0 0 24 24" ${STROKE}>${ICON.chevronDown}</svg>
              </summary>
              <div data-slot="collapsible-content" class="mt-2 rounded-lg bg-fill-0 px-3.5 py-3">
+               ${desktop ? `<div class="mb-2.5 text-xs text-muted-foreground">${CLI_CHECK_NOTE}</div>` : ""}
                <pre class="kit-log text-muted-foreground">${esc(mcp.raw.trim())}</pre>
              </div>
            </details>`
