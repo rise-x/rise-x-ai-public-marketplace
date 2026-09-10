@@ -84,6 +84,9 @@ type Server struct {
 	nodeCache   probeCache[nodeProbe]
 	npmrcCache  probeCache[npmrc.Report]
 	syncedCache probeCache[[]synced.Plugin]
+	// connectorsCache holds the Rise-X connectors the Desktop app gave the
+	// account's latest Claude Code session.
+	connectorsCache probeCache[[]string]
 	// staleCache holds the MCP scan: ~/.claude.json carries every project the
 	// partner has ever opened, so it is not a file to re-read per request.
 	staleCache probeCache[[]mcp.Stale]
@@ -205,6 +208,7 @@ func (s *Server) invalidateGather() {
 func (s *Server) invalidateClaudeProbes() {
 	s.mcpCache.invalidate()
 	s.syncedCache.invalidate()
+	s.connectorsCache.invalidate()
 	s.staleCache.invalidate()
 	s.installLocCache.invalidate()
 	s.plListCache.invalidate()
@@ -377,8 +381,8 @@ const remoteCatalogTimeout = 5 * time.Second
 
 // isKnownPlugin reports whether name is a plugin this marketplace ships. It
 // never runs a gather - an action handler must not wait on one - so it takes
-// the CLI's own "available" list when a gather has already filled it, then
-// the local marketplace clone, then the public catalog.
+// the catalog names a gather has already filled, then the local marketplace
+// clone, then the public catalog.
 func (s *Server) isKnownPlugin(ctx context.Context, name string) bool {
 	if name == "" {
 		return false

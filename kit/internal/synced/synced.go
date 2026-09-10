@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 )
 
 // installedByOrg is manifest.json's "installedBy" value for a plugin the
@@ -60,16 +62,23 @@ type pluginFile struct {
 	Version string `json:"version"`
 }
 
-// Read collects every plugin listed in the account manifests under
-// <desktopDataDir>/local-agent-mode-sessions/<org>/<account>/rpm. An entry
-// whose plugin directory is not on disk is skipped: the manifest names what
-// the account wants, the directory is what the machine actually has.
+// Read collects every plugin listed in the signed-in account's manifests under
+// <desktopDataDir>/local-agent-mode-sessions/<account>/<org>/rpm. Every
+// account that ever signed in on the machine leaves its manifests behind, and
+// only the current one's say what this account has: reading them all reported
+// a previous account's organisation pushes as this one's. An entry whose
+// plugin directory is not on disk is skipped: the manifest names what the
+// account wants, the directory is what the machine actually has.
 func Read(desktopDataDir string) ([]Plugin, error) {
 	if desktopDataDir == "" {
 		return nil, nil
 	}
+	account := signedInAccount(desktopDataDir)
+	if account == "" {
+		return nil, nil
+	}
 	paths, _ := filepath.Glob(filepath.Join(desktopDataDir,
-		"local-agent-mode-sessions", "*", "*", "rpm", "manifest.json"))
+		"local-agent-mode-sessions", account, "*", "rpm", "manifest.json"))
 
 	var out []Plugin
 	var errs []error
@@ -128,6 +137,94 @@ func ReadClaudeDir(claudeDir string) ([]Plugin, error) {
 		out = append(out, Plugin{Name: name, Version: version, Org: true, Dir: dir})
 	}
 	return out, nil
+}
+
+// Connector is one connector the Desktop app handed a Claude Code session.
+// A connector added under Customize > Connectors lives in the account, and
+// the session file is the only place on disk that names it: by the name the
+// partner typed and the tools it serves, never by address.
+type Connector struct {
+	Name  string
+	Tools []string
+}
+
+type sessionFile struct {
+	RemoteMcpServersConfig []struct {
+		Name  string `json:"name"`
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	} `json:"remoteMcpServersConfig"`
+}
+
+// Connectors reads the connectors the Desktop app gave the signed-in
+// account's latest Claude Code session, from
+// <desktopDataDir>/claude-code-sessions/<account>/<org>/local_*.json. The app
+// keeps that file current while the session runs, so the newest one by
+// modification time is the account's connectors as of its last activity.
+func Connectors(desktopDataDir string) ([]Connector, error) {
+	if desktopDataDir == "" {
+		return nil, nil
+	}
+	account := signedInAccount(desktopDataDir)
+	if account == "" {
+		return nil, nil
+	}
+	paths, _ := filepath.Glob(filepath.Join(desktopDataDir,
+		"claude-code-sessions", account, "*", "local_*.json"))
+	newest, at := "", time.Time{}
+	for _, path := range paths {
+		fi, err := os.Stat(path)
+		if err != nil || !fi.ModTime().After(at) {
+			continue
+		}
+		newest, at = path, fi.ModTime()
+	}
+	if newest == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(newest)
+	if err != nil {
+		return nil, err
+	}
+	var f sessionFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("%s: %w", newest, err)
+	}
+	out := make([]Connector, 0, len(f.RemoteMcpServersConfig))
+	for _, c := range f.RemoteMcpServersConfig {
+		tools := make([]string, 0, len(c.Tools))
+		for _, t := range c.Tools {
+			tools = append(tools, t.Name)
+		}
+		out = append(out, Connector{Name: c.Name, Tools: tools})
+	}
+	return out, nil
+}
+
+// configFile is the one key of the Desktop app's config.json read here.
+type configFile struct {
+	LastKnownAccountUUID string `json:"lastKnownAccountUuid"`
+}
+
+// signedInAccount reads which account the Desktop app is signed in as. Empty
+// when that cannot be read: no manifest can then be told apart from a
+// previous account's, so none is trusted.
+func signedInAccount(desktopDataDir string) string {
+	data, err := os.ReadFile(filepath.Join(desktopDataDir, "config.json"))
+	if err != nil {
+		return ""
+	}
+	var cfg configFile
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+	id := cfg.LastKnownAccountUUID
+	// It becomes one segment of the glob above, so it must be exactly that.
+	if id == "" || id == "." || id == ".." || id != filepath.Base(id) || strings.ContainsAny(id, `*?[\`) {
+		return ""
+	}
+	return id
 }
 
 func readVersion(dir string) string {

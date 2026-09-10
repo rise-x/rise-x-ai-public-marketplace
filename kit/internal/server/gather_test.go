@@ -36,11 +36,20 @@ const installedPluginList = `{
   ]
 }`
 
-// marketplaceClone builds a marketplace clone directory: a plugin.json per
-// plugin, and a .git/HEAD only when withGit.
+// marketplaceClone builds a marketplace clone directory: the marketplace.json
+// naming both plugins, a plugin.json per plugin, and a .git/HEAD only when
+// withGit.
 func marketplaceClone(t *testing.T, withGit bool) string {
 	t.Helper()
 	dir := t.TempDir()
+	manifestDir := filepath.Join(dir, ".claude-plugin")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"rise-x-public","plugins":[{"name":"rise-x-mcp"},{"name":"rise-x-apps"}]}`
+	if err := os.WriteFile(filepath.Join(manifestDir, "marketplace.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for name, version := range map[string]string{"rise-x-mcp": "1.3.1", "rise-x-apps": "1.5.0"} {
 		manifestDir := filepath.Join(dir, "plugins", name, ".claude-plugin")
 		if err := os.MkdirAll(manifestDir, 0o755); err != nil {
@@ -101,6 +110,37 @@ func doctorCheck(t *testing.T, baseURL, token, id string) doctor.Check {
 	}
 	t.Fatalf("no check %q in %+v", id, got.Checks)
 	return doctor.Check{}
+}
+
+// `claude plugin list --available` leaves out whatever is installed, so a
+// skill's row vanished the moment its Install finished. The catalog is the
+// clone's marketplace.json, in its order, whatever is installed.
+func TestGather_InstalledPluginKeepsItsRow(t *testing.T) {
+	fake := newFakeCLI(`{
+  "installed": [
+    {"id":"rise-x-apps@rise-x-public","version":"1.3.0","scope":"user","enabled":true,"installPath":"/tmp/apps"}
+  ],
+  "available": [
+    {"pluginId":"rise-x-mcp@rise-x-public","name":"rise-x-mcp","marketplaceName":"rise-x-public","source":"./plugins/rise-x-mcp"}
+  ]
+}`)
+	fake.Set(fakeCLIPath, []string{"plugin", "marketplace", "list", "--json"}, runnertest.Result{
+		Stdout: withInstallLocation(t, marketplaceListFixture, marketplaceClone(t, false))})
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath)})
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	var names []string
+	for _, p := range got.Plugins {
+		names = append(names, p.Name)
+	}
+	if want := []string{"rise-x-mcp", "rise-x-apps"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("plugins = %v, want %v", names, want)
+	}
+	apps := got.Plugins[1]
+	if !apps.Installed || apps.InstallSource != doctor.SourcePublic || apps.LocalVersion != "1.3.0" {
+		t.Fatalf("rise-x-apps = %+v, want installed from the public marketplace at 1.3.0", apps)
+	}
 }
 
 // A 404 means GitHub answered, so the row must say what went wrong rather than

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -244,16 +245,12 @@ func autoUpdateMarketplace(plugins []PluginInfo) string {
 }
 
 func (s *Server) gatherPlugins(ctx context.Context, installLocation string, plResult claudecli.PluginListResult, plErr error, overview *OverviewResponse, facts *doctor.Facts) {
-	var names []string
-	if plErr == nil {
-		for _, a := range plResult.Available {
-			if a.MarketplaceName == claudecli.MarketplaceName {
-				names = append(names, a.Name)
-			}
-		}
-	}
-	if len(names) == 0 {
-		names = s.marketplaceNames(ctx, installLocation)
+	// The catalog is marketplace.json, not the CLI's "available" list: that
+	// list leaves out whatever is installed, so a skill's row vanished the
+	// moment its Install finished.
+	names := s.marketplaceNames(ctx, installLocation)
+	if len(names) == 0 && plErr == nil {
+		names = publicPluginNames(plResult)
 	}
 	s.setCatalogNames(names)
 
@@ -330,6 +327,24 @@ func (s *Server) gatherPlugins(ctx context.Context, installLocation string, plRe
 		overview.Plugins = append(overview.Plugins, pi)
 		facts.Plugins = append(facts.Plugins, pi.PluginFact)
 	}
+}
+
+// publicPluginNames is every plugin the CLI lists from the public marketplace,
+// installed or not, for when marketplace.json itself cannot be read.
+func publicPluginNames(res claudecli.PluginListResult) []string {
+	var names []string
+	for _, a := range res.Available {
+		if a.MarketplaceName == claudecli.MarketplaceName {
+			names = append(names, a.Name)
+		}
+	}
+	for _, ip := range res.Installed {
+		id, market, ok := strings.Cut(ip.ID, "@")
+		if ok && market == claudecli.MarketplaceName && !slices.Contains(names, id) {
+			names = append(names, id)
+		}
+	}
+	return names
 }
 
 // findInstalled picks the CLI-installed copy of name and the marketplace it
@@ -504,7 +519,35 @@ func (s *Server) gatherMcp(ctx context.Context, client *claudecli.Client, plResu
 			info.Message = "" // the Desktop app owns them; nothing failed
 		}
 	}
+	// A connector added under Customize > Connectors lives in the account, in
+	// no file `claude mcp list` reads, so the plugin's own copy of the
+	// connection keeps asking for Claude Code's sign-in however many times the
+	// partner signs in through the Desktop app. What the app handed the
+	// latest Claude Code session answers instead; only a copy the CLI itself
+	// has connected, or no copy at all, outranks that.
+	switch mcp.Verdict(info.Verdict) {
+	case mcp.VerdictConnected, mcp.VerdictNotInstalled:
+	default:
+		if names := s.desktopConnectors(); len(names) > 0 {
+			info.Verdict, info.DesktopConnectors, info.Message = string(mcp.VerdictDesktop), names, ""
+		}
+	}
 	overview.Mcp = info
+}
+
+// desktopConnectors names the Rise-X connectors the Desktop app gave the
+// account's latest Claude Code session.
+func (s *Server) desktopConnectors() []string {
+	return s.connectorsCache.get(func() []string {
+		connectors, _ := synced.Connectors(s.desktopDataDir)
+		var names []string
+		for _, c := range connectors {
+			if mcp.RiseXToolset(c.Tools) {
+				names = append(names, c.Name)
+			}
+		}
+		return names
+	})
 }
 
 // syncedMcpConfig reads the .mcp.json bundled with the account-synced

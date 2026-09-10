@@ -101,18 +101,33 @@ A skill can also arrive without you installing it: your organisation can push
 it to your Claude account, and Claude Desktop then sets it up for you. Rise-X
 Kit shows those rows as **Installed by your organisation**, with no buttons —
 installing the same skill from the public marketplace would leave you with two
-copies. A skill you installed from another marketplace that mirrors the public
-one reads **Installed from &lt;marketplace&gt;**, and updates from that same
+copies. Only the account currently signed in to Claude Desktop counts: what an
+earlier account received on the same machine is not shown as yours. A skill
+you installed from another marketplace that mirrors the public one reads
+**Installed from &lt;marketplace&gt;**, and updates from that same
 marketplace.
 
 **Rise-X connection** shows whether the two Rise-X MCP (Model Context Protocol,
-the interface Claude uses to reach Rise-X) servers are connected, with three
+the interface Claude uses to reach Rise-X) servers are connected, with the
 steps to connect them:
 
-1. In Claude Desktop, go to **Customize** > **Connectors**, then press **Add**.
+1. In Claude Desktop, go to **Customize** > **Connectors**, press **Add**,
+   then **Add custom connector**.
 2. Enter the name and URL for each server: `rise-x-test` at
    `https://mcp-test.rise-x.io/mcp`, and `rise-x` at `https://mcp.rise-x.io/mcp`.
-3. Sign in when your browser prompts you.
+   Press **Continue**, keep what Claude Desktop detected, add no headers, and
+   press **Add**.
+3. Open the new connector, press **Connect**, and finish in your browser:
+   **Continue connecting**, then sign in.
+
+A connector added this way lives in your Claude account, where `claude mcp
+list` cannot see it: that command only knows the skill's own copy of the
+connection, which uses Claude Code's own sign-in and only matters when you run
+`claude` in a terminal. Rise-X Kit instead reads the connectors Claude Desktop
+hands your Claude Code sessions, and shows **Connected in Claude Desktop** once
+a session has had them, without the raw check output that would still say the
+skill's copy needs a sign-in. If **Recheck** does not see them yet, open a
+Claude Code session in Claude Desktop first.
 
 Connectors added in Claude Desktop before Rise-X moved to `mcp.rise-x.io` still
 point at the old address. Rise-X Kit lists any it finds under **Old Rise-X

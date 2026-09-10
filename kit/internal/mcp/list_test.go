@@ -66,6 +66,15 @@ func TestOverall(t *testing.T) {
 	}
 }
 
+func TestRiseXToolset(t *testing.T) {
+	if !RiseXToolset([]string{"add_components", "get_active_ecosystem", "list_flows"}) {
+		t.Error("the Rise-X tool list was not recognised")
+	}
+	if RiseXToolset([]string{"create_draft", "reply"}) || RiseXToolset(nil) {
+		t.Error("a connector without the Rise-X tools passed for Rise-X")
+	}
+}
+
 func TestReadConfig(t *testing.T) {
 	dir := t.TempDir()
 	body := `{
