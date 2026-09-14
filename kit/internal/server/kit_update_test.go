@@ -160,6 +160,9 @@ func TestHandler_KitUpdate_ReplacesBinaryAndRequestsRestart(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the rename-aside path is not exercised on this runner")
 	}
+	if _, ok := selfupdate.AssetName("v0", runtime.GOOS, runtime.GOARCH); !ok {
+		t.Skipf("no release asset for %s/%s, so nothing to download here", runtime.GOOS, runtime.GOARCH)
+	}
 	dir := t.TempDir()
 	exe := filepath.Join(dir, selfupdate.BinaryName(runtime.GOOS))
 	if err := os.WriteFile(exe, []byte("old build"), 0o755); err != nil {
