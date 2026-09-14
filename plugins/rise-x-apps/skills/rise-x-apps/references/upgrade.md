@@ -59,8 +59,10 @@ habit.
 
 1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
    outside), then `pnpm install`. If the app passes `useHistory` to
-   `agents.run` or `deps.<alias>.agent.run`, delete the argument: 0.14.0 drops
-   it, so the build fails on it, and the run is logged either way.
+   `agents.run` or `deps.<alias>.agent.run` — `useHistory: false` is what the
+   old skill taught — delete the argument: 0.14.0 drops it, so the build fails
+   on it, and the gateway ignores the flag anyway, so those runs are already
+   being logged.
 2. **Move the build onto the preset.** Read the app's dev port out of
    `webpack.local.config.js` first (`devServer.port`) — that file goes in this
    step and is the only place the value lives. Then delete `webpack.config.js`
