@@ -600,3 +600,36 @@ func TestRun_Npmrc_Detail(t *testing.T) {
 		t.Fatalf("detail = %q", c.Detail)
 	}
 }
+
+func TestRun_Kit(t *testing.T) {
+	f := baseFacts()
+	f.KitVersion, f.KitChecked = "v0.1.0", true
+	checks := Run(f)
+	if checks[0].ID != "kit" || checks[0].Status != StatusOK {
+		t.Fatalf("first check = %+v, want an ok kit row", checks[0])
+	}
+
+	f.KitLatest, f.KitLatestURL, f.KitUpdate, f.KitSelfUpdate = "v0.2.0", "https://github.com/rel", true, true
+	c := findCheck(t, Run(f), "kit")
+	if c.Status != StatusWarn || c.Fix != "kit.update" || c.FixLabel == "" {
+		t.Fatalf("kit check = %+v", c)
+	}
+
+	f.KitSelfUpdate = false
+	c = findCheck(t, Run(f), "kit")
+	if c.Fix != "" || !strings.Contains(c.Message, "https://github.com/rel") {
+		t.Fatalf("kit check without a self-update = %+v", c)
+	}
+
+	f.KitCheckError = "GitHub could not be reached"
+	if c = findCheck(t, Run(f), "kit"); c.Status != StatusSkip {
+		t.Fatalf("kit check with an error = %+v", c)
+	}
+
+	f = baseFacts()
+	for _, c := range Run(f) {
+		if c.ID == "kit" {
+			t.Fatal("a build that did not check got a kit row")
+		}
+	}
+}

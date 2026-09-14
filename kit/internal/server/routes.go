@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/jobs"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/npmrc"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/selfupdate"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/settings"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/web"
 )
@@ -256,6 +259,10 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		s.handleNodeInstall(w, ctx, name)
 	case "mcp.fix":
 		s.handleMcpFix(w, ctx, name, body)
+	case "mcp.remove":
+		s.handleMcpRemove(w, ctx, name, body)
+	case "kit.update":
+		s.handleKitUpdate(w, name)
 	case "cli.rescan":
 		cli, _ := s.relocate(ctx)
 		s.nodeCache.invalidate()
@@ -399,6 +406,115 @@ func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action
 		}
 		return 0, nil
 	})
+}
+
+// kitUpdateJobTimeout bounds the download of a release asset of a few MB.
+const kitUpdateJobTimeout = 5 * time.Minute
+
+// restartDelay is how long the finished job stays readable before this
+// process stops serving, so the page's poll can see it succeed and switch to
+// waiting for the new one.
+const restartDelay = 1500 * time.Millisecond
+
+// handleKitUpdate downloads the newest release for this platform, verifies it
+// against the release's checksums, swaps it in for the running binary and asks
+// main to relaunch. It goes through the jobs store directly: it needs no
+// claude CLI, and finishing must not raise the "restart Claude Code" hint.
+func (s *Server) handleKitUpdate(w http.ResponseWriter, action string) {
+	if s.exePath == "" {
+		httpError(w, http.StatusBadRequest, "cannot tell which file is running, so it cannot be replaced")
+		return
+	}
+	id, err := s.jobs.Start(action, kitUpdateJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
+		rel, newer, err := s.updates.Latest(jctx, s.version)
+		if err != nil {
+			return -1, fmt.Errorf("check for a newer version: %w", err)
+		}
+		if !newer {
+			return -1, fmt.Errorf("%s is already the newest version", s.version)
+		}
+		onLine(fmt.Sprintf("updating Rise-X Kit %s -> %s", s.version, rel.Version))
+		newPath, err := s.updates.Download(jctx, rel, runtime.GOOS, runtime.GOARCH, filepath.Dir(s.exePath), onLine)
+		if err != nil {
+			return -1, err
+		}
+		if err := selfupdate.Apply(newPath, s.exePath); err != nil {
+			os.Remove(newPath)
+			return -1, fmt.Errorf("replace %s: %w", s.exePath, err)
+		}
+		onLine("restarting Rise-X Kit")
+		time.AfterFunc(restartDelay, s.requestRestart)
+		return 0, nil
+	})
+	if err != nil {
+		if errors.Is(err, jobs.ErrBusy) {
+			httpError(w, http.StatusConflict, "a job is already running")
+			return
+		}
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"jobId": id})
+}
+
+// handleMcpRemove takes away the Rise-X connections Claude Code holds outside
+// the plugin: the one the body names, or every removable one when it names
+// none. Like mcp.fix, the targets come from the scan, never from the request.
+func (s *Server) handleMcpRemove(w http.ResponseWriter, ctx context.Context, action string, body actionBody) {
+	targets := s.connections()
+	if name := body.Name; name != "" {
+		match := findConnection(targets, name, body.Scope, body.ProjectPath)
+		if match == nil {
+			httpError(w, http.StatusBadRequest, "unknown connection target")
+			return
+		}
+		targets = []mcp.Connection{*match}
+	}
+
+	var removable []mcp.Connection
+	for _, c := range targets {
+		if c.Removable() {
+			removable = append(removable, c)
+		}
+	}
+	if len(removable) == 0 {
+		httpError(w, http.StatusBadRequest,
+			"nothing the CLI can remove; take this one out in Claude Desktop under Customize, Connectors")
+		return
+	}
+
+	s.startJob(w, ctx, action, needsCLI, mcpFixJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
+		client, ok := s.client(jctx)
+		if !ok {
+			return -1, claudecli.ErrNotFound
+		}
+		for _, c := range removable {
+			dir := ""
+			if c.Scope == mcp.ScopeLocal {
+				dir = c.ProjectPath
+				if _, err := os.Stat(dir); err != nil {
+					onLine(fmt.Sprintf("skipping %s: %s no longer exists", c.Name, dir))
+					continue
+				}
+			}
+			onLine(fmt.Sprintf("removing %s (%s): %s", c.Name, c.Scope, c.URL))
+			if code, err := client.McpRemove(jctx, dir, c.Name, c.Scope, onLine); err != nil || code != 0 {
+				return code, err
+			}
+		}
+		return 0, nil
+	})
+}
+
+func findConnection(list []mcp.Connection, name, scope, projectPath string) *mcp.Connection {
+	for i := range list {
+		c := &list[i]
+		if c.Name == name && c.Scope == scope &&
+			(c.Scope != mcp.ScopeLocal || c.ProjectPath == projectPath) {
+			return c
+		}
+	}
+	return nil
 }
 
 func findStale(list []mcp.Stale, name, scope, projectPath string) *mcp.Stale {

@@ -548,3 +548,20 @@ func TestGather_DesktopConnectorsAnswerNeedsAuth(t *testing.T) {
 		})
 	}
 }
+
+// Removing the rise-x-mcp skill does not remove a connector added in Claude
+// Desktop, so the card must go on showing it rather than "not installed".
+func TestGather_DesktopConnectorsShownWithoutPlugin(t *testing.T) {
+	fake := newFakeCLI(pluginListFixture)
+	fake.Set(fakeCLIPath, []string{"mcp", "list"}, runnertest.Result{Stdout: "Checking MCP server health…\n\nplugin:context7:context7: npx - ✔ Connected\n"})
+	dataDir, _ := signedInRoot(t)
+	writeDesktopSession(t, dataDir, `{"remoteMcpServersConfig":[`+
+		`{"uuid":"u2","name":"Rise-X","tools":[{"name":"get_active_ecosystem"}]}]}`)
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath), DesktopDataDir: dataDir})
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if got.Mcp.Verdict != "desktop" || !slices.Equal(got.Mcp.DesktopConnectors, []string{"Rise-X"}) {
+		t.Fatalf("mcp = %+v, want the desktop verdict naming Rise-X", got.Mcp)
+	}
+}

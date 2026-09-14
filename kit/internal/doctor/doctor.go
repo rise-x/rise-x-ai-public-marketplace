@@ -85,6 +85,17 @@ type PluginFact struct {
 type Facts struct {
 	GOOS string
 
+	// KitVersion is the running kit's own version; KitLatest the newest
+	// release it may move to. KitChecked is false for a development build,
+	// which never asks GitHub. KitCheckError is why the check could not run.
+	KitVersion    string
+	KitChecked    bool
+	KitLatest     string
+	KitLatestURL  string
+	KitUpdate     bool
+	KitSelfUpdate bool
+	KitCheckError string
+
 	CLIFound   bool
 	CLIVersion string
 
@@ -151,12 +162,39 @@ func Run(f Facts) []Check {
 		}
 	}
 
-	checks := append([]Check{cliCheck(f)}, needCLI...)
+	checks := []Check{cliCheck(f)}
+	if f.KitChecked {
+		checks = append([]Check{kitCheck(f)}, checks...)
+	}
+	checks = append(checks, needCLI...)
 	checks = append(checks, mcpStaleCheck(f), nodeCheck(f), npmrcCheck(f))
 	if f.GOOS == "windows" {
 		checks = append(checks, gitWindowsCheck(f))
 	}
 	return append(checks, envAutoupdaterCheck(f))
+}
+
+// kitCheck reports on the kit itself. It leads the list: every other row is
+// only as good as the build that produced it.
+func kitCheck(f Facts) Check {
+	const id = "kit"
+	const title = "Rise-X Kit"
+	if f.KitCheckError != "" {
+		return notChecked(id, title, f.KitCheckError)
+	}
+	if !f.KitUpdate {
+		return Check{ID: id, Status: StatusOK, Title: title,
+			Message: fmt.Sprintf("You have the newest version, %s.", f.KitVersion)}
+	}
+	check := Check{ID: id, Status: StatusWarn, Title: title,
+		Message: fmt.Sprintf("Version %s is available; you have %s.", f.KitLatest, f.KitVersion)}
+	if f.KitSelfUpdate {
+		check.Fix, check.FixLabel = "kit.update", "Update Rise-X Kit"
+		check.FixTitle = "Downloads the new version, swaps it in and restarts Rise-X Kit."
+	} else {
+		check.Message += " Download it from " + f.KitLatestURL
+	}
+	return check
 }
 
 const waitingForMarketplace = "Waiting until the Rise-X marketplace is registered."

@@ -20,12 +20,14 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/buildinfo"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/claudemd"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/instance"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/selfupdate"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/server"
 )
 
@@ -59,6 +61,11 @@ func run() int {
 			return 1
 		}
 		return 0
+	}
+
+	// A Windows self-update leaves the previous binary beside this one.
+	if exe, err := os.Executable(); err == nil {
+		selfupdate.Cleanup(exe)
 	}
 
 	// A partner who closed the tab has no way back to a port that was picked
@@ -108,7 +115,11 @@ func run() int {
 		log.Print(refusal(requested))
 		return 1
 	}
-	defer releaseLock()
+	// Released once: the restart path below hands the lock over before the
+	// deferred release would.
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(releaseLock) }
+	defer release()
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
@@ -171,9 +182,12 @@ func run() int {
 	defer stopSignals()
 
 	code := 0
+	restart := false
 	select {
 	case <-sigCtx.Done():
 	case <-srv.Quit():
+	case <-srv.Restart():
+		restart = true
 	case err := <-serveErr:
 		log.Printf("serve: %v", err)
 		code = 1
@@ -182,7 +196,10 @@ func run() int {
 	// Cancel the running job before we stop serving: http.Server.Shutdown
 	// waits for connections, not for jobs, and the children run in their own
 	// process group, so a Ctrl-C in the launching terminal never reaches them.
-	srv.Jobs().CancelAll()
+	// A restart is asked for by the update job itself, which has finished.
+	if !restart {
+		srv.Jobs().CancelAll()
+	}
 	if !srv.Jobs().WaitIdle(shutdownGrace) {
 		log.Printf("a job was still running after %s; exiting anyway", shutdownGrace)
 	}
@@ -190,7 +207,35 @@ func run() int {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	_ = httpServer.Shutdown(ctx)
+
+	if restart {
+		// The new binary is in place of this one. It must find no record and
+		// no lock, or it would reopen this window instead of serving, so both
+		// go before it starts. The page is polling for the new version on the
+		// same port, so that port and no browser are what it gets.
+		instance.Clear()
+		release()
+		exe, err := os.Executable()
+		if err == nil {
+			err = selfupdate.Relaunch(exe, relaunchArgs(actualPort, *claudeDir))
+		}
+		if err != nil {
+			log.Printf("could not start the updated Rise-X Kit: %v; start it again yourself", err)
+			return 1
+		}
+		fmt.Printf("updated; the new Rise-X Kit is taking over %s\n", url)
+	}
 	return code
+}
+
+// relaunchArgs is the command line the updated binary gets: the same port,
+// so the open page finds it, and the same config directory.
+func relaunchArgs(port int, claudeDir string) []string {
+	args := []string{"-port", fmt.Sprint(port), "-no-browser"}
+	if claudeDir != defaultClaudeDir() {
+		args = append(args, "-claude-dir", claudeDir)
+	}
+	return args
 }
 
 // action is what a launch does once it knows what else is on the machine.
