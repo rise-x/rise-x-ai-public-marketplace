@@ -90,6 +90,14 @@ are planned.
 **Summary** is the banner under the page header: it says whether your setup is
 ready, and links straight to any check that needs you.
 
+When a newer Rise-X Kit exists, a second banner offers **Update**. Rise-X Kit
+downloads the new version from the GitHub release, checks it against the
+release's checksums, swaps it in for the running copy and restarts on the same
+address; the page reloads on its own. A copy running on a platform without a
+release build gets a link to the release page instead. Every button that
+changes something asks first, in a dialog that lists exactly what it will
+change.
+
 **Claude Code** shows the `claude` CLI that Rise-X Kit found — its path and
 version — or, if none is found, an **Install** button and a **Rescan** button.
 
@@ -139,6 +147,14 @@ When your organisation delivers the Rise-X skill, its connections belong to
 Claude Desktop. `claude mcp list` cannot see them, so the card reads **Managed
 in Claude Desktop** and shows the addresses from the skill's own configuration.
 
+Removing the Rise-X skill does not remove its connections. A connector you
+added in Claude Desktop stays in your account, and a connection added with the
+`claude` CLI stays in `~/.claude.json`. The card keeps showing both after an
+uninstall: connections Claude Code keeps on its own are listed with a
+**Remove** button each, and the **Remove** dialog for the Rise-X skill offers
+to take them out at the same time. A Claude Desktop connector can only be
+removed in **Customize** > **Connectors**; the card says so.
+
 **Automatic updates** is a switch that turns on marketplace auto-update, so skill
 fixes arrive in the background instead of waiting for a manual update.
 
@@ -146,6 +162,7 @@ fixes arrive in the background instead of waiting for a manual update.
 
 | Check | What it means | What Fix does |
 |---|---|---|
+| Rise-X Kit | Whether this copy of Rise-X Kit is the newest release. A development build never checks | Downloads the new version, checks it against the release's checksums, replaces the running copy and restarts it |
 | Claude Code CLI | Whether `claude` was found, and its version | Installs the CLI, then rescans |
 | Rise-X marketplace | Whether the Rise-X marketplace is registered. Reads "Skills come from your organisation" when every skill is delivered by your account | Registers the marketplace |
 | Auto-update | Whether marketplace auto-update is on, for whichever marketplace your skills came from. Your organisation's own deliveries need no switch | Turns auto-update on for that marketplace |
@@ -177,7 +194,10 @@ your shell profile the way it normally does, so new shells find Node.
 The automatic-updates switch writes a documented Claude Code
 setting; whether Claude Code honors that setting at user scope isn't confirmed
 yet. Signing in to Rise-X always happens in Claude and your browser, never
-inside Rise-X Kit.
+inside Rise-X Kit. Updating Rise-X Kit itself downloads the release asset for
+your platform from GitHub, verifies its sha256 against the release's
+`checksums.txt`, and replaces only its own binary; nothing else on the machine
+changes.
 
 
 ## For maintainers
@@ -210,6 +230,9 @@ Go 1.23, no third-party dependencies.
 - `internal/npmrc` — finds and repoints leftover `@rise-x:registry` lines in
   `~/.npmrc`.
 - `internal/runner` — runs external commands without a shell.
+- `internal/selfupdate` — finds the newest `kit-v*` GitHub release, downloads
+  and checksum-verifies the asset for this platform, swaps the binary in and
+  relaunches it.
 - `internal/server` — the HTTP API the page calls, including its CSRF and host
   checks.
 - `internal/settings` — the one writer for `~/.claude/settings.json`.

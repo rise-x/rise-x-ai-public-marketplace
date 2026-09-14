@@ -173,6 +173,13 @@ Rise-X MCP connection, and run a setup doctor without a terminal. It carries
 no plugin version, is not listed in `marketplace.json`, and never reaches the
 private marketplace.
 
+The kit updates itself from GitHub Releases (`kit/internal/selfupdate`): it
+reads the newest `kit-v*` release and downloads
+`rise-x-kit_<version>_darwin_universal.tar.gz` or
+`rise-x-kit_<version>_windows_amd64.zip`, checked against `checksums.txt`.
+Those three asset names are a contract with every kit already installed;
+renaming one in `kit-release.yml` breaks the update button for partners.
+
 It has its own release track, independent of `release/*`: a PR touches
 `plugins/**` or `kit/**`, never both.
 
