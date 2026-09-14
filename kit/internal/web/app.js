@@ -6,7 +6,10 @@
  * <meta name="risex-token">, injected by the server).
  *
  * GET /api/overview -> 200
- *   { kitVersion, cli: { found, path?, version?,
+ *   { kitVersion,
+ *     kit?: { latest?, latestUrl?, updateAvailable, canSelfUpdate,
+ *       checkError? },     // absent for a development build, which never checks
+ *     cli: { found, path?, version?,
  *       source?: "path"|"local-bin"|"desktop-bundle"|"windows-probe" } | null,
  *     marketplace?: { registered, installLocation?,
  *       autoUpdate?: bool,   // absent = key not set in settings.json
@@ -29,6 +32,8 @@
  *       desktopConnectors?: [string], // the Rise-X connectors the Desktop app gave the latest session
  *       servers?: [{ name, target, status }], configured?: [{ name, type?, url?, command?, args? }],
  *       stale?: [{ name, scope: "user"|"local"|"desktop", projectPath?, url, suggestedUrl }],
+ *       // the Rise-X servers configured outside the plugin; they outlive an uninstall
+ *       connections?: [{ name, scope: "user"|"local"|"desktop", projectPath?, url }],
  *       message?: string,    // why the verdict is unknown, when it is
  *       raw?: string },      // full `claude mcp list` text, redacted
  *     reloadHint: bool }
@@ -52,6 +57,10 @@
  *     plugin.install / plugin.uninstall {name},
  *     plugin.update {name, marketplace?},
  *     mcp.fix {name, scope, projectPath?} - or {} for every fixable connection
+ *     mcp.remove {name, scope, projectPath?} - or {} for every removable one
+ *     kit.update {} - downloads the newest kit, swaps it in, then the server
+ *       restarts on the same port; the page waits for the new version's
+ *       X-Rise-X-Kit header on GET / and reloads
  *   400 = a bad Host, an unreadable body, or an argument the server refused.
  *   403 = a bad or missing token. 409 = a job is already running (the two sync
  *   file edits take the same slot). 422 = ~/.claude/settings.json is not valid
@@ -263,6 +272,9 @@ let overviewError = "";
 let staleToken = false;
 const jobs = []; // newest first
 let drawerOpen = false;
+// restarting is set once a kit.update has finished and the page is waiting
+// for the new process to answer on this port.
+let restarting = false;
 
 function notice(kind, text) {
   const info = kind === "info";
@@ -290,6 +302,11 @@ const JOB_TITLES = {
   "node.install": () => "Install Node.js",
   "mcp.fix": (b) =>
     b.name ? `Update the address for ${b.name}` : "Update old Rise-X addresses",
+  "mcp.remove": (b) =>
+    b.name
+      ? `Remove the connection ${b.name}`
+      : "Remove the Rise-X connections",
+  "kit.update": () => "Update Rise-X Kit",
 };
 
 /**
@@ -298,6 +315,10 @@ const JOB_TITLES = {
  */
 async function runAction(name, body, button) {
   const payload = body || {};
+  if (restarting) {
+    notice("info", "Rise-X Kit is restarting; this page reloads in a moment.");
+    throw new Error("restarting");
+  }
   if (button) button.disabled = true;
   clearNotice();
   try {
@@ -362,11 +383,34 @@ function startPolling(job) {
       stopPolling(job);
       if (job.status === "failed")
         notice("error", job.error || `${job.title} did not finish.`);
+      if (job.status === "succeeded" && job.action === "kit.update") {
+        // The server is about to swap itself out; a refresh now would only
+        // race that.
+        awaitRestart();
+        return;
+      }
+      // A follow-up the reader asked for in the same dialog, such as
+      // removing the connections after the skill.
+      if (job.status === "succeeded" && job.next) {
+        const next = job.next;
+        job.next = null;
+        next();
+        return;
+      }
       // A new Node.js lives somewhere the cached probe never looked, so this
       // one job re-probes the machine instead of reading the cache.
       refresh(job.action === "node.install");
     } catch (err) {
       stopPolling(job);
+      if (job.action === "kit.update" && !err.status) {
+        // The kit stopped answering because it is restarting into the new
+        // version, which is what this job is for.
+        job.status = "succeeded";
+        job.finishedAt = new Date().toISOString();
+        patchJob(job);
+        awaitRestart();
+        return;
+      }
       job.status = "failed";
       job.error = err.message;
       patchJob(job);
@@ -380,6 +424,117 @@ function startPolling(job) {
 function stopPolling(job) {
   clearInterval(job.timer);
   job.timer = null;
+}
+
+/* restart */
+
+// restartWait bounds how long the page waits for the updated kit to answer.
+const restartWait = 45000;
+
+/**
+ * awaitRestart follows a kit.update to the new process. The old one stops
+ * serving a moment after the job finishes and the new one takes the same
+ * port, so the page polls GET / until the X-Rise-X-Kit header names a version
+ * other than the one it loaded with, then reloads to pick up the new token.
+ */
+function awaitRestart() {
+  if (restarting) return;
+  restarting = true;
+  const was = (overview && overview.kitVersion) || "";
+  notice("info", "Rise-X Kit is restarting into the new version…");
+  const started = Date.now();
+  const tick = async () => {
+    try {
+      const res = await fetch("/", { method: "HEAD", cache: "no-store" });
+      const now = res.headers.get("X-Rise-X-Kit") || "";
+      if (res.ok && now && now !== was) {
+        location.reload();
+        return;
+      }
+    } catch {
+      // Between the old process closing and the new one listening, the
+      // connection is refused: that is the expected middle of a restart.
+    }
+    if (Date.now() - started > restartWait) {
+      restarting = false;
+      notice(
+        "error",
+        "The updated Rise-X Kit did not come back. Start it again yourself, the same way you did the first time.",
+      );
+      return;
+    }
+    setTimeout(tick, 700);
+  };
+  setTimeout(tick, 1200);
+}
+
+/* dialog */
+
+/**
+ * confirmDialog asks one question in a modal, in place of the browser's own
+ * confirm(). It resolves to {ok, checked}: ok is whether the reader pressed
+ * the confirm button, checked the state of the optional checkbox. Escape and
+ * a click on the backdrop both resolve ok:false.
+ */
+function confirmDialog(o) {
+  const dialog = $("kit-dialog");
+  const confirmVariant = o.destructive ? "destructive" : "default";
+  dialog.innerHTML = `
+    <div class="px-5 pt-4 pb-4">
+      <div id="kit-dialog-title" data-slot="dialog-title" class="text-ui font-medium">${esc(o.title)}</div>
+      ${o.body ? `<div id="kit-dialog-body" data-slot="dialog-description" class="mt-1.5 text-xs text-muted-foreground">${o.body}</div>` : ""}
+      ${o.detail ? `<pre class="kit-dialog-detail mt-3 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground">${esc(o.detail)}</pre>` : ""}
+      ${o.checkbox ? checkboxRow("kit-dialog-check", "dialog-check", o.checkbox) : ""}
+    </div>
+    <div data-slot="dialog-footer" class="flex items-center gap-2 kit-end border-t border-border-subtle px-5 py-3">
+      ${btn(o.cancelLabel || "Cancel", { act: "dialog-cancel", variant: "outline", size: "sm" })}
+      ${btn(o.confirmLabel || "Continue", { act: "dialog-confirm", variant: confirmVariant, size: "sm", cls: o.destructive ? "border-border-strong" : "" })}
+    </div>`;
+  return new Promise((resolve) => {
+    const finish = () => {
+      dialog.removeEventListener("close", finish);
+      dialog.removeEventListener("click", onBackdrop);
+      const box = $("kit-dialog-check");
+      resolve({
+        ok: dialog.returnValue === "confirm",
+        checked: !!box && box.getAttribute("aria-checked") === "true",
+      });
+      dialog.innerHTML = "";
+    };
+    // The dialog element itself is only under the pointer where the backdrop
+    // is; every visible part is a child.
+    const onBackdrop = (event) => {
+      if (event.target === dialog) dialog.close("cancel");
+    };
+    dialog.addEventListener("close", finish);
+    dialog.addEventListener("click", onBackdrop);
+    dialog.returnValue = "";
+    dialog.showModal();
+    // Focus lands on the safe choice, so an early Enter never confirms.
+    const cancel = dialog.querySelector('[data-act="dialog-cancel"]');
+    if (cancel) cancel.focus();
+  });
+}
+
+/** checkboxRow is the design system's choice-row: a checkbox button with a
+ * label and a caption underneath. act is the data-act its toggle posts. */
+function checkboxRow(id, act, o) {
+  const on = !!o.checked;
+  return `
+    <div data-slot="choice-row" class="mt-3 flex items-start gap-2.5">
+      <button
+        type="button" role="checkbox" data-act="${esc(act)}" id="${esc(id)}"
+        aria-checked="${on}" data-state="${on ? "checked" : "unchecked"}" ${on ? "data-checked" : ""}
+        data-slot="checkbox"
+        class="peer size-[15px] mt-0.5 shrink-0 rounded-[4px] border border-input bg-card transition-colors duration-100 outline-none focus-visible:ring-3 focus-visible:ring-ring-control/35 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground flex items-center justify-center"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" class="size-3" aria-hidden="true" ${on ? "" : "hidden"}><path d="M20 6 9 17l-5-5"/></svg>
+      </button>
+      <div class="min-w-0">
+        <label for="${esc(id)}" data-slot="label" class="text-ui font-medium text-foreground select-none">${esc(o.label)}</label>
+        ${o.caption ? `<span class="mt-0.5 block text-micro text-subtle">${esc(o.caption)}</span>` : ""}
+      </div>
+    </div>`;
 }
 
 /* render */
@@ -529,7 +684,7 @@ function jumped(link) {
 }
 
 function renderBanner() {
-  $("kit-banner").innerHTML = overview.reloadHint
+  const reload = overview.reloadHint
     ? `<div data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs border-info/25 bg-info/8 items-start">
         ${ICON.info}
         <div class="min-w-0 flex-1">
@@ -543,6 +698,27 @@ function renderBanner() {
         ${btn(ICON.close, { act: "banner-dismiss", variant: "ghost", size: "icon-xs", aria: "Dismiss" })}
       </div>`
     : "";
+  $("kit-banner").innerHTML = `${kitUpdateBanner()}${reload}`;
+}
+
+/** kitUpdateBanner offers the kit's own update: a button where the kit can
+ * replace itself, a link to the release where it cannot. */
+function kitUpdateBanner() {
+  const kit = overview.kit;
+  if (!kit || !kit.updateAvailable) return "";
+  const action = kit.canSelfUpdate
+    ? btn("Update", { act: "kit-update", size: "sm", cls: "shrink-0" })
+    : `<a href="${esc(kit.latestUrl)}" target="_blank" rel="noreferrer noopener" data-slot="button" data-variant="outline" data-size="sm" class="${btnClass("outline", "sm")} shrink-0">Get it${ICON.external}</a>`;
+  return `<div data-slot="alert" role="status" class="flex gap-[9px] rounded-lg border px-3 py-2.5 text-xs border-info/25 bg-info/8 items-center">
+      ${ICON.info}
+      <div class="min-w-0 flex-1">
+        <div data-slot="alert-title" class="mb-px text-ui font-medium">Rise-X Kit ${esc(kit.latest)} is available</div>
+        <div data-slot="alert-description" class="text-xs text-muted-foreground">
+          You have ${esc(overview.kitVersion)}. ${kit.canSelfUpdate ? "Updating takes a few seconds and restarts Rise-X Kit; this page reloads on its own." : "Download it from the release page and run the installer again."}
+        </div>
+      </div>
+      ${action}
+    </div>`;
 }
 
 /**
@@ -929,6 +1105,46 @@ function staleRows(stale) {
     .join("");
 }
 
+/** removableConnections are the ones Claude Code itself holds, which the kit
+ * can take out; a Desktop connector is only ever the app's to remove. */
+const removableConnections = (mcp) =>
+  ((mcp && mcp.connections) || []).filter((c) => c.scope !== "desktop");
+
+/** connectionsBlock lists the Rise-X connections configured outside the
+ * skill. They stay when the skill is removed, so this is where a partner sees
+ * and removes them. */
+function connectionsBlock(mcp) {
+  const list = mcp.connections || [];
+  if (!list.length) return "";
+  const rows = list
+    .map((entry) =>
+      listItem({
+        name: entry.name,
+        code: SCOPE_LABELS[entry.scope] || entry.scope,
+        description: entry.url,
+        trailing:
+          entry.scope === "desktop"
+            ? '<span class="kit-wrap max-w-[42ch] shrink-0 text-right text-xs text-muted-foreground">Remove this one in Claude Desktop &rsaquo; Customize &rsaquo; Connectors.</span>'
+            : btn("Remove", {
+                act: "mcp-remove",
+                variant: "destructive",
+                cls: "shrink-0",
+                data: {
+                  name: entry.name,
+                  scope: entry.scope,
+                  project: entry.projectPath || "",
+                  url: entry.url,
+                },
+              }),
+      }),
+    )
+    .join("");
+  return `<div data-slot="list" class="flex flex-col rounded-lg border border-border-subtle">
+      <div class="border-b border-border-subtle px-3.5 py-2.5 text-xs font-medium text-foreground">Connections Claude Code keeps on its own</div>
+      ${rows}
+    </div>`;
+}
+
 function renderConnection() {
   const mcp = overview.mcp || { verdict: "unknown" };
   const [label, variant] = CONNECTION[mcp.verdict] || CONNECTION.unknown;
@@ -937,18 +1153,21 @@ function renderConnection() {
   const rows = connectionRows(mcp);
   const managed = mcp.verdict === "managed";
   const desktop = mcp.verdict === "desktop";
+  const skillInstalled = (overview.plugins || []).some(
+    (p) => p.name === "rise-x-mcp" && p.installed,
+  );
 
   const guide = desktop
     ? desktopNote(mcp.desktopConnectors || [])
     : managed
-    ? `<div class="rounded-lg bg-fill-0 p-3.5">
+      ? `<div class="rounded-lg bg-fill-0 p-3.5">
          <div class="text-xs font-medium text-foreground">Managed in Claude Desktop</div>
          <div class="mt-1 text-xs text-muted-foreground">
            Claude Desktop set these up from your account, so Kit cannot check them from here.
            Open <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> to see whether they are signed in.
          </div>
        </div>`
-    : `<div class="rounded-lg bg-fill-0 p-3.5">
+      : `<div class="rounded-lg bg-fill-0 p-3.5">
          <div class="text-xs font-medium text-foreground">Add it in Claude Desktop</div>
          <ol class="mt-2.5 flex flex-col gap-2">${GUIDE_STEPS.map(
            (step, i) => `<li class="flex items-start gap-2.5">
@@ -977,16 +1196,30 @@ function renderConnection() {
        </div>`
     : "";
 
+  const leftovers = connectionsBlock(mcp);
+  // With the skill gone, a connector the Desktop app still has is the reason
+  // the badge reads connected; say so rather than only "install the skill".
+  const notInstalledHint = skillInstalled
+    ? ""
+    : `<div class="rounded-lg bg-fill-0 px-3.5 py-3 text-xs text-muted-foreground">
+         ${
+           desktop
+             ? "The Rise-X skill is not installed, but its connection in Claude Desktop is still there. Install the skill above to use it again, or remove the connector in Claude Desktop &rsaquo; Customize &rsaquo; Connectors."
+             : "Install the Rise-X skill above, then its connection details appear here."
+         }
+       </div>`;
+
   const body = rows
     ? `${note}
        <div data-slot="list" class="flex flex-col rounded-lg border border-border-subtle">${rows}</div>
        ${staleBlock}
+       ${leftovers}
        ${guide}`
     : `${note}
        ${staleBlock}
-       <div class="rounded-lg bg-fill-0 px-3.5 py-3 text-xs text-muted-foreground">
-         Install the Rise-X skill above, then its connection details appear here.
-       </div>`;
+       ${leftovers}
+       ${desktop ? desktopNote(mcp.desktopConnectors || []) : ""}
+       ${notInstalledHint}`;
 
   $("kit-conn-body").innerHTML = `
     ${body}
@@ -1435,7 +1668,10 @@ async function refresh(fresh, act) {
       // skipped the renderSummary below and left loadDoctor to paint the
       // banner on its own - a green "everything is set up" over cards that
       // never loaded.
-      const [ov, doc] = await Promise.allSettled([loadOverview(), loadDoctor()]);
+      const [ov, doc] = await Promise.allSettled([
+        loadOverview(),
+        loadDoctor(),
+      ]);
       const failed = [ov, doc].find((r) => r.status === "rejected");
       if (failed) throw failed.reason;
     }
@@ -1536,30 +1772,38 @@ function stopped() {
     </div>`;
 }
 
-function runFix(button) {
+/** FIX_QUESTIONS are the dialogs a doctor Fix asks before it runs; the
+ * row's detail lines, when it has any, go in the dialog's detail box. */
+const FIX_QUESTIONS = {
+  "npmrc.clean": {
+    title: "Point @rise-x at the public npm registry?",
+    body: "Rise-X Kit rewrites that one line in ~/.npmrc and saves a backup of the file first. Your other npm settings and credentials are not touched.",
+    confirmLabel: "Update ~/.npmrc",
+  },
+  "node.install": {
+    title: "Install Node.js?",
+    body: "This downloads the current LTS release and may take a few minutes.",
+    confirmLabel: "Install Node.js",
+  },
+  "mcp.fix": {
+    title: "Update these Rise-X connections?",
+    body: "Each one is removed and added back at the address Rise-X uses today, in the same place it was.",
+    confirmLabel: "Update addresses",
+  },
+};
+
+async function runFix(button) {
   const name = button.dataset.fix;
   const args = JSON.parse(button.dataset.args || "{}");
-  if (name === "npmrc.clean") {
-    const detail = button.dataset.detail;
-    const question = detail
-      ? `Point @rise-x at the public npm registry in ~/.npmrc?\n\n${detail}`
-      : "Point @rise-x at the public npm registry in ~/.npmrc?";
-    if (!confirm(question)) return undefined;
-    args.confirm = true;
-  } else if (name === "node.install") {
-    if (
-      !confirm(
-        "Install Node.js? This downloads the current LTS release and may take a few minutes.",
-      )
-    ) {
-      return undefined;
-    }
-  } else if (name === "mcp.fix") {
-    const detail = button.dataset.detail;
-    const question = detail
-      ? `Update these Rise-X connections to their current address?\n\n${detail}`
-      : "Update old Rise-X addresses to their current address?";
-    if (!confirm(question)) return undefined;
+  if (name === "kit.update") return updateKit(button);
+  const question = FIX_QUESTIONS[name];
+  if (question) {
+    const { ok } = await confirmDialog({
+      ...question,
+      detail: button.dataset.detail || "",
+    });
+    if (!ok) return undefined;
+    if (name === "npmrc.clean") args.confirm = true;
   }
   return runAction(name, args, button).then((result) => {
     if (!result || result.jobId) return undefined;
@@ -1593,6 +1837,89 @@ function runFix(button) {
 
 /** simple wraps an action that posts nothing but an empty body. */
 const simple = (action) => (button) => runAction(action, {}, button);
+
+/** updateKit confirms and starts the kit's own update. The job's end is
+ * handled in startPolling, which waits for the new process. */
+async function updateKit(button) {
+  const kit = overview.kit || {};
+  const { ok } = await confirmDialog({
+    title: `Update Rise-X Kit to ${kit.latest || "the newest version"}?`,
+    body: `The new version is downloaded and checked, then Rise-X Kit restarts and this page reloads. Anything running in Activity finishes first.`,
+    confirmLabel: "Update and restart",
+  });
+  if (!ok) return undefined;
+  return runAction("kit.update", {}, button);
+}
+
+/** removeConnection confirms and removes one connection Claude Code keeps. */
+async function removeConnection(button) {
+  const { name, scope, project, url } = button.dataset;
+  const { ok } = await confirmDialog({
+    title: `Remove the connection ${name}?`,
+    body: `Claude Code will no longer reach Rise-X through it${scope === "local" ? " in that project" : ""}. You can add it again from the Rise-X skill later.`,
+    detail: url,
+    confirmLabel: "Remove connection",
+    destructive: true,
+  });
+  if (!ok) return undefined;
+  return runAction(
+    "mcp.remove",
+    { name, scope, projectPath: project || undefined },
+    button,
+  );
+}
+
+/**
+ * removeSkill confirms an uninstall. For the Rise-X skill it also offers to
+ * take out the connections Claude Code keeps outside the skill, since those
+ * stay behind otherwise; a connector in Claude Desktop is named but is the
+ * app's to remove.
+ */
+async function removeSkill(button) {
+  const { name, marketplace } = button.dataset;
+  const mcp = (overview && overview.mcp) || {};
+  const removable = name === "rise-x-mcp" ? removableConnections(mcp) : [];
+  const desktopNames = name === "rise-x-mcp" ? mcp.desktopConnectors || [] : [];
+  const parts = [
+    `Claude Code will no longer have its skills${name === "rise-x-mcp" ? " or its Rise-X connection" : ""}.`,
+  ];
+  if (desktopNames.length) {
+    parts.push(
+      `The connector ${esc(desktopNames.join(", "))} in Claude Desktop stays; remove it under Customize &rsaquo; Connectors if you no longer want it.`,
+    );
+  }
+  const { ok, checked } = await confirmDialog({
+    title: `Remove ${skillLabel(name)}?`,
+    body: parts.join(" "),
+    detail: removable.length
+      ? removable
+          .map(
+            (c) => `${c.name} (${SCOPE_LABELS[c.scope] || c.scope}): ${c.url}`,
+          )
+          .join("\n")
+      : "",
+    checkbox: removable.length
+      ? {
+          label: "Also remove the connections Claude Code keeps on its own",
+          caption: "The ones listed above, from ~/.claude.json.",
+          checked: true,
+        }
+      : null,
+    confirmLabel: `Remove ${skillLabel(name)}`,
+    destructive: true,
+  });
+  if (!ok) return undefined;
+  const result = await runAction(
+    "plugin.uninstall",
+    { name, marketplace },
+    button,
+  );
+  if (checked && result && result.jobId) {
+    const job = jobs.find((j) => j.id === result.jobId);
+    if (job) job.next = () => runAction("mcp.remove", {}).catch(() => {});
+  }
+  return result;
+}
 
 const ACTIONS = {
   refresh: () => refresh(true, "refresh"),
@@ -1631,22 +1958,21 @@ const ACTIONS = {
       button,
     );
   },
+  "mcp-remove": removeConnection,
+  "kit-update": updateKit,
   autoupdate: (button) => toggleAutoUpdate(button),
   copy: (button) => flashCopied(button, button.dataset.copy),
   skill: (button) => {
     const { op, name, marketplace } = button.dataset;
-    if (
-      op === "uninstall" &&
-      !confirm(
-        `Remove ${skillLabel(name)}? Claude Code will no longer have its skills.`,
-      )
-    ) {
-      return undefined;
-    }
+    if (op === "uninstall") return removeSkill(button);
     return runAction(`plugin.${op}`, { name, marketplace }, button);
   },
   fix: runFix,
   jump: jumped,
+  "dialog-confirm": () => $("kit-dialog").close("confirm"),
+  "dialog-cancel": () => $("kit-dialog").close("cancel"),
+  "dialog-check": (button) =>
+    paintCheckbox(button, button.getAttribute("aria-checked") !== "true"),
 };
 
 function onClick(event) {

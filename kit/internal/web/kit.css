@@ -13,6 +13,19 @@
   display: none !important;
 }
 
+/* The page is a column that fills the viewport, so the Activity strip stays on
+   the bottom edge when the cards are shorter than the window. It is sticky on
+   top of that, so it also stays put once they are taller. */
+body {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+#kit-main {
+  flex: 1 0 auto;
+  width: 100%;
+}
+
 /* Layout helpers the compiled build does not contain */
 .kit-shell {
   margin-inline: auto;
@@ -248,6 +261,53 @@
   display: inline-flex;
   flex-shrink: 0;
   color: var(--muted-foreground);
+}
+
+/* Confirmation dialog. demo.html has no open dialog markup to copy (Radix only
+   renders it while open), so the panel is a native <dialog> with the card's
+   own tokens; its content uses the same utilities as the cards. Opened with
+   showModal(), so focus, Escape and the backdrop come from the browser. */
+.kit-dialog {
+  /* The design system's reset zeroes every margin, which is what centres a
+     modal dialog in the browser's own stylesheet. */
+  margin: auto;
+  width: min(440px, calc(100vw - 32px));
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--border) 60%, transparent),
+    0 16px 40px rgb(0 0 0 / 0.22);
+}
+.kit-dialog::backdrop {
+  background: color-mix(in srgb, var(--background) 55%, rgb(0 0 0 / 0.55));
+  backdrop-filter: blur(3px);
+}
+.kit-dialog[open] {
+  animation: kit-dialog-in 0.18s var(--ease);
+}
+@keyframes kit-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kit-dialog[open] {
+    animation: none;
+  }
+}
+/* The detail box lists the exact lines a confirm would change. */
+.kit-dialog-detail {
+  max-height: 148px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 /* Review-only chrome: the mock state switcher. Not part of the product.
