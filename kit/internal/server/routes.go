@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +45,14 @@ const (
 // maxActionBody caps an action's JSON body; every one of them is a couple of
 // short fields.
 const maxActionBody = 64 << 10
+
+// restartingMessage is the 409 every action but quit gets once kit.update
+// has asked main to relaunch.
+const restartingMessage = "Rise-X Kit is restarting into the new version"
+
+// desktopConfigMessage names where a ScopeDesktop entry lives: the Desktop
+// app's own MCP config file, not the account connectors under Customize.
+const desktopConfigMessage = "this connection is in Claude Desktop's own configuration file (claude_desktop_config.json), which the CLI does not edit; change it there"
 
 // contentSecurityPolicy is sent with every response. The page carries the CSRF
 // token, so it must never be framed; font-src allows data: only for the design
@@ -221,10 +230,13 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Once the update has swapped the binary in, this process is about to stop
-	// serving, and a job started now would be orphaned by the relaunch.
-	if s.restartPending() {
-		httpError(w, http.StatusConflict, "Rise-X Kit is restarting into the new version")
+	// Once the update has asked for the relaunch, this process is about to
+	// stop serving. The ask comes restartDelay after the job finishes, so a
+	// job started in that gap is not caught here; main's CancelAll on the
+	// way out is what stops that one. Quit stays available: stopping is what
+	// the partner may want if the restart looks stuck.
+	if name != "quit" && s.restartPending() {
+		httpError(w, http.StatusConflict, restartingMessage)
 		return
 	}
 
@@ -375,8 +387,7 @@ func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action
 				"this connection carries its own headers, which the fix cannot put back; repoint it yourself so its credentials are kept")
 			return
 		}
-		httpError(w, http.StatusBadRequest,
-			"nothing the CLI can change; update this one in Claude Desktop under Customize, Connectors")
+		httpError(w, http.StatusBadRequest, desktopConfigMessage)
 		return
 	}
 
@@ -442,10 +453,10 @@ func (s *Server) handleKitUpdate(w http.ResponseWriter, action string) {
 		httpError(w, http.StatusBadRequest, "cannot tell which file is running, so it cannot be replaced")
 		return
 	}
-	// A failure the background check remembered was bounded by that check's
-	// five seconds; the update has five minutes and asks again.
-	s.updates.ForgetFailures()
 	id, err := s.jobs.Start(action, kitUpdateJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
+		// A failure the background check remembered was bounded by that
+		// check's five seconds; the update has five minutes and asks again.
+		s.updates.ForgetFailures()
 		rel, newer, err := s.updates.Latest(jctx, s.version)
 		if err != nil {
 			return -1, fmt.Errorf("check for a newer version: %w", err)
@@ -502,20 +513,29 @@ func (s *Server) handleMcpRemove(w http.ResponseWriter, ctx context.Context, act
 		return
 	}
 
+	// All or nothing: one target the kit will not remove refuses the whole
+	// request, so what goes is exactly what the page showed. Each refusal
+	// names the target, since a batch may carry several.
 	var removable []mcp.Connection
 	for _, t := range asked {
 		match := findConnection(known, t.Name, t.Scope, t.ProjectPath)
 		switch {
 		case match == nil:
-			httpError(w, http.StatusBadRequest, "unknown connection target")
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("%s (%s) is not a connection this machine has", t.Name, t.Scope))
 			return
+		case slices.ContainsFunc(removable, func(c mcp.Connection) bool { return c == *match }):
+			continue // named twice: remove once
 		case match.Scope == mcp.ScopeDesktop:
-			httpError(w, http.StatusBadRequest,
-				"this connection is in Claude Desktop's own configuration file, which the CLI does not edit; remove it there")
+			httpError(w, http.StatusBadRequest, t.Name+": "+desktopConfigMessage)
 			return
 		case match.HasHeaders:
-			httpError(w, http.StatusBadRequest,
-				"this connection carries its own headers, which may hold a credential that exists nowhere else; remove it yourself if you mean to")
+			httpError(w, http.StatusBadRequest, t.Name+
+				": this connection carries its own headers, which may hold a credential that exists nowhere else; remove it yourself if you mean to")
+			return
+		case !match.Removable:
+			// The two arms above are the reasons Removable is false today;
+			// the field stays the verdict if another is added.
+			httpError(w, http.StatusBadRequest, t.Name+": this connection is not one the kit removes")
 			return
 		}
 		removable = append(removable, *match)

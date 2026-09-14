@@ -307,7 +307,11 @@ const JOB_TITLES = {
   "mcp.remove": (b) =>
     b.name
       ? `Remove the connection ${b.name}`
-      : `Remove ${(b.targets || []).length} Rise-X connection(s)`,
+      : b.targets && b.targets.length === 1
+        ? `Remove the connection ${b.targets[0].name}`
+        : b.targets
+          ? `Remove ${b.targets.length} Rise-X connections`
+          : "Remove the Rise-X connections",
   "kit.update": () => "Update Rise-X Kit",
 };
 
@@ -497,10 +501,23 @@ function confirmDialog(o) {
       ${btn(o.cancelLabel || "Cancel", { act: "dialog-cancel", variant: "outline", size: "sm" })}
       ${btn(o.confirmLabel || "Continue", { act: "dialog-confirm", variant: confirmVariant, size: "sm", cls: o.destructive ? "border-border-strong" : "" })}
     </div>`;
+  // Only the parts this call emitted, so no id points at nothing.
+  dialog.setAttribute(
+    "aria-describedby",
+    [
+      o.bodyHtml && "kit-dialog-body",
+      o.detail && "kit-dialog-detail",
+      o.checkbox && "kit-dialog-check-label",
+      o.checkbox && o.checkbox.caption && "kit-dialog-check-caption",
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
   return new Promise((resolve) => {
     const finish = () => {
       dialog.removeEventListener("close", finish);
       dialog.removeEventListener("pointerdown", onPointerDown);
+      dialog.removeEventListener("pointerup", onPointerUp);
       dialog.removeEventListener("click", onBackdrop);
       const box = $("kit-dialog-check");
       resolve({
@@ -512,18 +529,25 @@ function confirmDialog(o) {
     // The dialog element itself is only under the pointer where the backdrop
     // is; every visible part is a child. A click's target is the nearest
     // common ancestor of where the press started and ended, so a selection
-    // dragged out of the detail box would land on the dialog too: only a
-    // press that also started on the backdrop cancels.
+    // dragged out of the detail box would land on the dialog too, as would
+    // a press on the backdrop released over the card: only a press that
+    // started and ended on the backdrop cancels.
     let pressedBackdrop = false;
+    let releasedBackdrop = false;
     const onPointerDown = (event) => {
       pressedBackdrop = event.target === dialog;
     };
+    const onPointerUp = (event) => {
+      releasedBackdrop = event.target === dialog;
+    };
     const onBackdrop = (event) => {
-      if (event.target === dialog && pressedBackdrop) dialog.close("cancel");
-      pressedBackdrop = false;
+      if (event.target === dialog && pressedBackdrop && releasedBackdrop)
+        dialog.close("cancel");
+      pressedBackdrop = releasedBackdrop = false;
     };
     dialog.addEventListener("close", finish);
     dialog.addEventListener("pointerdown", onPointerDown);
+    dialog.addEventListener("pointerup", onPointerUp);
     dialog.addEventListener("click", onBackdrop);
     dialog.returnValue = "";
     dialog.showModal();
@@ -549,7 +573,7 @@ function checkboxRow(id, act, o) {
       </button>
       <div class="min-w-0">
         <label for="${esc(id)}" id="${esc(id)}-label" data-slot="label" class="text-ui font-medium text-foreground select-none">${esc(o.label)}</label>
-        ${o.caption ? `<span class="mt-0.5 block text-micro text-subtle">${esc(o.caption)}</span>` : ""}
+        ${o.caption ? `<span id="${esc(id)}-caption" class="mt-0.5 block text-micro text-subtle">${esc(o.caption)}</span>` : ""}
       </div>
     </div>`;
 }
@@ -1106,7 +1130,7 @@ function staleRows(stale) {
         description: `${entry.url} → ${entry.suggestedUrl}`,
         trailing:
           entry.scope === "desktop"
-            ? '<span class="kit-wrap max-w-[42ch] shrink-0 text-right text-xs text-muted-foreground">Update this one in Claude Desktop &rsaquo; Customize &rsaquo; Connectors.</span>'
+            ? '<span class="kit-wrap max-w-[42ch] shrink-0 text-right text-xs text-muted-foreground">Set in Claude Desktop\'s own configuration file (claude_desktop_config.json); change it there.</span>'
             : btn("Fix", {
                 act: "mcp-fix",
                 variant: "outline",

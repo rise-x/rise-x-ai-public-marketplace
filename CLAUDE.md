@@ -259,9 +259,10 @@ Known-benign, expected hits: the `localhost_public_url` warning documented in
 `plugins/rise-x-mcp/skills/rise-x-mcp/references/managing-apps.md`, generic
 "feedback" wording in
 `plugins/rise-x-mcp/skills/rise-x-mcp/references/validation.md`,
-the two retired Azure Container Apps hostnames under `kit/internal/mcp/`
-(listed in `stale.go`, repeated in its test fixtures; public MCP endpoints
-partners connected to, kept for the reconnect fix), and
+the retired `*.azurecontainerapps.io` hostnames anywhere under `kit/`
+(the two real ones in `kit/internal/mcp/stale.go`, plus invented
+`azurecontainerapps.io` slugs in the `mcp` and `server` test fixtures; public
+MCP endpoints partners connected to, kept for the reconnect fix), and
 this file (it quotes the pattern above). Anything else is a real hit — fix it.
 Future known-benign hits specific to one plugin belong in that plugin's own
 "Per-plugin rules" section above, not here.

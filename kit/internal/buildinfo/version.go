@@ -3,7 +3,7 @@ package buildinfo
 
 // Version and Commit are overridden at build time, e.g.:
 //
-//	go build -ldflags "-X github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/buildinfo.Version=0.1.0 ..."
+//	go build -ldflags "-X github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/buildinfo.Version=v0.1.0 ..."
 var (
 	Version = "dev"
 	Commit  = "none"

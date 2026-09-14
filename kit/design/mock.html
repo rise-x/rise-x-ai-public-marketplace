@@ -620,20 +620,20 @@ writing ~/.claude/plugins/rise-x-mcp
     <!-- ================= Confirmation dialog (state: dialog:remove | dialog:update) =================
          A native <dialog> opened with showModal(); .kit-dialog in kit.css carries the panel, the
          content is the cards' own utilities. Escape, the backdrop and both buttons close it. -->
-    <dialog id="kit-dialog" data-slot="dialog" class="kit-dialog" aria-labelledby="kit-dialog-title">
+    <dialog id="kit-dialog" data-slot="dialog" class="kit-dialog" aria-labelledby="kit-dialog-title" aria-describedby="kit-dialog-body kit-dialog-detail kit-dialog-check-label kit-dialog-check-caption">
       <div data-when="dialog:remove">
         <div class="px-5 pt-4 pb-4">
           <div id="kit-dialog-title" data-slot="dialog-title" class="text-ui font-medium">Remove Rise-X?</div>
-          <div data-slot="dialog-description" class="mt-1.5 text-xs text-muted-foreground">Claude Code will no longer have its skills or its Rise-X connection. The connector Rise-X in Claude Desktop stays; remove it under Customize &rsaquo; Connectors if you no longer want it.</div>
-          <pre class="kit-dialog-detail mt-3 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground">rise-x (everywhere): https://mcp.rise-x.io/mcp
+          <div id="kit-dialog-body" data-slot="dialog-description" class="mt-1.5 text-xs text-muted-foreground">Claude Code will no longer have its skills or its Rise-X connection. The connector Rise-X in Claude Desktop stays; remove it under Customize &rsaquo; Connectors if you no longer want it.</div>
+          <pre id="kit-dialog-detail" class="kit-dialog-detail mt-3 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground">rise-x (everywhere): https://mcp.rise-x.io/mcp
 rise-x-test (one project): https://mcp-test.rise-x.io/mcp</pre>
           <div data-slot="choice-row" class="mt-3 flex items-start gap-2.5">
             <button type="button" role="checkbox" id="kit-dialog-check" aria-checked="false" data-state="unchecked" data-slot="checkbox" class="peer size-[15px] mt-0.5 shrink-0 rounded-[4px] border border-input bg-card transition-colors duration-100 outline-none focus-visible:ring-3 focus-visible:ring-ring-control/35 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground flex items-center justify-center">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" class="size-3" aria-hidden="true" hidden><path d="M20 6 9 17l-5-5"/></svg>
             </button>
             <div class="min-w-0">
-              <label for="kit-dialog-check" data-slot="label" class="text-ui font-medium text-foreground select-none">Also remove the 2 connections listed above</label>
-              <span class="mt-0.5 block text-micro text-subtle">Set up outside the skill, in ~/.claude.json. Off unless you tick it.</span>
+              <label for="kit-dialog-check" id="kit-dialog-check-label" data-slot="label" class="text-ui font-medium text-foreground select-none">Also remove the 2 connections listed above</label>
+              <span id="kit-dialog-check-caption" class="mt-0.5 block text-micro text-subtle">Set up outside the skill, in ~/.claude.json. Off unless you tick it.</span>
             </div>
           </div>
         </div>
@@ -645,7 +645,7 @@ rise-x-test (one project): https://mcp-test.rise-x.io/mcp</pre>
       <div data-when="dialog:update">
         <div class="px-5 pt-4 pb-4">
           <div data-slot="dialog-title" class="text-ui font-medium">Update Rise-X Kit to v0.2.0?</div>
-          <div data-slot="dialog-description" class="mt-1.5 text-xs text-muted-foreground">The new version is downloaded and checked, then Rise-X Kit restarts and this page reloads. Anything running in Activity finishes first.</div>
+          <div data-slot="dialog-description" class="mt-1.5 text-xs text-muted-foreground">The new version is downloaded and checked, then Rise-X Kit restarts and this page reloads. If something is still running in Activity, wait for it to finish first.</div>
         </div>
         <div data-slot="dialog-footer" class="flex items-center gap-2 kit-end border-t border-border-subtle px-5 py-3">
           <button type="button" data-set="dialog:closed" data-slot="button" data-variant="outline" data-size="sm" class="ds-btn border-border-strong bg-card hover:bg-muted dark:bg-transparent h-control-sm rounded-md px-2.5">Cancel</button>

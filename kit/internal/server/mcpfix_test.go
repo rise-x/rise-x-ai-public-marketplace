@@ -211,9 +211,29 @@ func TestHandler_McpFix_DesktopEntry_400(t *testing.T) {
 		resp.Body.Close()
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
-	if got := errorMessage(t, resp); got !=
-		"nothing the CLI can change; update this one in Claude Desktop under Customize, Connectors" {
+	if got := errorMessage(t, resp); got != desktopConfigMessage {
 		t.Fatalf("error = %q", got)
+	}
+}
+
+// A target has to match name, scope and project together: a local entry
+// cannot be removed from another project, and the refusal names it.
+func TestHandler_McpRemove_WrongProject_400(t *testing.T) {
+	baseURL, token, _, fake := connectionsServer(t)
+
+	resp := post(t, baseURL+"/api/actions/mcp.remove", token, map[string]any{
+		"name": "rise-x-test", "scope": "local", "projectPath": t.TempDir()})
+	if resp.StatusCode != http.StatusBadRequest {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if msg := errorMessage(t, resp); !strings.Contains(msg, "rise-x-test") {
+		t.Fatalf("error = %q, want it to name the target", msg)
+	}
+	for _, call := range fake.Calls {
+		if len(call.Args) > 1 && call.Args[1] == "remove" {
+			t.Fatalf("something was removed: %+v", call)
+		}
 	}
 }
 
@@ -391,8 +411,9 @@ func TestHandler_McpRemove_DesktopRefused_400(t *testing.T) {
 	resp.Body.Close()
 }
 
-// A connection still on an old address is the stale scan's, with its Fix;
-// it must not also appear as a removable connection.
+// A connection still on an old address is the stale scan's, with its Fix,
+// and never a removable connection. Today that follows from the two host
+// sets being disjoint; this pins the outcome whichever way it is reached.
 func TestGather_StaleEntryIsNotAlsoAConnection(t *testing.T) {
 	baseURL, token, _, _ := staleServer(t)
 

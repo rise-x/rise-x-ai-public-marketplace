@@ -152,6 +152,7 @@
     </aside>
 
     <!-- Filled by app.js's confirmDialog() and opened with showModal(). -->
-    <dialog id="kit-dialog" data-slot="dialog" class="kit-dialog" aria-labelledby="kit-dialog-title" aria-describedby="kit-dialog-body kit-dialog-detail kit-dialog-check-label"></dialog>
+    <!-- aria-describedby is set per call, from the parts the dialog emits. -->
+    <dialog id="kit-dialog" data-slot="dialog" class="kit-dialog" aria-labelledby="kit-dialog-title"></dialog>
   </body>
 </html>

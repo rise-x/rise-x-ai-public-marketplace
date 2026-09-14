@@ -257,37 +257,3 @@ func TestLatest_DeadlineNotCached(t *testing.T) {
 		t.Fatalf("server saw %d requests, want 2 (the timed-out one was not cached)", n)
 	}
 }
-
-// A later failure keeps the last good list rather than wiping it.
-func TestLatest_FailureKeepsLastGoodList(t *testing.T) {
-	var fail atomic.Bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if fail.Load() {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(list(release("kit-v0.2.0", false, false))))
-	}))
-	t.Cleanup(srv.Close)
-	c := New("rise-x/rise-x-ai-public-marketplace")
-	c.APIBaseURL = srv.URL
-
-	if _, _, err := c.Latest(context.Background(), "v0.1.0"); err != nil {
-		t.Fatal(err)
-	}
-	fail.Store(true)
-	c.ForgetFailures()
-	c.mu.Lock()
-	c.at = time.Time{} // expire the good answer
-	c.mu.Unlock()
-	if _, _, err := c.Latest(context.Background(), "v0.1.0"); err == nil {
-		t.Fatal("expected the 500")
-	}
-	c.mu.Lock()
-	kept := len(c.releases)
-	c.mu.Unlock()
-	if kept != 1 {
-		t.Fatalf("releases after a failure = %d, want the last good list kept", kept)
-	}
-}

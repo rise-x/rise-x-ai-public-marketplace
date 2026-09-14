@@ -63,11 +63,6 @@ func run() int {
 		return 0
 	}
 
-	// A Windows self-update leaves the previous binary beside this one.
-	if exe, err := os.Executable(); err == nil {
-		selfupdate.Cleanup(exe)
-	}
-
 	// A partner who closed the tab has no way back to a port that was picked
 	// at random, so a second launch reopens the running window rather than
 	// leaving another server behind. An explicit -port asks for a server on
@@ -121,6 +116,15 @@ func run() int {
 	release := func() { releaseOnce.Do(releaseLock) }
 	defer release()
 
+	// The binary the update replaces and the relaunch starts, resolved once so
+	// every side names the same file. Cleanup runs only now, with the lock
+	// held: a second launch during another kit's download must not remove
+	// that download's work directory.
+	exe := resolvedExecutable()
+	if exe != "" {
+		selfupdate.Cleanup(exe)
+	}
+
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
 		log.Printf("listen: %v", err)
@@ -139,6 +143,7 @@ func run() int {
 		Token:     token,
 		ClaudeDir: *claudeDir,
 		Version:   buildinfo.Version,
+		ExePath:   exe,
 	})
 
 	// Recorded before the browser opens, so the next launch finds this window.
@@ -224,6 +229,19 @@ func run() int {
 		fmt.Printf("updated; the new Rise-X Kit is taking over %s\n", url)
 	}
 	return code
+}
+
+// resolvedExecutable is this binary's real path, symlinks followed, or "" when
+// it cannot be told; the server then refuses to update itself.
+func resolvedExecutable() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
 }
 
 // relaunchArgs is the command line the updated binary gets: the same port,

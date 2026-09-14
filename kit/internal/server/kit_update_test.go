@@ -210,47 +210,91 @@ func TestHandler_KitUpdate_ReplacesBinaryAndRequestsRestart(t *testing.T) {
 		t.Fatalf("install dir holds %d entries after the update, want the binary alone", len(entries))
 	}
 	resp = post(t, baseURL+"/api/actions/marketplace.update", token, map[string]any{})
-	resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
+		resp.Body.Close()
 		t.Fatalf("action while restarting = %d, want 409", resp.StatusCode)
+	}
+	if msg := errorMessage(t, resp); msg != restartingMessage {
+		t.Fatalf("409 message = %q, want the restart one, not the busy one", msg)
+	}
+	// Quit must still work: it is the way out if the relaunch looks stuck.
+	resp = post(t, baseURL+"/api/actions/quit", token, map[string]any{})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("quit while restarting = %d, want 200", resp.StatusCode)
 	}
 }
 
-// A download that fails verification changes nothing: the running binary is
-// untouched, no work directory is left, and no restart is asked for.
-func TestHandler_KitUpdate_ChecksumMismatch_NoRestart(t *testing.T) {
+// A download that fails changes nothing, whatever the failure: the running
+// binary is untouched, no work directory is left, and no restart is asked for.
+func TestHandler_KitUpdate_Failures_NoRestart(t *testing.T) {
 	if _, ok := selfupdate.AssetName("v0", runtime.GOOS, runtime.GOARCH); !ok || runtime.GOOS == "windows" {
 		t.Skipf("not exercised on %s/%s", runtime.GOOS, runtime.GOARCH)
-	}
-	dir := t.TempDir()
-	exe := filepath.Join(dir, selfupdate.BinaryName(runtime.GOOS))
-	if err := os.WriteFile(exe, []byte("old build"), 0o755); err != nil {
-		t.Fatal(err)
 	}
 	const version = "v0.1.0-rc.3"
 	asset, _ := selfupdate.AssetName(version, runtime.GOOS, runtime.GOARCH)
 	archive := tarGzOne(t, selfupdate.BinaryName(runtime.GOOS), []byte("new build"))
-	checksums := strings.Repeat("0", 64) + "  " + asset + "\n"
-	checker := releasesChecker(t, "["+releaseJSON(version, true)+"]",
-		map[string][]byte{asset: archive, "checksums.txt": []byte(checksums)})
-	baseURL, token, srv := newTestServerVersion(t, "v0.1.0-rc.2", checker, func(cfg *Config) { cfg.ExePath = exe })
+	good := sha256.Sum256(archive)
+	cases := []struct {
+		name   string
+		assets map[string][]byte
+	}{
+		{"checksum mismatch", map[string][]byte{asset: archive,
+			"checksums.txt": []byte(strings.Repeat("0", 64) + "  " + asset + "\n")}},
+		{"asset missing (404)", map[string][]byte{
+			"checksums.txt": []byte(hex.EncodeToString(good[:]) + "  " + asset + "\n")}},
+		{"archive without the binary", map[string][]byte{asset: tarGzOne(t, "README", []byte("x")),
+			"checksums.txt": []byte(func() string { s := sha256.Sum256(tarGzOne(t, "README", []byte("x"))); return hex.EncodeToString(s[:]) }() + "  " + asset + "\n")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			exe := filepath.Join(dir, selfupdate.BinaryName(runtime.GOOS))
+			if err := os.WriteFile(exe, []byte("old build"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			checker := releasesChecker(t, "["+releaseJSON(version, true)+"]", tc.assets)
+			baseURL, token, srv := newTestServerVersion(t, "v0.1.0-rc.2", checker, func(cfg *Config) { cfg.ExePath = exe })
 
+			resp := post(t, baseURL+"/api/actions/kit.update", token, map[string]any{})
+			if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "failed" {
+				t.Fatalf("job status = %q, want failed", status)
+			}
+			got, _ := os.ReadFile(exe)
+			if string(got) != "old build" {
+				t.Fatalf("binary = %q, want untouched", got)
+			}
+			entries, _ := os.ReadDir(dir)
+			if len(entries) != 1 {
+				t.Fatalf("install dir holds %d entries, want the binary alone", len(entries))
+			}
+			select {
+			case <-srv.Restart():
+				t.Fatal("a failed update asked for a restart")
+			case <-time.After(2 * restartDelay):
+			}
+		})
+	}
+}
+
+// While an update job holds the slot, a second one is the ordinary busy 409,
+// distinct from the restart 409.
+func TestHandler_KitUpdate_Busy_409(t *testing.T) {
+	fake := newFakeCLI(pluginListFixture)
+	fake.SetDelay(2 * time.Second)
+	checker := releasesChecker(t, "["+releaseJSON("v0.1.0", false)+"]", nil)
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath), Version: "v0.1.0", Updates: checker,
+		ExePath: filepath.Join(t.TempDir(), "rise-x-kit")})
+
+	first := post(t, baseURL+"/api/actions/marketplace.update", token, map[string]any{})
+	first.Body.Close()
 	resp := post(t, baseURL+"/api/actions/kit.update", token, map[string]any{})
-	if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "failed" {
-		t.Fatalf("job status = %q, want failed", status)
+	if resp.StatusCode != http.StatusConflict {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
 	}
-	got, _ := os.ReadFile(exe)
-	if string(got) != "old build" {
-		t.Fatalf("binary = %q, want untouched", got)
-	}
-	entries, _ := os.ReadDir(dir)
-	if len(entries) != 1 {
-		t.Fatalf("install dir holds %d entries, want the binary alone", len(entries))
-	}
-	select {
-	case <-srv.Restart():
-		t.Fatal("a failed update asked for a restart")
-	case <-time.After(2 * restartDelay):
+	if msg := errorMessage(t, resp); msg != "a job is already running" {
+		t.Fatalf("409 message = %q", msg)
 	}
 }
 

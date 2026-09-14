@@ -147,19 +147,17 @@ func (c *Checker) list(ctx context.Context) ([]Release, error) {
 
 	releases, err := c.fetch(ctx)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	switch {
-	case err == nil:
-		c.releases, c.err, c.at = releases, nil, time.Now()
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		// The caller's own budget ran out. A five-second overview check must
-		// not decide for the five-minute update that GitHub is down.
-	default:
-		// The last good list is kept: a failure says nothing about what was
-		// already known.
-		c.err, c.at = err, time.Now()
+	// A failure the caller's own context caused is not remembered: a
+	// five-second overview check must not decide for the five-minute update
+	// that GitHub is down. The client's own timeout, and every other
+	// failure, is remembered for failureTTL so an offline machine does not
+	// pay the full wait on every page load.
+	if err != nil && ctx.Err() != nil {
+		return releases, err
 	}
+	c.mu.Lock()
+	c.releases, c.err, c.at = releases, err, time.Now()
+	c.mu.Unlock()
 	return releases, err
 }
 

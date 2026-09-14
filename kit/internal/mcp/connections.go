@@ -55,6 +55,9 @@ func connectionsIn(servers map[string]configuredEntry, scope, projectPath string
 	var out []Connection
 	for _, name := range sortedKeys(servers) {
 		entry := servers[name]
+		// The stale check cannot fire today, since isRiseX admits only hosts
+		// Rise-X serves from and isStale only hosts it has left; it is here
+		// so the two lists stay disjoint if either set of hosts changes.
 		if !remoteEntry(entry) || !isRiseX(entry.URL) || isStale(name, entry.URL) {
 			continue
 		}

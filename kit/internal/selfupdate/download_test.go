@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func tarGz(t *testing.T, member string, payload []byte) []byte {
@@ -242,4 +243,40 @@ func TestCleanup_RemovesLeftoverWorkDir(t *testing.T) {
 	}
 	Cleanup(exe)
 	assertOnly(t, dir, "rise-x-kit", "unrelated")
+}
+
+// The asset goes through TransferClient, which has no fixed timeout: a body
+// that trickles in slower than the API client's timeout still arrives.
+func TestDownload_UsesTransferClientWithoutTheAPITimeout(t *testing.T) {
+	payload := []byte("slow but whole")
+	archive := tarGz(t, "rise-x-kit", payload)
+	checksums := sumLine(archive, "rise-x-kit_v0.1.0_darwin_universal.tar.gz")
+	mux := http.NewServeMux()
+	mux.HandleFunc("/asset", func(w http.ResponseWriter, r *http.Request) {
+		half := len(archive) / 2
+		w.Write(archive[:half])
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(120 * time.Millisecond)
+		w.Write(archive[half:])
+	})
+	mux.HandleFunc("/checksums", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(checksums)) })
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := New("rise-x/rise-x-ai-public-marketplace")
+	c.HTTPClient = &http.Client{Timeout: 30 * time.Millisecond} // the API budget, far shorter than the body
+	rel := Release{Tag: "kit-v0.1.0", Version: "v0.1.0", Assets: map[string]string{
+		"rise-x-kit_v0.1.0_darwin_universal.tar.gz": srv.URL + "/asset",
+		"checksums.txt": srv.URL + "/checksums",
+	}}
+	newPath, err := c.Download(context.Background(), rel, "darwin", "arm64", t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("Download over a slow body: %v", err)
+	}
+	got, _ := os.ReadFile(newPath)
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("binary = %q", got)
+	}
 }
