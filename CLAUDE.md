@@ -175,10 +175,18 @@ private marketplace.
 
 The kit updates itself from GitHub Releases (`kit/internal/selfupdate`): it
 reads the newest `kit-v*` release and downloads
-`rise-x-kit_<version>_darwin_universal.tar.gz` or
-`rise-x-kit_<version>_windows_amd64.zip`, checked against `checksums.txt`.
-Those three asset names are a contract with every kit already installed;
-renaming one in `kit-release.yml` breaks the update button for partners.
+`rise-x-kit_v<X.Y.Z>_darwin_universal.tar.gz` or
+`rise-x-kit_v<X.Y.Z>_windows_amd64.zip` (the tag minus `kit-`, so the `v`
+stays), checked against `checksums.txt`. Those three asset names are a
+contract between `kit-release.yml`, `selfupdate.AssetName`, `install.sh` and
+`install.ps1`, and with every kit already installed; renaming one breaks the
+update button for partners.
+
+While the kit is being tested with partners before its first release, a
+maintainer may publish a `kit-v<X.Y.Z>-rc.N` **pre-release** by hand from a
+PR branch, with assets built the way `kit-release.yml` builds them. That is
+the one exception to the rule below: `kit-release.yml` never emits an `-rc`
+tag, so the two cannot collide.
 
 It has its own release track, independent of `release/*`: a PR touches
 `plugins/**` or `kit/**`, never both.
@@ -251,8 +259,9 @@ Known-benign, expected hits: the `localhost_public_url` warning documented in
 `plugins/rise-x-mcp/skills/rise-x-mcp/references/managing-apps.md`, generic
 "feedback" wording in
 `plugins/rise-x-mcp/skills/rise-x-mcp/references/validation.md`,
-`kit/internal/mcp/stale.go`'s two retired Azure Container Apps hostnames
-(public MCP endpoints partners connected to, kept for the reconnect fix), and
+the two retired Azure Container Apps hostnames under `kit/internal/mcp/`
+(listed in `stale.go`, repeated in its test fixtures; public MCP endpoints
+partners connected to, kept for the reconnect fix), and
 this file (it quotes the pattern above). Anything else is a real hit — fix it.
 Future known-benign hits specific to one plugin belong in that plugin's own
 "Per-plugin rules" section above, not here.

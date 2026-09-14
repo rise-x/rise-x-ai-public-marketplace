@@ -101,8 +101,8 @@ func TestDownload_TarGz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
-	if want := filepath.Join(dir, "rise-x-kit.new"); newPath != want {
-		t.Fatalf("newPath = %q, want %q", newPath, want)
+	if filepath.Dir(filepath.Dir(newPath)) != dir || !strings.HasPrefix(filepath.Base(filepath.Dir(newPath)), workPrefix) || filepath.Base(newPath) != "rise-x-kit.new" {
+		t.Fatalf("newPath = %q, want <dir>/%s*/rise-x-kit.new", newPath, workPrefix)
 	}
 
 	got, err := os.ReadFile(newPath)
@@ -121,7 +121,8 @@ func TestDownload_TarGz(t *testing.T) {
 			t.Fatalf("mode = %v, want -rwxr-xr-x", info.Mode().Perm())
 		}
 	}
-	assertOnly(t, dir, "rise-x-kit.new")
+	assertOnly(t, filepath.Dir(newPath), "rise-x-kit.new")
+	assertOnly(t, dir, filepath.Base(filepath.Dir(newPath)))
 
 	joined := strings.Join(lines, "|")
 	for _, want := range []string{"Downloading " + assetName, "Checksum verified", "Unpacked rise-x-kit"} {
@@ -142,8 +143,8 @@ func TestDownload_Zip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
-	if want := filepath.Join(dir, "rise-x-kit.exe.new"); newPath != want {
-		t.Fatalf("newPath = %q, want %q", newPath, want)
+	if filepath.Dir(filepath.Dir(newPath)) != dir || filepath.Base(newPath) != "rise-x-kit.exe.new" {
+		t.Fatalf("newPath = %q, want <dir>/%s*/rise-x-kit.exe.new", newPath, workPrefix)
 	}
 	got, err := os.ReadFile(newPath)
 	if err != nil {
@@ -152,7 +153,7 @@ func TestDownload_Zip(t *testing.T) {
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("new binary = %q, want %q", got, payload)
 	}
-	assertOnly(t, dir, "rise-x-kit.exe.new")
+	assertOnly(t, filepath.Dir(newPath), "rise-x-kit.exe.new")
 }
 
 func TestDownload_ChecksumMismatch(t *testing.T) {
@@ -219,4 +220,26 @@ func assertOnly(t *testing.T, dir string, want ...string) {
 			t.Fatalf("dir holds %v, want %v", got, want)
 		}
 	}
+}
+
+// A run that dies between Download and Apply leaves its work directory
+// behind; the next launch's Cleanup removes it along with a Windows .old.
+func TestCleanup_RemovesLeftoverWorkDir(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "rise-x-kit")
+	if err := os.WriteFile(exe, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	work, err := os.MkdirTemp(dir, workPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "rise-x-kit.new"), []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "unrelated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	Cleanup(exe)
+	assertOnly(t, dir, "rise-x-kit", "unrelated")
 }

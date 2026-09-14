@@ -7,8 +7,10 @@ import (
 
 // Connection is one Rise-X MCP server configured outside the rise-x-mcp
 // plugin: at user or local scope in ~/.claude.json, or in the Desktop app's
-// own config. Removing the plugin leaves these behind, so the page shows
-// them whether or not the plugin is installed.
+// own config file. Removing the plugin leaves these behind, so the page shows
+// them whether or not the plugin is installed. A server still on an address
+// Rise-X has moved off is not here: the stale scan owns that one, with its
+// Fix.
 type Connection struct {
 	Name  string `json:"name"`
 	Scope string `json:"scope"`
@@ -16,11 +18,15 @@ type Connection struct {
 	// remove -s local` must run in.
 	ProjectPath string `json:"projectPath,omitempty"`
 	URL         string `json:"url"`
+	// HasHeaders marks an entry carrying static headers, an Authorization
+	// among them for a hand-added server. Removing it would destroy a
+	// credential that may exist nowhere else, so the kit never does.
+	HasHeaders bool `json:"hasHeaders,omitempty"`
+	// Removable is whether the kit may remove this entry itself, decided
+	// here so the page and the action agree: not the Desktop app's file,
+	// and not an entry with its own headers.
+	Removable bool `json:"removable"`
 }
-
-// Removable reports whether the kit may remove this entry itself. The
-// Desktop app's config is the app's alone.
-func (c Connection) Removable() bool { return c.Scope != ScopeDesktop }
 
 // Connections lists the Rise-X connections configured in ~/.claude.json (user
 // scope plus every project's local scope) and in the Desktop app's own
@@ -49,24 +55,23 @@ func connectionsIn(servers map[string]configuredEntry, scope, projectPath string
 	var out []Connection
 	for _, name := range sortedKeys(servers) {
 		entry := servers[name]
-		if !remoteEntry(entry) || !isRiseX(name, entry.URL) {
+		if !remoteEntry(entry) || !isRiseX(entry.URL) || isStale(name, entry.URL) {
 			continue
 		}
-		out = append(out, Connection{Name: name, Scope: scope, ProjectPath: projectPath, URL: entry.URL})
+		headers := len(entry.Headers) > 0
+		out = append(out, Connection{Name: name, Scope: scope, ProjectPath: projectPath,
+			URL: entry.URL, HasHeaders: headers, Removable: scope != ScopeDesktop && !headers})
 	}
 	return out
 }
 
-// isRiseX reports whether a server is a Rise-X one: on a current Rise-X
-// host, on an address Rise-X has moved off, or on any other host when its
-// name or URL says Rise-X. A partner's own server on localhost is not.
-func isRiseX(name, rawURL string) bool {
+// isRiseX reports whether a server is on a host Rise-X owns. The name is
+// deliberately not consulted: this list feeds a remove, and "rise-x" in a
+// name a partner chose for their own server must not make it a target.
+func isRiseX(rawURL string) bool {
 	host := hostOf(rawURL)
 	if host == "" || localHost(host) {
 		return false
 	}
-	if slices.Contains(currentHosts, host) || isStale(name, rawURL) {
-		return true
-	}
-	return strings.HasSuffix(host, ".rise-x.io") || riseXHint(name)
+	return slices.Contains(currentHosts, host) || strings.HasSuffix(host, ".rise-x.io")
 }

@@ -29,10 +29,10 @@ func allDigits(s string) bool {
 	return true
 }
 
-// parsable reports whether v looks like a kit version at all. "dev", "" and
+// Known reports whether v looks like a kit version at all. "dev", "" and
 // "unknown" do not, and a binary carrying one of those must never be offered
-// an update.
-func parsable(v string) bool {
+// an update. It is the one predicate for that, shared with the server.
+func Known(v string) bool {
 	n := normalize(v)
 	if n == "" {
 		return false

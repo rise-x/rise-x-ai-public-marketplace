@@ -150,10 +150,13 @@ in Claude Desktop** and shows the addresses from the skill's own configuration.
 Removing the Rise-X skill does not remove its connections. A connector you
 added in Claude Desktop stays in your account, and a connection added with the
 `claude` CLI stays in `~/.claude.json`. The card keeps showing both after an
-uninstall: connections Claude Code keeps on its own are listed with a
-**Remove** button each, and the **Remove** dialog for the Rise-X skill offers
-to take them out at the same time. A Claude Desktop connector can only be
-removed in **Customize** > **Connectors**; the card says so.
+uninstall. Connections set up outside the skill, on a Rise-X host, are listed
+with a **Remove** button each, and the **Remove** dialog for the Rise-X skill
+offers to take exactly the listed ones out at the same time; that option is
+off until you tick it. A connection that carries its own headers is listed but
+never removed, since a header may hold a credential that exists nowhere else.
+A Claude Desktop connector can only be removed in **Customize** >
+**Connectors**; the card says so.
 
 **Automatic updates** is a switch that turns on marketplace auto-update, so skill
 fixes arrive in the background instead of waiting for a manual update.

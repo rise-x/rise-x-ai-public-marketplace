@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -186,6 +187,15 @@ type actionBody struct {
 	// Enabled is a pointer so "not sent" and false are different things.
 	Enabled *bool `json:"enabled"`
 	Confirm bool  `json:"confirm"`
+	// Targets names several connections at once, for mcp.remove: exactly the
+	// rows the page showed, each re-matched against the server's own scan.
+	Targets []connectionTarget `json:"targets"`
+}
+
+type connectionTarget struct {
+	Name        string `json:"name"`
+	Scope       string `json:"scope"`
+	ProjectPath string `json:"projectPath"`
 }
 
 // decodeActionBody reads the request body. An empty body is valid - most
@@ -208,6 +218,13 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	body, err := decodeActionBody(w, r)
 	if err != nil {
 		httpError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Once the update has swapped the binary in, this process is about to stop
+	// serving, and a job started now would be orphaned by the relaunch.
+	if s.restartPending() {
+		httpError(w, http.StatusConflict, "Rise-X Kit is restarting into the new version")
 		return
 	}
 
@@ -425,6 +442,9 @@ func (s *Server) handleKitUpdate(w http.ResponseWriter, action string) {
 		httpError(w, http.StatusBadRequest, "cannot tell which file is running, so it cannot be replaced")
 		return
 	}
+	// A failure the background check remembered was bounded by that check's
+	// five seconds; the update has five minutes and asks again.
+	s.updates.ForgetFailures()
 	id, err := s.jobs.Start(action, kitUpdateJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
 		rel, newer, err := s.updates.Latest(jctx, s.version)
 		if err != nil {
@@ -436,12 +456,21 @@ func (s *Server) handleKitUpdate(w http.ResponseWriter, action string) {
 		onLine(fmt.Sprintf("updating Rise-X Kit %s -> %s", s.version, rel.Version))
 		newPath, err := s.updates.Download(jctx, rel, runtime.GOOS, runtime.GOARCH, filepath.Dir(s.exePath), onLine)
 		if err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				return -1, fmt.Errorf("Rise-X Kit cannot replace itself in %s: %w. Download %s from %s and run the installer again",
+					filepath.Dir(s.exePath), err, rel.Version, rel.URL)
+			}
 			return -1, err
 		}
 		if err := selfupdate.Apply(newPath, s.exePath); err != nil {
-			os.Remove(newPath)
+			os.RemoveAll(filepath.Dir(newPath))
+			if errors.Is(err, fs.ErrPermission) {
+				return -1, fmt.Errorf("Rise-X Kit cannot replace itself at %s: %w. Download %s from %s and run the installer again",
+					s.exePath, err, rel.Version, rel.URL)
+			}
 			return -1, fmt.Errorf("replace %s: %w", s.exePath, err)
 		}
+		os.RemoveAll(filepath.Dir(newPath))
 		onLine("restarting Rise-X Kit")
 		time.AfterFunc(restartDelay, s.requestRestart)
 		return 0, nil
@@ -458,29 +487,38 @@ func (s *Server) handleKitUpdate(w http.ResponseWriter, action string) {
 }
 
 // handleMcpRemove takes away the Rise-X connections Claude Code holds outside
-// the plugin: the one the body names, or every removable one when it names
-// none. Like mcp.fix, the targets come from the scan, never from the request.
+// the plugin: the one the body names, or the ones it lists in targets. There
+// is deliberately no "everything" form: what goes is exactly what the page
+// showed. Like mcp.fix, each target is re-matched against the scan, so
+// nothing from the request shapes the claude argv.
 func (s *Server) handleMcpRemove(w http.ResponseWriter, ctx context.Context, action string, body actionBody) {
-	targets := s.connections()
-	if name := body.Name; name != "" {
-		match := findConnection(targets, name, body.Scope, body.ProjectPath)
-		if match == nil {
-			httpError(w, http.StatusBadRequest, "unknown connection target")
-			return
-		}
-		targets = []mcp.Connection{*match}
+	known := s.connections()
+	asked := body.Targets
+	if body.Name != "" {
+		asked = append(asked, connectionTarget{Name: body.Name, Scope: body.Scope, ProjectPath: body.ProjectPath})
+	}
+	if len(asked) == 0 {
+		httpError(w, http.StatusBadRequest, "name the connection to remove")
+		return
 	}
 
 	var removable []mcp.Connection
-	for _, c := range targets {
-		if c.Removable() {
-			removable = append(removable, c)
+	for _, t := range asked {
+		match := findConnection(known, t.Name, t.Scope, t.ProjectPath)
+		switch {
+		case match == nil:
+			httpError(w, http.StatusBadRequest, "unknown connection target")
+			return
+		case match.Scope == mcp.ScopeDesktop:
+			httpError(w, http.StatusBadRequest,
+				"this connection is in Claude Desktop's own configuration file, which the CLI does not edit; remove it there")
+			return
+		case match.HasHeaders:
+			httpError(w, http.StatusBadRequest,
+				"this connection carries its own headers, which may hold a credential that exists nowhere else; remove it yourself if you mean to")
+			return
 		}
-	}
-	if len(removable) == 0 {
-		httpError(w, http.StatusBadRequest,
-			"nothing the CLI can remove; take this one out in Claude Desktop under Customize, Connectors")
-		return
+		removable = append(removable, *match)
 	}
 
 	s.startJob(w, ctx, action, needsCLI, mcpFixJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {

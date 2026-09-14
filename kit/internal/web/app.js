@@ -33,7 +33,8 @@
  *       servers?: [{ name, target, status }], configured?: [{ name, type?, url?, command?, args? }],
  *       stale?: [{ name, scope: "user"|"local"|"desktop", projectPath?, url, suggestedUrl }],
  *       // the Rise-X servers configured outside the plugin; they outlive an uninstall
- *       connections?: [{ name, scope: "user"|"local"|"desktop", projectPath?, url }],
+ *       connections?: [{ name, scope: "user"|"local"|"desktop", projectPath?, url,
+ *         hasHeaders?, removable }],   // removable is the server's verdict; the page never decides
  *       message?: string,    // why the verdict is unknown, when it is
  *       raw?: string },      // full `claude mcp list` text, redacted
  *     reloadHint: bool }
@@ -57,7 +58,8 @@
  *     plugin.install / plugin.uninstall {name},
  *     plugin.update {name, marketplace?},
  *     mcp.fix {name, scope, projectPath?} - or {} for every fixable connection
- *     mcp.remove {name, scope, projectPath?} - or {} for every removable one
+ *     mcp.remove {name, scope, projectPath?} or {targets: [{name, scope, projectPath?}]}
+ *       - only the rows the page showed; there is no "everything" form
  *     kit.update {} - downloads the newest kit, swaps it in, then the server
  *       restarts on the same port; the page waits for the new version's
  *       X-Rise-X-Kit header on GET / and reloads
@@ -305,7 +307,7 @@ const JOB_TITLES = {
   "mcp.remove": (b) =>
     b.name
       ? `Remove the connection ${b.name}`
-      : "Remove the Rise-X connections",
+      : `Remove ${(b.targets || []).length} Rise-X connection(s)`,
   "kit.update": () => "Update Rise-X Kit",
 };
 
@@ -475,6 +477,11 @@ function awaitRestart() {
  * confirm(). It resolves to {ok, checked}: ok is whether the reader pressed
  * the confirm button, checked the state of the optional checkbox. Escape and
  * a click on the backdrop both resolve ok:false.
+ *
+ * o.bodyHtml is HTML and is interpolated as is: every caller builds it from
+ * literals and esc()'d values. Nothing read from the server goes in raw.
+ * The buttons close the dialog with dialog.close(value) rather than a
+ * <form method="dialog">: the page's CSP has form-action 'none'.
  */
 function confirmDialog(o) {
   const dialog = $("kit-dialog");
@@ -482,8 +489,8 @@ function confirmDialog(o) {
   dialog.innerHTML = `
     <div class="px-5 pt-4 pb-4">
       <div id="kit-dialog-title" data-slot="dialog-title" class="text-ui font-medium">${esc(o.title)}</div>
-      ${o.body ? `<div id="kit-dialog-body" data-slot="dialog-description" class="mt-1.5 text-xs text-muted-foreground">${o.body}</div>` : ""}
-      ${o.detail ? `<pre class="kit-dialog-detail mt-3 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground">${esc(o.detail)}</pre>` : ""}
+      ${o.bodyHtml ? `<div id="kit-dialog-body" data-slot="dialog-description" class="mt-1.5 text-xs text-muted-foreground">${o.bodyHtml}</div>` : ""}
+      ${o.detail ? `<pre id="kit-dialog-detail" class="kit-dialog-detail mt-3 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground">${esc(o.detail)}</pre>` : ""}
       ${o.checkbox ? checkboxRow("kit-dialog-check", "dialog-check", o.checkbox) : ""}
     </div>
     <div data-slot="dialog-footer" class="flex items-center gap-2 kit-end border-t border-border-subtle px-5 py-3">
@@ -493,6 +500,7 @@ function confirmDialog(o) {
   return new Promise((resolve) => {
     const finish = () => {
       dialog.removeEventListener("close", finish);
+      dialog.removeEventListener("pointerdown", onPointerDown);
       dialog.removeEventListener("click", onBackdrop);
       const box = $("kit-dialog-check");
       resolve({
@@ -502,11 +510,20 @@ function confirmDialog(o) {
       dialog.innerHTML = "";
     };
     // The dialog element itself is only under the pointer where the backdrop
-    // is; every visible part is a child.
+    // is; every visible part is a child. A click's target is the nearest
+    // common ancestor of where the press started and ended, so a selection
+    // dragged out of the detail box would land on the dialog too: only a
+    // press that also started on the backdrop cancels.
+    let pressedBackdrop = false;
+    const onPointerDown = (event) => {
+      pressedBackdrop = event.target === dialog;
+    };
     const onBackdrop = (event) => {
-      if (event.target === dialog) dialog.close("cancel");
+      if (event.target === dialog && pressedBackdrop) dialog.close("cancel");
+      pressedBackdrop = false;
     };
     dialog.addEventListener("close", finish);
+    dialog.addEventListener("pointerdown", onPointerDown);
     dialog.addEventListener("click", onBackdrop);
     dialog.returnValue = "";
     dialog.showModal();
@@ -531,7 +548,7 @@ function checkboxRow(id, act, o) {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" class="size-3" aria-hidden="true" ${on ? "" : "hidden"}><path d="M20 6 9 17l-5-5"/></svg>
       </button>
       <div class="min-w-0">
-        <label for="${esc(id)}" data-slot="label" class="text-ui font-medium text-foreground select-none">${esc(o.label)}</label>
+        <label for="${esc(id)}" id="${esc(id)}-label" data-slot="label" class="text-ui font-medium text-foreground select-none">${esc(o.label)}</label>
         ${o.caption ? `<span class="mt-0.5 block text-micro text-subtle">${esc(o.caption)}</span>` : ""}
       </div>
     </div>`;
@@ -1105,10 +1122,10 @@ function staleRows(stale) {
     .join("");
 }
 
-/** removableConnections are the ones Claude Code itself holds, which the kit
- * can take out; a Desktop connector is only ever the app's to remove. */
+/** removableConnections are the ones the server says the kit may take out:
+ * not the Desktop app's own file, not an entry carrying its own headers. */
 const removableConnections = (mcp) =>
-  ((mcp && mcp.connections) || []).filter((c) => c.scope !== "desktop");
+  ((mcp && mcp.connections) || []).filter((c) => c.removable);
 
 /** connectionsBlock lists the Rise-X connections configured outside the
  * skill. They stay when the skill is removed, so this is where a partner sees
@@ -1122,10 +1139,13 @@ function connectionsBlock(mcp) {
         name: entry.name,
         code: SCOPE_LABELS[entry.scope] || entry.scope,
         description: entry.url,
-        trailing:
-          entry.scope === "desktop"
-            ? '<span class="kit-wrap max-w-[42ch] shrink-0 text-right text-xs text-muted-foreground">Remove this one in Claude Desktop &rsaquo; Customize &rsaquo; Connectors.</span>'
-            : btn("Remove", {
+        trailing: !entry.removable
+          ? `<span class="kit-wrap max-w-[42ch] shrink-0 text-right text-xs text-muted-foreground">${
+              entry.scope === "desktop"
+                ? "Set in Claude Desktop's own configuration file (claude_desktop_config.json); edit it there."
+                : "Has its own headers, which may hold a credential; remove it yourself if you mean to."
+            }</span>`
+          : btn("Remove", {
                 act: "mcp-remove",
                 variant: "destructive",
                 cls: "shrink-0",
@@ -1140,7 +1160,7 @@ function connectionsBlock(mcp) {
     )
     .join("");
   return `<div data-slot="list" class="flex flex-col rounded-lg border border-border-subtle">
-      <div class="border-b border-border-subtle px-3.5 py-2.5 text-xs font-medium text-foreground">Connections Claude Code keeps on its own</div>
+      <div class="border-b border-border-subtle px-3.5 py-2.5 text-xs font-medium text-foreground">Connections set up outside the skill</div>
       ${rows}
     </div>`;
 }
@@ -1777,17 +1797,19 @@ function stopped() {
 const FIX_QUESTIONS = {
   "npmrc.clean": {
     title: "Point @rise-x at the public npm registry?",
-    body: "Rise-X Kit rewrites that one line in ~/.npmrc and saves a backup of the file first. Your other npm settings and credentials are not touched.",
+    bodyHtml:
+      "Rise-X Kit rewrites that one line in ~/.npmrc and saves a backup of the file first. Your other npm settings and credentials are not touched.",
     confirmLabel: "Update ~/.npmrc",
   },
   "node.install": {
     title: "Install Node.js?",
-    body: "This downloads the current LTS release and may take a few minutes.",
+    bodyHtml: "This downloads the current LTS release and may take a few minutes.",
     confirmLabel: "Install Node.js",
   },
   "mcp.fix": {
     title: "Update these Rise-X connections?",
-    body: "Each one is removed and added back at the address Rise-X uses today, in the same place it was.",
+    bodyHtml:
+      "Each one is removed and added back at the address Rise-X uses today, in the same place it was.",
     confirmLabel: "Update addresses",
   },
 };
@@ -1844,7 +1866,8 @@ async function updateKit(button) {
   const kit = overview.kit || {};
   const { ok } = await confirmDialog({
     title: `Update Rise-X Kit to ${kit.latest || "the newest version"}?`,
-    body: `The new version is downloaded and checked, then Rise-X Kit restarts and this page reloads. Anything running in Activity finishes first.`,
+    bodyHtml:
+      "The new version is downloaded and checked, then Rise-X Kit restarts and this page reloads. If something is still running in Activity, wait for it to finish first.",
     confirmLabel: "Update and restart",
   });
   if (!ok) return undefined;
@@ -1856,7 +1879,7 @@ async function removeConnection(button) {
   const { name, scope, project, url } = button.dataset;
   const { ok } = await confirmDialog({
     title: `Remove the connection ${name}?`,
-    body: `Claude Code will no longer reach Rise-X through it${scope === "local" ? " in that project" : ""}. You can add it again from the Rise-X skill later.`,
+    bodyHtml: `Claude Code will no longer reach Rise-X through it${scope === "local" ? " in that project" : ""}. You can add it again from the Rise-X skill later.`,
     detail: url,
     confirmLabel: "Remove connection",
     destructive: true,
@@ -1890,7 +1913,7 @@ async function removeSkill(button) {
   }
   const { ok, checked } = await confirmDialog({
     title: `Remove ${skillLabel(name)}?`,
-    body: parts.join(" "),
+    bodyHtml: parts.join(" "),
     detail: removable.length
       ? removable
           .map(
@@ -1900,9 +1923,9 @@ async function removeSkill(button) {
       : "",
     checkbox: removable.length
       ? {
-          label: "Also remove the connections Claude Code keeps on its own",
-          caption: "The ones listed above, from ~/.claude.json.",
-          checked: true,
+          label: `Also remove the ${removable.length === 1 ? "connection" : `${removable.length} connections`} listed above`,
+          caption: "Set up outside the skill, in ~/.claude.json. Off unless you tick it.",
+          checked: false,
         }
       : null,
     confirmLabel: `Remove ${skillLabel(name)}`,
@@ -1915,8 +1938,14 @@ async function removeSkill(button) {
     button,
   );
   if (checked && result && result.jobId) {
+    // Exactly the rows the dialog listed, not whatever the scan finds later.
+    const targets = removable.map((c) => ({
+      name: c.name,
+      scope: c.scope,
+      projectPath: c.projectPath || undefined,
+    }));
     const job = jobs.find((j) => j.id === result.jobId);
-    if (job) job.next = () => runAction("mcp.remove", {}).catch(() => {});
+    if (job) job.next = () => runAction("mcp.remove", { targets }).catch(() => {});
   }
   return result;
 }

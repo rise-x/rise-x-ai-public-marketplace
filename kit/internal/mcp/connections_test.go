@@ -10,6 +10,8 @@ const connectionsClaudeJSON = `{
   "mcpServers": {
     "rise-x": {"type": "http", "url": "https://mcp.rise-x.io/mcp"},
     "old-rise-x": {"type": "http", "url": "https://mcp-server.lemonmeadow-b9fe5140.australiaeast.azurecontainerapps.io/mcp"},
+    "rise-x-keyed": {"type": "http", "url": "https://mcp.rise-x.io/mcp", "headers": {"Authorization": "Bearer x"}},
+    "risex-gateway": {"type": "http", "url": "https://mcp.partnercorp.example/mcp"},
     "context7": {"type": "http", "url": "https://mcp.context7.com/mcp"},
     "codegraph": {"type": "stdio", "command": "codegraph"},
     "rise-x-mcp-local": {"type": "http", "url": "http://127.0.0.1:8080/mcp"},
@@ -38,11 +40,14 @@ func TestConnections_RiseXOnlyAcrossScopes(t *testing.T) {
 	desktop := writeTemp(t, "claude_desktop_config.json",
 		`{"mcpServers":{"Rise-X":{"type":"http","url":"https://mcp.rise-x.io/mcp"}}}`)
 
+	// The stale entry belongs to the stale scan and its Fix; the entry named
+	// like Rise-X on a partner's own host is not Rise-X's to remove; the
+	// keyed one is listed but never removable.
 	got := Connections(claudeJSON, desktop)
 	want := []Connection{
-		{Name: "old-rise-x", Scope: ScopeUser, URL: "https://mcp-server.lemonmeadow-b9fe5140.australiaeast.azurecontainerapps.io/mcp"},
-		{Name: "rise-x", Scope: ScopeUser, URL: "https://mcp.rise-x.io/mcp"},
-		{Name: "rise-x-test", Scope: ScopeLocal, ProjectPath: "/work/app", URL: "https://mcp-test.rise-x.io/mcp"},
+		{Name: "rise-x", Scope: ScopeUser, URL: "https://mcp.rise-x.io/mcp", Removable: true},
+		{Name: "rise-x-keyed", Scope: ScopeUser, URL: "https://mcp.rise-x.io/mcp", HasHeaders: true},
+		{Name: "rise-x-test", Scope: ScopeLocal, ProjectPath: "/work/app", URL: "https://mcp-test.rise-x.io/mcp", Removable: true},
 		{Name: "Rise-X", Scope: ScopeDesktop, URL: "https://mcp.rise-x.io/mcp"},
 	}
 	if len(got) != len(want) {
@@ -52,9 +57,6 @@ func TestConnections_RiseXOnlyAcrossScopes(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("[%d] = %+v, want %+v", i, got[i], want[i])
 		}
-	}
-	if got[0].Removable() != true || got[3].Removable() != false {
-		t.Errorf("Removable: user %v, desktop %v", got[0].Removable(), got[3].Removable())
 	}
 }
 
@@ -67,20 +69,20 @@ func TestConnections_MissingFilesContributeNothing(t *testing.T) {
 
 func TestIsRiseX(t *testing.T) {
 	cases := []struct {
-		name, url string
-		want      bool
+		url  string
+		want bool
 	}{
-		{"rise-x", "https://mcp.rise-x.io/mcp", true},
-		{"anything", "https://mcp-staging.rise-x.io/mcp", true},
-		{"rise-x", "https://mcp-server.bluefield-efc1f90d.australiaeast.azurecontainerapps.io/mcp", true},
-		{"my-risex", "https://example.com/mcp", true},
-		{"context7", "https://mcp.context7.com/mcp", false},
-		{"rise-x-local", "http://localhost:8080/mcp", false},
-		{"rise-x", "https:/0.0.0.0:8080/mcp", false},
+		{"https://mcp.rise-x.io/mcp", true},
+		{"https://mcp-anything.rise-x.io/mcp", true},
+		{"https://mcp-server.bluefield-efc1f90d.australiaeast.azurecontainerapps.io/mcp", false},
+		{"https://example.com/mcp", false},
+		{"https://mcp.context7.com/mcp", false},
+		{"http://localhost:8080/mcp", false},
+		{"https:/0.0.0.0:8080/mcp", false},
 	}
 	for _, c := range cases {
-		if got := isRiseX(c.name, c.url); got != c.want {
-			t.Errorf("isRiseX(%q, %q) = %v, want %v", c.name, c.url, got, c.want)
+		if got := isRiseX(c.url); got != c.want {
+			t.Errorf("isRiseX(%q) = %v, want %v", c.url, got, c.want)
 		}
 	}
 }

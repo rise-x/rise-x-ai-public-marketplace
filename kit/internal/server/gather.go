@@ -587,7 +587,7 @@ const kitCheckTimeout = 5 * time.Second
 // gatherKit asks GitHub whether a newer kit exists. A development build has
 // no version to compare, so it is left out of both the overview and the doctor.
 func (s *Server) gatherKit(ctx context.Context, overview *OverviewResponse, facts *doctor.Facts) {
-	if !kitVersionKnown(s.version) {
+	if !selfupdate.Known(s.version) {
 		return
 	}
 	facts.KitVersion, facts.KitChecked = s.version, true
@@ -607,12 +607,6 @@ func (s *Server) gatherKit(ctx context.Context, overview *OverviewResponse, fact
 	info.CanSelfUpdate = newer && canSelf && s.exePath != ""
 	facts.KitLatest, facts.KitLatestURL = rel.Version, rel.URL
 	facts.KitUpdate, facts.KitSelfUpdate = newer, info.CanSelfUpdate
-}
-
-// kitVersionKnown reports whether version is a release the checker can
-// compare: "dev", "unknown" and "" are the builds that never check.
-func kitVersionKnown(version string) bool {
-	return selfupdate.Compare(version, "0.0.0") > 0 || selfupdate.IsPrerelease(version)
 }
 
 // kitCheckReason folds the release lookup's failure into the one line the

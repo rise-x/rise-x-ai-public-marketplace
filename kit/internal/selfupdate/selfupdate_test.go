@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // newTestChecker serves body for every releases request and counts the hits.
@@ -225,5 +227,67 @@ func TestBinaryName(t *testing.T) {
 	}
 	if got := BinaryName("darwin"); got != "rise-x-kit" {
 		t.Errorf("BinaryName(darwin) = %q", got)
+	}
+}
+
+// A failure caused by the caller's own deadline is not remembered: the
+// five-second overview check must not decide for the five-minute update.
+func TestLatest_DeadlineNotCached(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		time.Sleep(150 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(list(release("kit-v0.2.0", false, false))))
+	}))
+	t.Cleanup(srv.Close)
+	c := New("rise-x/rise-x-ai-public-marketplace")
+	c.APIBaseURL = srv.URL
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, _, err := c.Latest(ctx, "v0.1.0"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want a deadline", err)
+	}
+	rel, newer, err := c.Latest(context.Background(), "v0.1.0")
+	if err != nil || !newer || rel.Version != "v0.2.0" {
+		t.Fatalf("after the deadline: rel=%+v newer=%v err=%v", rel, newer, err)
+	}
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("server saw %d requests, want 2 (the timed-out one was not cached)", n)
+	}
+}
+
+// A later failure keeps the last good list rather than wiping it.
+func TestLatest_FailureKeepsLastGoodList(t *testing.T) {
+	var fail atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(list(release("kit-v0.2.0", false, false))))
+	}))
+	t.Cleanup(srv.Close)
+	c := New("rise-x/rise-x-ai-public-marketplace")
+	c.APIBaseURL = srv.URL
+
+	if _, _, err := c.Latest(context.Background(), "v0.1.0"); err != nil {
+		t.Fatal(err)
+	}
+	fail.Store(true)
+	c.ForgetFailures()
+	c.mu.Lock()
+	c.at = time.Time{} // expire the good answer
+	c.mu.Unlock()
+	if _, _, err := c.Latest(context.Background(), "v0.1.0"); err == nil {
+		t.Fatal("expected the 500")
+	}
+	c.mu.Lock()
+	kept := len(c.releases)
+	c.mu.Unlock()
+	if kept != 1 {
+		t.Fatalf("releases after a failure = %d, want the last good list kept", kept)
 	}
 }

@@ -23,6 +23,9 @@ body {
 }
 #kit-main {
   flex: 1 0 auto;
+  /* .kit-shell centres with margin-inline:auto, which on a column flex item
+     is an auto cross-axis margin: without an explicit width the item shrinks
+     to its content instead of stretching to the max-width. */
   width: 100%;
 }
 

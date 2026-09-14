@@ -204,6 +204,54 @@ func TestHandler_KitUpdate_ReplacesBinaryAndRequestsRestart(t *testing.T) {
 	if ov.ReloadHint {
 		t.Fatal("kit.update set the reload hint")
 	}
+	// The work directory is gone, and nothing else may start now.
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("install dir holds %d entries after the update, want the binary alone", len(entries))
+	}
+	resp = post(t, baseURL+"/api/actions/marketplace.update", token, map[string]any{})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("action while restarting = %d, want 409", resp.StatusCode)
+	}
+}
+
+// A download that fails verification changes nothing: the running binary is
+// untouched, no work directory is left, and no restart is asked for.
+func TestHandler_KitUpdate_ChecksumMismatch_NoRestart(t *testing.T) {
+	if _, ok := selfupdate.AssetName("v0", runtime.GOOS, runtime.GOARCH); !ok || runtime.GOOS == "windows" {
+		t.Skipf("not exercised on %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, selfupdate.BinaryName(runtime.GOOS))
+	if err := os.WriteFile(exe, []byte("old build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const version = "v0.1.0-rc.3"
+	asset, _ := selfupdate.AssetName(version, runtime.GOOS, runtime.GOARCH)
+	archive := tarGzOne(t, selfupdate.BinaryName(runtime.GOOS), []byte("new build"))
+	checksums := strings.Repeat("0", 64) + "  " + asset + "\n"
+	checker := releasesChecker(t, "["+releaseJSON(version, true)+"]",
+		map[string][]byte{asset: archive, "checksums.txt": []byte(checksums)})
+	baseURL, token, srv := newTestServerVersion(t, "v0.1.0-rc.2", checker, func(cfg *Config) { cfg.ExePath = exe })
+
+	resp := post(t, baseURL+"/api/actions/kit.update", token, map[string]any{})
+	if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "failed" {
+		t.Fatalf("job status = %q, want failed", status)
+	}
+	got, _ := os.ReadFile(exe)
+	if string(got) != "old build" {
+		t.Fatalf("binary = %q, want untouched", got)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("install dir holds %d entries, want the binary alone", len(entries))
+	}
+	select {
+	case <-srv.Restart():
+		t.Fatal("a failed update asked for a restart")
+	case <-time.After(2 * restartDelay):
+	}
 }
 
 // Nothing newer is a failed job, not a download.

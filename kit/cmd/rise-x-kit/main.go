@@ -196,10 +196,9 @@ func run() int {
 	// Cancel the running job before we stop serving: http.Server.Shutdown
 	// waits for connections, not for jobs, and the children run in their own
 	// process group, so a Ctrl-C in the launching terminal never reaches them.
-	// A restart is asked for by the update job itself, which has finished.
-	if !restart {
-		srv.Jobs().CancelAll()
-	}
+	// On a restart the update job has already finished, so this reaches only
+	// a job started in the gap, which must not outlive the process either.
+	srv.Jobs().CancelAll()
 	if !srv.Jobs().WaitIdle(shutdownGrace) {
 		log.Printf("a job was still running after %s; exiting anyway", shutdownGrace)
 	}
@@ -215,10 +214,9 @@ func run() int {
 		// same port, so that port and no browser are what it gets.
 		instance.Clear()
 		release()
-		exe, err := os.Executable()
-		if err == nil {
-			err = selfupdate.Relaunch(exe, relaunchArgs(actualPort, *claudeDir))
-		}
+		// The same resolved path the update replaced: on Windows this process's
+		// own file has been renamed aside by now.
+		err := selfupdate.Relaunch(srv.ExePath(), relaunchArgs(actualPort, *claudeDir))
 		if err != nil {
 			log.Printf("could not start the updated Rise-X Kit: %v; start it again yourself", err)
 			return 1

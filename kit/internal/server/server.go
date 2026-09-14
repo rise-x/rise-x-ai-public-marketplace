@@ -173,6 +173,13 @@ func New(cfg Config) *Server {
 		// it has no file to replace.
 		exePath, _ = os.Executable()
 	}
+	// The file to replace is the real one, not a symlink an installer or a
+	// package manager may have put on PATH.
+	if exePath != "" {
+		if resolved, err := filepath.EvalSymlinks(exePath); err == nil {
+			exePath = resolved
+		}
+	}
 	// The version is served as the X-Rise-X-Kit header, and an empty header
 	// reads as "not a kit": a build that lost its -X ldflag would then be
 	// invisible to the next launch's probe, which would start a rival server.
@@ -311,6 +318,21 @@ func (s *Server) Restart() <-chan struct{} { return s.restartRequested }
 func (s *Server) requestRestart() {
 	s.restartOnce.Do(func() { close(s.restartRequested) })
 }
+
+// restartPending reports whether kit.update has asked for a relaunch, so no
+// new action starts against a process that is about to stop serving.
+func (s *Server) restartPending() bool {
+	select {
+	case <-s.restartRequested:
+		return true
+	default:
+		return false
+	}
+}
+
+// ExePath is the binary kit.update replaces and main relaunches: resolved
+// once here, so both sides name the same file.
+func (s *Server) ExePath() string { return s.exePath }
 
 // Jobs is the store main cancels on shutdown: a claude child runs in its own
 // process group, so nothing else stops it.

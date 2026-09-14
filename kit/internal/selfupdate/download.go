@@ -21,11 +21,16 @@ const maxAssetBytes = 64 << 20
 
 const checksumsName = "checksums.txt"
 
-// Download fetches the release asset for goos/goarch plus checksums.txt into
-// destDir, verifies the asset's sha256, extracts the single binary member to
-// <destDir>/<binary>.new with mode 0755, and returns that path. destDir must
-// exist and should be the running binary's own directory, so the later rename
-// stays on one filesystem. onLine, when not nil, receives short progress
+// workPrefix names the per-run directory Download works in.
+const workPrefix = ".rise-x-kit-update-"
+
+// Download fetches the release asset for goos/goarch plus checksums.txt,
+// verifies the asset's sha256, extracts the single binary member with mode
+// 0755, and returns its path. The work happens in a fresh directory under
+// destDir, so nothing the install directory already holds is touched;
+// destDir should be the running binary's own directory, so the later rename
+// stays on one filesystem. The caller removes that directory once Apply has
+// moved the binary out of it. onLine, when not nil, receives short progress
 // lines. Nothing is left behind on failure.
 func (c *Checker) Download(ctx context.Context, rel Release, goos, goarch, destDir string, onLine func(string)) (newPath string, err error) {
 	say := func(s string) {
@@ -47,15 +52,20 @@ func (c *Checker) Download(ctx context.Context, rel Release, goos, goarch, destD
 		return "", fmt.Errorf("release %s has no %s", rel.Tag, checksumsName)
 	}
 
-	archivePath := filepath.Join(destDir, assetName)
-	sumsPath := filepath.Join(destDir, checksumsName)
-	newPath = filepath.Join(destDir, BinaryName(goos)+".new")
+	work, err := os.MkdirTemp(destDir, workPrefix)
+	if err != nil {
+		return "", fmt.Errorf("prepare the update: %w", err)
+	}
+	archivePath := filepath.Join(work, assetName)
+	sumsPath := filepath.Join(work, checksumsName)
+	newPath = filepath.Join(work, BinaryName(goos)+".new")
 	defer func() {
+		if err != nil {
+			os.RemoveAll(work)
+			return
+		}
 		os.Remove(archivePath)
 		os.Remove(sumsPath)
-		if err != nil {
-			os.Remove(newPath)
-		}
 	}()
 
 	say("Downloading " + assetName)
@@ -90,15 +100,14 @@ func (c *Checker) fetchFile(ctx context.Context, url, dest string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.transferClient().Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-		return "", ErrRateLimited
-	}
+	// Assets come from the download host, where a 403 is an expired signed
+	// URL, not the API's rate limit.
 	if resp.StatusCode != http.StatusOK {
 		return "", &StatusError{URL: url, Code: resp.StatusCode}
 	}

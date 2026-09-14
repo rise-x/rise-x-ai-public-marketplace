@@ -1,7 +1,10 @@
-// Package selfupdate finds newer rise-x-kit releases on GitHub, downloads and
-// checksum-verifies the release asset for the running platform, swaps the new
-// binary in, and relaunches it. A development build (version "dev") is never
-// offered an update: Latest returns an empty answer without contacting GitHub.
+// Package selfupdate finds newer rise-x-kit releases on GitHub, downloads the
+// release asset for the running platform, swaps the new binary in, and
+// relaunches it. The download is checked against the release's own
+// checksums.txt, which guards the transfer, not the publisher: both files
+// come from the same release, so this is integrity, not authenticity. A
+// development build (version "dev") is never offered an update: Latest
+// returns an empty answer without contacting GitHub.
 package selfupdate
 
 import (
@@ -57,7 +60,12 @@ type Release struct {
 type Checker struct {
 	Repo       string // "owner/name"
 	APIBaseURL string // default https://api.github.com
+	// HTTPClient makes the API call, which is small and must answer fast.
 	HTTPClient *http.Client
+	// TransferClient downloads the assets. It carries no timeout of its own:
+	// a few MB over a slow link takes longer than any fixed budget, so the
+	// caller's context bounds it instead.
+	TransferClient *http.Client
 
 	mu       sync.Mutex
 	releases []Release
@@ -67,10 +75,25 @@ type Checker struct {
 
 func New(repo string) *Checker {
 	return &Checker{
-		Repo:       repo,
-		APIBaseURL: "https://api.github.com",
-		HTTPClient: &http.Client{Timeout: 10 * time.Second},
+		Repo:           repo,
+		APIBaseURL:     "https://api.github.com",
+		HTTPClient:     &http.Client{Timeout: 10 * time.Second},
+		TransferClient: &http.Client{},
 	}
+}
+
+func (c *Checker) apiClient() *http.Client {
+	if c.HTTPClient != nil {
+		return c.HTTPClient
+	}
+	return http.DefaultClient
+}
+
+func (c *Checker) transferClient() *http.Client {
+	if c.TransferClient != nil {
+		return c.TransferClient
+	}
+	return http.DefaultClient
 }
 
 // ForgetFailures drops a remembered failure so the next Latest retries now.
@@ -88,7 +111,7 @@ func (c *Checker) ForgetFailures() {
 // whether it is newer than current. A prerelease is offered only to a binary
 // that is itself on a prerelease.
 func (c *Checker) Latest(ctx context.Context, current string) (Release, bool, error) {
-	if !parsable(current) {
+	if !Known(current) {
 		return Release{}, false, nil
 	}
 	releases, err := c.list(ctx)
@@ -125,8 +148,18 @@ func (c *Checker) list(ctx context.Context) ([]Release, error) {
 	releases, err := c.fetch(ctx)
 
 	c.mu.Lock()
-	c.releases, c.err, c.at = releases, err, time.Now()
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	switch {
+	case err == nil:
+		c.releases, c.err, c.at = releases, nil, time.Now()
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		// The caller's own budget ran out. A five-second overview check must
+		// not decide for the five-minute update that GitHub is down.
+	default:
+		// The last good list is kept: a failure says nothing about what was
+		// already known.
+		c.err, c.at = err, time.Now()
+	}
 	return releases, err
 }
 
@@ -153,7 +186,9 @@ type releaseJSON struct {
 }
 
 func (c *Checker) fetch(ctx context.Context) ([]Release, error) {
-	url := fmt.Sprintf("%s/repos/%s/releases?per_page=30", c.APIBaseURL, c.Repo)
+	// The same page size the installers read: the repo also publishes plugin
+	// releases, and the newest kit one has to be inside the page.
+	url := fmt.Sprintf("%s/repos/%s/releases?per_page=100", c.APIBaseURL, c.Repo)
 	body, err := c.get(ctx, url, maxBodyBytes)
 	if err != nil {
 		return nil, err
@@ -190,7 +225,7 @@ func (c *Checker) get(ctx context.Context, url string, limit int64) ([]byte, err
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.apiClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
