@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -210,9 +211,29 @@ func TestHandler_McpFix_DesktopEntry_400(t *testing.T) {
 		resp.Body.Close()
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
-	if got := errorMessage(t, resp); got !=
-		"nothing the CLI can change; update this one in Claude Desktop under Customize, Connectors" {
+	if got := errorMessage(t, resp); got != desktopConfigMessage {
 		t.Fatalf("error = %q", got)
+	}
+}
+
+// A target has to match name, scope and project together: a local entry
+// cannot be removed from another project, and the refusal names it.
+func TestHandler_McpRemove_WrongProject_400(t *testing.T) {
+	baseURL, token, _, fake := connectionsServer(t)
+
+	resp := post(t, baseURL+"/api/actions/mcp.remove", token, map[string]any{
+		"name": "rise-x-test", "scope": "local", "projectPath": t.TempDir()})
+	if resp.StatusCode != http.StatusBadRequest {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if msg := errorMessage(t, resp); !strings.Contains(msg, "rise-x-test") {
+		t.Fatalf("error = %q, want it to name the target", msg)
+	}
+	for _, call := range fake.Calls {
+		if len(call.Args) > 1 && call.Args[1] == "remove" {
+			t.Fatalf("something was removed: %+v", call)
+		}
 	}
 }
 
@@ -224,4 +245,194 @@ func findCall(t *testing.T, fake *runnertest.Fake, args []string) int {
 		t.Fatalf("no call with %v in %+v", args, fake.Calls)
 	}
 	return i
+}
+
+// connectionsClaudeJSON holds two Rise-X connections outside the plugin, one
+// of them at the current address, plus a server that is not Rise-X.
+const connectionsClaudeJSON = `{
+  "mcpServers": {
+    "rise-x": {"type": "http", "url": "https://mcp.rise-x.io/mcp"},
+    "rise-x-keyed": {"type": "http", "url": "https://mcp.rise-x.io/mcp", "headers": {"Authorization": "Bearer x"}},
+    "context7": {"type": "http", "url": "https://mcp.context7.com/mcp"}
+  },
+  "projects": {
+    "PROJECT_PATH": {
+      "mcpServers": {
+        "rise-x-test": {"type": "http", "url": "https://mcp-test.rise-x.io/mcp"}
+      }
+    }
+  }
+}`
+
+// connectionsServer starts a kit whose ~/.claude.json holds those two
+// connections and whose fake CLI can remove either.
+func connectionsServer(t *testing.T) (baseURL, token, projectPath string, fake *runnertest.Fake) {
+	t.Helper()
+	projectPath = t.TempDir()
+	path := filepath.Join(t.TempDir(), ".claude.json")
+	body := []byte(strings.ReplaceAll(connectionsClaudeJSON, "PROJECT_PATH", jsonSafe(t, projectPath)))
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake = newFakeCLI(pluginListFixture)
+	for _, args := range [][]string{
+		{"mcp", "remove", "rise-x", "-s", "user"},
+		{"mcp", "remove", "rise-x-test", "-s", "local"},
+	} {
+		fake.Set(fakeCLIPath, args, runnertest.Result{Stdout: "ok\n"})
+	}
+	baseURL, token = newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath),
+		ClaudeJSONPath: path})
+	return baseURL, token, projectPath, fake
+}
+
+// The connections are listed with or without the plugin: removing the skill
+// does not remove them, so the card must keep showing them.
+func TestGather_Connections_ListedWithoutPlugin(t *testing.T) {
+	baseURL, token, projectPath, _ := connectionsServer(t)
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if got.Mcp == nil || len(got.Mcp.Connections) != 3 {
+		t.Fatalf("mcp = %+v, want three connections", got.Mcp)
+	}
+	user, keyed, local := got.Mcp.Connections[0], got.Mcp.Connections[1], got.Mcp.Connections[2]
+	if user.Name != "rise-x" || user.Scope != mcp.ScopeUser || user.URL != "https://mcp.rise-x.io/mcp" || !user.Removable {
+		t.Errorf("user entry = %+v", user)
+	}
+	if keyed.Name != "rise-x-keyed" || !keyed.HasHeaders || keyed.Removable {
+		t.Errorf("keyed entry = %+v, want listed but not removable", keyed)
+	}
+	if local.Name != "rise-x-test" || local.Scope != mcp.ScopeLocal || local.ProjectPath != projectPath || !local.Removable {
+		t.Errorf("local entry = %+v", local)
+	}
+}
+
+func TestHandler_McpRemove_OneEntry(t *testing.T) {
+	baseURL, token, projectPath, fake := connectionsServer(t)
+
+	resp := post(t, baseURL+"/api/actions/mcp.remove", token, map[string]any{
+		"name": "rise-x-test", "scope": "local", "projectPath": projectPath})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "succeeded" {
+		t.Fatalf("job status = %q", status)
+	}
+	remove := findCall(t, fake, []string{"mcp", "remove", "rise-x-test", "-s", "local"})
+	if dir := fake.Calls[remove].Dir; dir != projectPath {
+		t.Fatalf("remove ran in %q, want the project path %q", dir, projectPath)
+	}
+	for _, call := range fake.Calls {
+		if slices.Equal(call.Args, []string{"mcp", "remove", "rise-x", "-s", "user"}) {
+			t.Fatalf("the user-scope entry was not named, yet it was removed: %+v", fake.Calls)
+		}
+	}
+}
+
+// Several rows go at once only when each is named: there is no "everything"
+// form, so nothing the page never showed can be removed.
+func TestHandler_McpRemove_Targets(t *testing.T) {
+	baseURL, token, projectPath, fake := connectionsServer(t)
+
+	resp := post(t, baseURL+"/api/actions/mcp.remove", token, map[string]any{"targets": []map[string]any{
+		{"name": "rise-x", "scope": "user"},
+		{"name": "rise-x-test", "scope": "local", "projectPath": projectPath},
+	}})
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if status := waitForJob(t, baseURL, token, jobID(t, resp)); status != "succeeded" {
+		t.Fatalf("job status = %q", status)
+	}
+	findCall(t, fake, []string{"mcp", "remove", "rise-x", "-s", "user"})
+	findCall(t, fake, []string{"mcp", "remove", "rise-x-test", "-s", "local"})
+	for _, call := range fake.Calls {
+		if slices.Equal(call.Args, []string{"mcp", "remove", "rise-x-keyed", "-s", "user"}) {
+			t.Fatalf("the keyed entry was not named, yet it was removed: %+v", fake.Calls)
+		}
+	}
+}
+
+func TestHandler_McpRemove_EmptyBody_400(t *testing.T) {
+	baseURL, token, _, fake := connectionsServer(t)
+
+	resp := post(t, baseURL+"/api/actions/mcp.remove", token, map[string]any{})
+	if resp.StatusCode != http.StatusBadRequest {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+	for _, call := range fake.Calls {
+		if len(call.Args) > 1 && call.Args[0] == "mcp" && call.Args[1] == "remove" {
+			t.Fatalf("an empty body removed something: %+v", call)
+		}
+	}
+}
+
+// An entry with its own headers may hold a credential that exists nowhere
+// else, so the kit refuses to remove it, the way mcp.fix refuses to repoint it.
+func TestHandler_McpRemove_HeadersRefused_400(t *testing.T) {
+	baseURL, token, _, _ := connectionsServer(t)
+
+	resp := post(t, baseURL+"/api/actions/mcp.remove", token, map[string]any{
+		"name": "rise-x-keyed", "scope": "user"})
+	if resp.StatusCode != http.StatusBadRequest {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if msg := errorMessage(t, resp); !strings.Contains(msg, "headers") {
+		t.Fatalf("error = %q, want it to name the headers", msg)
+	}
+}
+
+// The Desktop app's own config file is not the CLI's to edit.
+func TestHandler_McpRemove_DesktopRefused_400(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "claude_desktop_config.json"),
+		[]byte(`{"mcpServers":{"Rise-X":{"type":"http","url":"https://mcp.rise-x.io/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeCLI(pluginListFixture)
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath), DesktopDataDir: dataDir})
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if len(got.Mcp.Connections) != 1 || got.Mcp.Connections[0].Scope != mcp.ScopeDesktop || got.Mcp.Connections[0].Removable {
+		t.Fatalf("connections = %+v, want one desktop entry that is not removable", got.Mcp.Connections)
+	}
+	resp := post(t, baseURL+"/api/actions/mcp.remove", token, map[string]any{"name": "Rise-X", "scope": "desktop"})
+	if resp.StatusCode != http.StatusBadRequest {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// A connection still on an old address is the stale scan's, with its Fix,
+// and never a removable connection. Today that follows from the two host
+// sets being disjoint; this pins the outcome whichever way it is reached.
+func TestGather_StaleEntryIsNotAlsoAConnection(t *testing.T) {
+	baseURL, token, _, _ := staleServer(t)
+
+	var got OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &got)
+	if len(got.Mcp.Stale) != 2 || len(got.Mcp.Connections) != 0 {
+		t.Fatalf("stale=%d connections=%d, want 2 and 0", len(got.Mcp.Stale), len(got.Mcp.Connections))
+	}
+}
+
+// A name the scan does not know is refused: the request never shapes argv.
+func TestHandler_McpRemove_UnknownTarget_400(t *testing.T) {
+	baseURL, token, _, _ := connectionsServer(t)
+
+	resp := post(t, baseURL+"/api/actions/mcp.remove", token, map[string]any{
+		"name": "context7", "scope": "user"})
+	if resp.StatusCode != http.StatusBadRequest {
+		resp.Body.Close()
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
 }

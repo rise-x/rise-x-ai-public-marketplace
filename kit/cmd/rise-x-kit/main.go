@@ -20,12 +20,14 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/buildinfo"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/claudemd"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/instance"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/selfupdate"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/server"
 )
 
@@ -108,7 +110,20 @@ func run() int {
 		log.Print(refusal(requested))
 		return 1
 	}
-	defer releaseLock()
+	// Released once: the restart path below hands the lock over before the
+	// deferred release would.
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(releaseLock) }
+	defer release()
+
+	// The binary the update replaces and the relaunch starts, resolved once so
+	// every side names the same file. Cleanup runs only now, with the lock
+	// held: a second launch during another kit's download must not remove
+	// that download's work directory.
+	exe := resolvedExecutable()
+	if exe != "" {
+		selfupdate.Cleanup(exe)
+	}
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
@@ -128,6 +143,7 @@ func run() int {
 		Token:     token,
 		ClaudeDir: *claudeDir,
 		Version:   buildinfo.Version,
+		ExePath:   exe,
 	})
 
 	// Recorded before the browser opens, so the next launch finds this window.
@@ -171,9 +187,12 @@ func run() int {
 	defer stopSignals()
 
 	code := 0
+	restart := false
 	select {
 	case <-sigCtx.Done():
 	case <-srv.Quit():
+	case <-srv.Restart():
+		restart = true
 	case err := <-serveErr:
 		log.Printf("serve: %v", err)
 		code = 1
@@ -182,6 +201,8 @@ func run() int {
 	// Cancel the running job before we stop serving: http.Server.Shutdown
 	// waits for connections, not for jobs, and the children run in their own
 	// process group, so a Ctrl-C in the launching terminal never reaches them.
+	// On a restart the update job has already finished, so this reaches only
+	// a job started in the gap, which must not outlive the process either.
 	srv.Jobs().CancelAll()
 	if !srv.Jobs().WaitIdle(shutdownGrace) {
 		log.Printf("a job was still running after %s; exiting anyway", shutdownGrace)
@@ -190,7 +211,47 @@ func run() int {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	_ = httpServer.Shutdown(ctx)
+
+	if restart {
+		// The new binary is in place of this one. It must find no record and
+		// no lock, or it would reopen this window instead of serving, so both
+		// go before it starts. The page is polling for the new version on the
+		// same port, so that port and no browser are what it gets.
+		instance.Clear()
+		release()
+		// The same resolved path the update replaced: on Windows this process's
+		// own file has been renamed aside by now.
+		err := selfupdate.Relaunch(srv.ExePath(), relaunchArgs(actualPort, *claudeDir))
+		if err != nil {
+			log.Printf("could not start the updated Rise-X Kit: %v; start it again yourself", err)
+			return 1
+		}
+		fmt.Printf("updated; the new Rise-X Kit is taking over %s\n", url)
+	}
 	return code
+}
+
+// resolvedExecutable is this binary's real path, symlinks followed, or "" when
+// it cannot be told; the server then refuses to update itself.
+func resolvedExecutable() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
+}
+
+// relaunchArgs is the command line the updated binary gets: the same port,
+// so the open page finds it, and the same config directory.
+func relaunchArgs(port int, claudeDir string) []string {
+	args := []string{"-port", fmt.Sprint(port), "-no-browser"}
+	if claudeDir != defaultClaudeDir() {
+		args = append(args, "-claude-dir", claudeDir)
+	}
+	return args
 }
 
 // action is what a launch does once it knows what else is on the machine.

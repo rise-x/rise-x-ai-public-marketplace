@@ -7,7 +7,10 @@ import (
 
 // OverviewResponse is GET /api/overview's shape.
 type OverviewResponse struct {
-	KitVersion  string           `json:"kitVersion"`
+	KitVersion string `json:"kitVersion"`
+	// Kit is the kit's own update state; nil for a development build, which
+	// never checks.
+	Kit         *KitInfo         `json:"kit,omitempty"`
 	CLI         *CLIInfo         `json:"cli"`
 	Marketplace *MarketplaceInfo `json:"marketplace,omitempty"`
 	Plugins     []PluginInfo     `json:"plugins,omitempty"`
@@ -23,6 +26,22 @@ type OverviewResponse struct {
 type RunningJob struct {
 	ID     string `json:"id"`
 	Action string `json:"action"`
+}
+
+// KitInfo is what the page needs to offer the kit's own update.
+type KitInfo struct {
+	// Latest is the newest release this build may move to, v-prefixed.
+	Latest string `json:"latest,omitempty"`
+	// LatestURL is that release's page, for the platforms the kit cannot
+	// update itself on.
+	LatestURL       string `json:"latestUrl,omitempty"`
+	UpdateAvailable bool   `json:"updateAvailable"`
+	// CanSelfUpdate is whether a release asset exists for this platform, so
+	// the Update button can do the work rather than link out.
+	CanSelfUpdate bool `json:"canSelfUpdate"`
+	// CheckError is why GitHub could not be asked, in one line; Latest and
+	// UpdateAvailable say nothing while it is set.
+	CheckError string `json:"checkError,omitempty"`
 }
 
 type CLIInfo struct {
@@ -67,6 +86,10 @@ type McpInfo struct {
 	// Stale holds the connections pointing at an address Rise-X has moved
 	// off, each with the address it should point at instead.
 	Stale []mcp.Stale `json:"stale,omitempty"`
+	// Connections are the Rise-X servers configured outside the plugin, in
+	// ~/.claude.json or the Desktop app's config. They outlive a plugin
+	// uninstall, so the page lists them whether or not the plugin is there.
+	Connections []mcp.Connection `json:"connections,omitempty"`
 	// DesktopConnectors names the Rise-X connectors the Claude Desktop app
 	// gave the account's latest Claude Code session, when Verdict is
 	// "desktop".

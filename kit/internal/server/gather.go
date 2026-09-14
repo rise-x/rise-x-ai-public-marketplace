@@ -20,6 +20,7 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/nodeinstall"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/npmrc"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/selfupdate"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/semver"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/settings"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/synced"
@@ -150,7 +151,7 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 		overview.CLI = &CLIInfo{Found: false}
 		// Detecting stale addresses needs no CLI, so the connection card must
 		// still show them when there is none to gather the rest.
-		overview.Mcp = &McpInfo{Verdict: string(mcp.VerdictUnknown), Stale: s.staleMcp()}
+		overview.Mcp = &McpInfo{Verdict: string(mcp.VerdictUnknown), Stale: s.staleMcp(), Connections: s.connections()}
 	}
 
 	node := s.nodeCache.getOrFail(func() (nodeProbe, bool) {
@@ -175,6 +176,8 @@ func (s *Server) gather(ctx context.Context) (OverviewResponse, doctor.Facts, er
 
 	facts.McpStale = s.staleMcp()
 	facts.DisableAutoupdater, facts.ForceAutoupdatePlugins = autoupdaterEnv(set)
+
+	s.gatherKit(ctx, &overview, &facts)
 
 	overview.ReloadHint = s.getReloadHint()
 	if id, action, ok := s.jobs.Running(); ok {
@@ -490,7 +493,7 @@ func (s *Server) gatherHead(ctx context.Context, mp *claudecli.Marketplace, over
 }
 
 func (s *Server) gatherMcp(ctx context.Context, client *claudecli.Client, plResult claudecli.PluginListResult, plErr error, overview *OverviewResponse) {
-	info := &McpInfo{Verdict: string(mcp.VerdictUnknown), Stale: s.staleMcp()}
+	info := &McpInfo{Verdict: string(mcp.VerdictUnknown), Stale: s.staleMcp(), Connections: s.connections()}
 
 	res := s.mcpCache.getOrForget(func() (mcpListResult, error) {
 		raw, err := client.McpList(ctx)
@@ -524,10 +527,9 @@ func (s *Server) gatherMcp(ctx context.Context, client *claudecli.Client, plResu
 	// connection keeps asking for Claude Code's sign-in however many times the
 	// partner signs in through the Desktop app. What the app handed the
 	// latest Claude Code session answers instead; only a copy the CLI itself
-	// has connected, or no copy at all, outranks that.
-	switch mcp.Verdict(info.Verdict) {
-	case mcp.VerdictConnected, mcp.VerdictNotInstalled:
-	default:
+	// has connected outranks that. With the plugin gone the connector is
+	// still the partner's connection, so "not installed" must not hide it.
+	if mcp.Verdict(info.Verdict) != mcp.VerdictConnected {
 		if names := s.desktopConnectors(); len(names) > 0 {
 			info.Verdict, info.DesktopConnectors, info.Message = string(mcp.VerdictDesktop), names, ""
 		}
@@ -575,6 +577,52 @@ func autoupdaterEnv(set settings.Settings) (disable, force bool) {
 		return false, false
 	}
 	return env["DISABLE_AUTOUPDATER"] != "", env["FORCE_AUTOUPDATE_PLUGINS"] != ""
+}
+
+// kitCheckTimeout bounds the release lookup inside a gather: the rest of the
+// page must not wait on GitHub. The checker remembers its answer for half an
+// hour, so this is paid rarely.
+const kitCheckTimeout = 5 * time.Second
+
+// gatherKit asks GitHub whether a newer kit exists. A development build has
+// no version to compare, so it is left out of both the overview and the doctor.
+func (s *Server) gatherKit(ctx context.Context, overview *OverviewResponse, facts *doctor.Facts) {
+	if !selfupdate.Known(s.version) {
+		return
+	}
+	facts.KitVersion, facts.KitChecked = s.version, true
+	info := &KitInfo{}
+	overview.Kit = info
+
+	cctx, cancel := context.WithTimeout(ctx, kitCheckTimeout)
+	defer cancel()
+	rel, newer, err := s.updates.Latest(cctx, s.version)
+	if err != nil {
+		info.CheckError = kitCheckReason(err)
+		facts.KitCheckError = info.CheckError
+		return
+	}
+	_, canSelf := selfupdate.AssetName(rel.Version, runtime.GOOS, runtime.GOARCH)
+	info.Latest, info.LatestURL, info.UpdateAvailable = rel.Version, rel.URL, newer
+	info.CanSelfUpdate = newer && canSelf && s.exePath != ""
+	facts.KitLatest, facts.KitLatestURL = rel.Version, rel.URL
+	facts.KitUpdate, facts.KitSelfUpdate = newer, info.CanSelfUpdate
+}
+
+// kitCheckReason folds the release lookup's failure into the one line the
+// doctor row shows.
+func kitCheckReason(err error) string {
+	switch {
+	case errors.Is(err, selfupdate.ErrRateLimited):
+		return "GitHub is rate-limiting update checks from this machine"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "GitHub did not answer in time"
+	}
+	var statusErr *selfupdate.StatusError
+	if errors.As(err, &statusErr) {
+		return fmt.Sprintf("GitHub answered HTTP %d", statusErr.Code)
+	}
+	return "GitHub could not be reached"
 }
 
 // nodeInstalled reports the cached node probe's verdict, for the winget verb.

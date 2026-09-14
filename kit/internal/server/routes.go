@@ -7,8 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +23,7 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/jobs"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/npmrc"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/selfupdate"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/settings"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/web"
 )
@@ -40,6 +45,14 @@ const (
 // maxActionBody caps an action's JSON body; every one of them is a couple of
 // short fields.
 const maxActionBody = 64 << 10
+
+// restartingMessage is the 409 every action but quit gets once kit.update
+// has asked main to relaunch.
+const restartingMessage = "Rise-X Kit is restarting into the new version"
+
+// desktopConfigMessage names where a ScopeDesktop entry lives: the Desktop
+// app's own MCP config file, not the account connectors under Customize.
+const desktopConfigMessage = "this connection is in Claude Desktop's own configuration file (claude_desktop_config.json), which the CLI does not edit; change it there"
 
 // contentSecurityPolicy is sent with every response. The page carries the CSRF
 // token, so it must never be framed; font-src allows data: only for the design
@@ -183,6 +196,15 @@ type actionBody struct {
 	// Enabled is a pointer so "not sent" and false are different things.
 	Enabled *bool `json:"enabled"`
 	Confirm bool  `json:"confirm"`
+	// Targets names several connections at once, for mcp.remove: exactly the
+	// rows the page showed, each re-matched against the server's own scan.
+	Targets []connectionTarget `json:"targets"`
+}
+
+type connectionTarget struct {
+	Name        string `json:"name"`
+	Scope       string `json:"scope"`
+	ProjectPath string `json:"projectPath"`
 }
 
 // decodeActionBody reads the request body. An empty body is valid - most
@@ -205,6 +227,16 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	body, err := decodeActionBody(w, r)
 	if err != nil {
 		httpError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Once the update has asked for the relaunch, this process is about to
+	// stop serving. The ask comes restartDelay after the job finishes, so a
+	// job started in that gap is not caught here; main's CancelAll on the
+	// way out is what stops that one. Quit stays available: stopping is what
+	// the partner may want if the restart looks stuck.
+	if name != "quit" && s.restartPending() {
+		httpError(w, http.StatusConflict, restartingMessage)
 		return
 	}
 
@@ -256,6 +288,10 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		s.handleNodeInstall(w, ctx, name)
 	case "mcp.fix":
 		s.handleMcpFix(w, ctx, name, body)
+	case "mcp.remove":
+		s.handleMcpRemove(w, ctx, name, body)
+	case "kit.update":
+		s.handleKitUpdate(w, name)
 	case "cli.rescan":
 		cli, _ := s.relocate(ctx)
 		s.nodeCache.invalidate()
@@ -351,8 +387,7 @@ func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action
 				"this connection carries its own headers, which the fix cannot put back; repoint it yourself so its credentials are kept")
 			return
 		}
-		httpError(w, http.StatusBadRequest,
-			"nothing the CLI can change; update this one in Claude Desktop under Customize, Connectors")
+		httpError(w, http.StatusBadRequest, desktopConfigMessage)
 		return
 	}
 
@@ -399,6 +434,145 @@ func (s *Server) handleMcpFix(w http.ResponseWriter, ctx context.Context, action
 		}
 		return 0, nil
 	})
+}
+
+// kitUpdateJobTimeout bounds the download of a release asset of a few MB.
+const kitUpdateJobTimeout = 5 * time.Minute
+
+// restartDelay is how long the finished job stays readable before this
+// process stops serving, so the page's poll can see it succeed and switch to
+// waiting for the new one.
+const restartDelay = 1500 * time.Millisecond
+
+// handleKitUpdate downloads the newest release for this platform, verifies it
+// against the release's checksums, swaps it in for the running binary and asks
+// main to relaunch. It goes through the jobs store directly: it needs no
+// claude CLI, and finishing must not raise the "restart Claude Code" hint.
+func (s *Server) handleKitUpdate(w http.ResponseWriter, action string) {
+	if s.exePath == "" {
+		httpError(w, http.StatusBadRequest, "cannot tell which file is running, so it cannot be replaced")
+		return
+	}
+	id, err := s.jobs.Start(action, kitUpdateJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
+		// A failure the background check remembered was bounded by that
+		// check's five seconds; the update has five minutes and asks again.
+		s.updates.ForgetFailures()
+		rel, newer, err := s.updates.Latest(jctx, s.version)
+		if err != nil {
+			return -1, fmt.Errorf("check for a newer version: %w", err)
+		}
+		if !newer {
+			return -1, fmt.Errorf("%s is already the newest version", s.version)
+		}
+		onLine(fmt.Sprintf("updating Rise-X Kit %s -> %s", s.version, rel.Version))
+		newPath, err := s.updates.Download(jctx, rel, runtime.GOOS, runtime.GOARCH, filepath.Dir(s.exePath), onLine)
+		if err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				return -1, fmt.Errorf("Rise-X Kit cannot replace itself in %s: %w. Download %s from %s and run the installer again",
+					filepath.Dir(s.exePath), err, rel.Version, rel.URL)
+			}
+			return -1, err
+		}
+		if err := selfupdate.Apply(newPath, s.exePath); err != nil {
+			os.RemoveAll(filepath.Dir(newPath))
+			if errors.Is(err, fs.ErrPermission) {
+				return -1, fmt.Errorf("Rise-X Kit cannot replace itself at %s: %w. Download %s from %s and run the installer again",
+					s.exePath, err, rel.Version, rel.URL)
+			}
+			return -1, fmt.Errorf("replace %s: %w", s.exePath, err)
+		}
+		os.RemoveAll(filepath.Dir(newPath))
+		onLine("restarting Rise-X Kit")
+		time.AfterFunc(restartDelay, s.requestRestart)
+		return 0, nil
+	})
+	if err != nil {
+		if errors.Is(err, jobs.ErrBusy) {
+			httpError(w, http.StatusConflict, "a job is already running")
+			return
+		}
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"jobId": id})
+}
+
+// handleMcpRemove takes away the Rise-X connections Claude Code holds outside
+// the plugin: the one the body names, or the ones it lists in targets. There
+// is deliberately no "everything" form: what goes is exactly what the page
+// showed. Like mcp.fix, each target is re-matched against the scan, so
+// nothing from the request shapes the claude argv.
+func (s *Server) handleMcpRemove(w http.ResponseWriter, ctx context.Context, action string, body actionBody) {
+	known := s.connections()
+	asked := body.Targets
+	if body.Name != "" {
+		asked = append(asked, connectionTarget{Name: body.Name, Scope: body.Scope, ProjectPath: body.ProjectPath})
+	}
+	if len(asked) == 0 {
+		httpError(w, http.StatusBadRequest, "name the connection to remove")
+		return
+	}
+
+	// All or nothing: one target the kit will not remove refuses the whole
+	// request, so what goes is exactly what the page showed. Each refusal
+	// names the target, since a batch may carry several.
+	var removable []mcp.Connection
+	for _, t := range asked {
+		match := findConnection(known, t.Name, t.Scope, t.ProjectPath)
+		switch {
+		case match == nil:
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("%s (%s) is not a connection this machine has", t.Name, t.Scope))
+			return
+		case slices.ContainsFunc(removable, func(c mcp.Connection) bool { return c == *match }):
+			continue // named twice: remove once
+		case match.Scope == mcp.ScopeDesktop:
+			httpError(w, http.StatusBadRequest, t.Name+": "+desktopConfigMessage)
+			return
+		case match.HasHeaders:
+			httpError(w, http.StatusBadRequest, t.Name+
+				": this connection carries its own headers, which may hold a credential that exists nowhere else; remove it yourself if you mean to")
+			return
+		case !match.Removable:
+			// The two arms above are the reasons Removable is false today;
+			// the field stays the verdict if another is added.
+			httpError(w, http.StatusBadRequest, t.Name+": this connection is not one the kit removes")
+			return
+		}
+		removable = append(removable, *match)
+	}
+
+	s.startJob(w, ctx, action, needsCLI, mcpFixJobTimeout, func(jctx context.Context, onLine func(string)) (int, error) {
+		client, ok := s.client(jctx)
+		if !ok {
+			return -1, claudecli.ErrNotFound
+		}
+		for _, c := range removable {
+			dir := ""
+			if c.Scope == mcp.ScopeLocal {
+				dir = c.ProjectPath
+				if _, err := os.Stat(dir); err != nil {
+					onLine(fmt.Sprintf("skipping %s: %s no longer exists", c.Name, dir))
+					continue
+				}
+			}
+			onLine(fmt.Sprintf("removing %s (%s): %s", c.Name, c.Scope, c.URL))
+			if code, err := client.McpRemove(jctx, dir, c.Name, c.Scope, onLine); err != nil || code != 0 {
+				return code, err
+			}
+		}
+		return 0, nil
+	})
+}
+
+func findConnection(list []mcp.Connection, name, scope, projectPath string) *mcp.Connection {
+	for i := range list {
+		c := &list[i]
+		if c.Name == name && c.Scope == scope &&
+			(c.Scope != mcp.ScopeLocal || c.ProjectPath == projectPath) {
+			return c
+		}
+	}
+	return nil
 }
 
 func findStale(list []mcp.Stale, name, scope, projectPath string) *mcp.Stale {

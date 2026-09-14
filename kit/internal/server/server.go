@@ -18,6 +18,7 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/npmrc"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/selfupdate"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/settings"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/synced"
 )
@@ -61,6 +62,14 @@ type Config struct {
 	// NpmrcPath is the npm config the doctor reads and npmrc.clean edits;
 	// empty defaults to ~/.npmrc.
 	NpmrcPath string
+
+	// Updates overrides the GitHub-backed release check; nil defaults to
+	// selfupdate.New(claudecli.MarketplaceRepo). Tests point it at httptest.
+	Updates *selfupdate.Checker
+
+	// ExePath is the running binary, the file kit.update replaces; empty
+	// defaults to os.Executable().
+	ExePath string
 }
 
 // Server holds everything the HTTP handlers need.
@@ -74,6 +83,8 @@ type Server struct {
 	locateEnv      func(runner.Runner) claudecli.Env
 	nodeEnv        func(runner.Runner) doctor.Env
 	catalog        *catalog.Catalog
+	updates        *selfupdate.Checker
+	exePath        string
 	writer         *settings.Writer
 	jobs           *jobs.Store
 	desktopDataDir string
@@ -90,6 +101,8 @@ type Server struct {
 	// staleCache holds the MCP scan: ~/.claude.json carries every project the
 	// partner has ever opened, so it is not a file to re-read per request.
 	staleCache probeCache[[]mcp.Stale]
+	// connectionsCache holds the same files' Rise-X entries, plugin or not.
+	connectionsCache probeCache[[]mcp.Connection]
 	// installLocCache holds the marketplace clone's path, so validating a
 	// plugin name in an action handler costs at most one claude spawn a
 	// minute.
@@ -115,6 +128,10 @@ type Server struct {
 	catalogNames  []string
 	quitRequested chan struct{}
 	quitOnce      sync.Once
+	// restartRequested is closed once kit.update has swapped the binary in,
+	// so main can relaunch it in place of this process.
+	restartRequested chan struct{}
+	restartOnce      sync.Once
 }
 
 func New(cfg Config) *Server {
@@ -146,6 +163,23 @@ func New(cfg Config) *Server {
 	if npmrcPath == "" {
 		npmrcPath = defaultNpmrcPath()
 	}
+	updates := cfg.Updates
+	if updates == nil {
+		updates = selfupdate.New(claudecli.MarketplaceRepo)
+	}
+	exePath := cfg.ExePath
+	if exePath == "" {
+		// A failure here only costs the self-update: kit.update refuses when
+		// it has no file to replace.
+		exePath, _ = os.Executable()
+	}
+	// The file to replace is the real one, not a symlink an installer or a
+	// package manager may have put on PATH.
+	if exePath != "" {
+		if resolved, err := filepath.EvalSymlinks(exePath); err == nil {
+			exePath = resolved
+		}
+	}
 	// The version is served as the X-Rise-X-Kit header, and an empty header
 	// reads as "not a kit": a build that lost its -X ldflag would then be
 	// invisible to the next launch's probe, which would start a rival server.
@@ -154,19 +188,22 @@ func New(cfg Config) *Server {
 		version = "unknown"
 	}
 	s := &Server{
-		port:           cfg.Port,
-		token:          cfg.Token,
-		claudeDir:      cfg.ClaudeDir,
-		version:        version,
-		runner:         r,
-		locateEnv:      locateEnv,
-		nodeEnv:        nodeEnv,
-		catalog:        cat,
-		jobs:           jobs.NewStore(),
-		desktopDataDir: desktopDataDir,
-		claudeJSONPath: claudeJSONPath,
-		npmrcPath:      npmrcPath,
-		quitRequested:  make(chan struct{}),
+		port:             cfg.Port,
+		token:            cfg.Token,
+		claudeDir:        cfg.ClaudeDir,
+		version:          version,
+		runner:           r,
+		locateEnv:        locateEnv,
+		nodeEnv:          nodeEnv,
+		catalog:          cat,
+		updates:          updates,
+		exePath:          exePath,
+		jobs:             jobs.NewStore(),
+		desktopDataDir:   desktopDataDir,
+		claudeJSONPath:   claudeJSONPath,
+		npmrcPath:        npmrcPath,
+		quitRequested:    make(chan struct{}),
+		restartRequested: make(chan struct{}),
 	}
 	s.writer = settings.NewWriter(s.settingsPath())
 	// Locate the CLI once here, so the page's first two requests don't both
@@ -210,6 +247,7 @@ func (s *Server) invalidateClaudeProbes() {
 	s.syncedCache.invalidate()
 	s.connectorsCache.invalidate()
 	s.staleCache.invalidate()
+	s.connectionsCache.invalidate()
 	s.installLocCache.invalidate()
 	s.plListCache.invalidate()
 	s.mpListCache.invalidate()
@@ -264,12 +302,37 @@ func (s *Server) invalidateProbes() {
 	s.nodeCache.invalidate()
 	s.npmrcCache.invalidate()
 	s.catalog.ForgetFailures()
+	s.updates.ForgetFailures()
 	s.invalidateClaudeProbes()
 }
 
 // Quit is closed when the "quit" action runs, so main can shut the process
 // down.
 func (s *Server) Quit() <-chan struct{} { return s.quitRequested }
+
+// Restart is closed once kit.update has put the new binary in place of the
+// running one, so main can stop serving and start that binary on the same
+// port.
+func (s *Server) Restart() <-chan struct{} { return s.restartRequested }
+
+func (s *Server) requestRestart() {
+	s.restartOnce.Do(func() { close(s.restartRequested) })
+}
+
+// restartPending reports whether kit.update has asked for a relaunch, so no
+// new action starts against a process that is about to stop serving.
+func (s *Server) restartPending() bool {
+	select {
+	case <-s.restartRequested:
+		return true
+	default:
+		return false
+	}
+}
+
+// ExePath is the binary kit.update replaces and main relaunches: resolved
+// once here, so both sides name the same file.
+func (s *Server) ExePath() string { return s.exePath }
 
 // Jobs is the store main cancels on shutdown: a claude child runs in its own
 // process group, so nothing else stops it.
@@ -303,6 +366,14 @@ func (s *Server) synced() []synced.Plugin {
 func (s *Server) staleMcp() []mcp.Stale {
 	return s.staleCache.get(func() []mcp.Stale {
 		return mcp.Scan(s.claudeJSONPath, s.desktopConfigPath())
+	})
+}
+
+// connections lists the Rise-X servers those same files configure outside the
+// plugin, whether or not it is installed.
+func (s *Server) connections() []mcp.Connection {
+	return s.connectionsCache.get(func() []mcp.Connection {
+		return mcp.Connections(s.claudeJSONPath, s.desktopConfigPath())
 	})
 }
 

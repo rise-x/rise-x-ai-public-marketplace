@@ -90,6 +90,14 @@ are planned.
 **Summary** is the banner under the page header: it says whether your setup is
 ready, and links straight to any check that needs you.
 
+When a newer Rise-X Kit exists, a second banner offers **Update**. Rise-X Kit
+downloads the new version from the GitHub release, checks it against the
+release's checksums, swaps it in for the running copy and restarts on the same
+address; the page reloads on its own. A copy running on a platform without a
+release build gets a link to the release page instead. Every button that
+changes something asks first, in a dialog that lists exactly what it will
+change.
+
 **Claude Code** shows the `claude` CLI that Rise-X Kit found — its path and
 version — or, if none is found, an **Install** button and a **Rescan** button.
 
@@ -129,15 +137,33 @@ a session has had them, without the raw check output that would still say the
 skill's copy needs a sign-in. If **Recheck** does not see them yet, open a
 Claude Code session in Claude Desktop first.
 
-Connectors added in Claude Desktop before Rise-X moved to `mcp.rise-x.io` still
-point at the old address. Rise-X Kit lists any it finds under **Old Rise-X
-addresses**, with a **Fix** button for the ones added with the `claude` CLI;
-connectors the Desktop app owns have to be removed and re-added in
-**Customize** > **Connectors**.
+Connections set up before Rise-X moved to `mcp.rise-x.io` still point at the
+old address. Rise-X Kit lists any it finds in `~/.claude.json` or in Claude
+Desktop's own configuration file (`claude_desktop_config.json`) under **Old
+Rise-X addresses**, with a **Fix** button for the ones added with the `claude`
+CLI; an entry in the Desktop app's file has to be changed there. A connector
+added under **Customize** > **Connectors** lives in your account, where Kit
+cannot see its address; if it predates the move, remove it and add the new
+one.
 
 When your organisation delivers the Rise-X skill, its connections belong to
 Claude Desktop. `claude mcp list` cannot see them, so the card reads **Managed
 in Claude Desktop** and shows the addresses from the skill's own configuration.
+
+Removing the Rise-X skill does not remove its connections. A connector you
+added in Claude Desktop stays in your account, and a connection added with the
+`claude` CLI stays in `~/.claude.json`. The card keeps showing both after an
+uninstall. Connections set up outside the skill, on a current Rise-X host, are
+listed under **Connections set up outside the skill**; the ones in
+`~/.claude.json` get a **Remove** button each, and the **Remove** dialog for
+the Rise-X skill offers to take exactly the listed ones out at the same time.
+That option is off until you tick it. A connection that carries its own
+headers is listed but never removed, since a header may hold a credential that
+exists nowhere else. An entry in Claude Desktop's own configuration file is
+listed without a button; change it there. A connection still on an old
+address is not in this list: it belongs to **Old Rise-X addresses**, and
+appears here once **Fix** has moved it. A connector added under **Customize**
+> **Connectors** lives in your account and is removed there.
 
 **Automatic updates** is a switch that turns on marketplace auto-update, so skill
 fixes arrive in the background instead of waiting for a manual update.
@@ -146,6 +172,7 @@ fixes arrive in the background instead of waiting for a manual update.
 
 | Check | What it means | What Fix does |
 |---|---|---|
+| Rise-X Kit | Whether this copy of Rise-X Kit is the newest release. A development build never checks | Downloads the new version, checks it against the release's checksums, replaces the running copy and restarts it |
 | Claude Code CLI | Whether `claude` was found, and its version | Installs the CLI, then rescans |
 | Rise-X marketplace | Whether the Rise-X marketplace is registered. Reads "Skills come from your organisation" when every skill is delivered by your account | Registers the marketplace |
 | Auto-update | Whether marketplace auto-update is on, for whichever marketplace your skills came from. Your organisation's own deliveries need no switch | Turns auto-update on for that marketplace |
@@ -177,7 +204,10 @@ your shell profile the way it normally does, so new shells find Node.
 The automatic-updates switch writes a documented Claude Code
 setting; whether Claude Code honors that setting at user scope isn't confirmed
 yet. Signing in to Rise-X always happens in Claude and your browser, never
-inside Rise-X Kit.
+inside Rise-X Kit. Updating Rise-X Kit itself downloads the release asset for
+your platform from GitHub, verifies its sha256 against the release's
+`checksums.txt`, and replaces only its own binary; nothing else on the machine
+changes.
 
 
 ## For maintainers
@@ -210,6 +240,9 @@ Go 1.23, no third-party dependencies.
 - `internal/npmrc` — finds and repoints leftover `@rise-x:registry` lines in
   `~/.npmrc`.
 - `internal/runner` — runs external commands without a shell.
+- `internal/selfupdate` — finds the newest `kit-v*` GitHub release, downloads
+  and checksum-verifies the asset for this platform, swaps the binary in and
+  relaunches it.
 - `internal/server` — the HTTP API the page calls, including its CSRF and host
   checks.
 - `internal/settings` — the one writer for `~/.claude/settings.json`.

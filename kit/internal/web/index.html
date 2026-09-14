@@ -150,5 +150,9 @@
         <div id="kit-jobs-panel" class="kit-jobs-panel pb-4 kit-substack" hidden></div>
       </div>
     </aside>
+
+    <!-- Filled by app.js's confirmDialog() and opened with showModal(). -->
+    <!-- aria-describedby is set per call, from the parts the dialog emits. -->
+    <dialog id="kit-dialog" data-slot="dialog" class="kit-dialog" aria-labelledby="kit-dialog-title"></dialog>
   </body>
 </html>

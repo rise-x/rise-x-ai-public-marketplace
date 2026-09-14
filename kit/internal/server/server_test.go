@@ -91,7 +91,7 @@ func fixtureCatalog(t *testing.T) *catalog.Catalog {
 
 // newServer starts an httptest server around a Server built from cfg, filling
 // in the fields every test shares.
-func newServer(t *testing.T, cfg Config) (baseURL, token string) {
+func newServerWith(t *testing.T, cfg Config) (baseURL, token string, srv *Server) {
 	t.Helper()
 	ts := httptest.NewUnstartedServer(nil)
 	cfg.Port = ts.Listener.Addr().(*net.TCPAddr).Port
@@ -113,10 +113,22 @@ func newServer(t *testing.T, cfg Config) (baseURL, token string) {
 	if cfg.NodeEnv == nil {
 		cfg.NodeEnv = noNodeEnv
 	}
-	ts.Config.Handler = New(cfg).Handler()
+	// The default checker would ask GitHub for a versioned build.
+	if cfg.Updates == nil {
+		cfg.Updates = releasesChecker(t, "[]", nil)
+	}
+	srv = New(cfg)
+	ts.Config.Handler = srv.Handler()
 	ts.Start()
 	t.Cleanup(ts.Close)
-	return ts.URL, cfg.Token
+	return ts.URL, cfg.Token, srv
+}
+
+// newServer is newServerWith for the tests that never touch the Server itself.
+func newServer(t *testing.T, cfg Config) (baseURL, token string) {
+	t.Helper()
+	baseURL, token, _ = newServerWith(t, cfg)
+	return baseURL, token
 }
 
 // newTestServer is the default fixture: a fake claude on PATH.
