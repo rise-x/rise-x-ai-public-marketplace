@@ -20,7 +20,7 @@ into a Claude session and let it run the install for you:
 ```
 Install Rise-X Kit on this machine. It's a desktop helper from the public
 Rise-X marketplace. On macOS run:
-curl -fsSL https://raw.githubusercontent.com/rise-x/rise-x-ai-public-marketplace/main/kit/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/rise-x/rise-x-ai-public-marketplace/main/kit/install.sh | bash
 On Windows run:
 irm https://raw.githubusercontent.com/rise-x/rise-x-ai-public-marketplace/main/kit/install.ps1 | iex
 Pick the one for my operating system, run it, then start the app with
@@ -32,7 +32,7 @@ rise-x-kit and tell me the address it prints.
 **macOS** — open Terminal and run:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/rise-x/rise-x-ai-public-marketplace/main/kit/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/rise-x/rise-x-ai-public-marketplace/main/kit/install.sh | bash
 ```
 
 **Windows** — open PowerShell and run:

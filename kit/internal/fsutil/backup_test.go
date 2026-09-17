@@ -181,6 +181,36 @@ func TestReadNoFollow_RefusesASymlink(t *testing.T) {
 	}
 }
 
+// A file past the cap is refused outright. Returning its first megabyte would
+// hand the caller a packed-refs that parses cleanly and names the wrong
+// commit, which is worse than no answer.
+func TestReadNoFollow_RefusesAFileOverTheCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big")
+	if err := os.WriteFile(path, make([]byte, maxReadBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReadNoFollow(path); err == nil {
+		t.Fatalf("ReadNoFollow(oversize) = %d bytes, nil; want an error", len(got))
+	}
+}
+
+// The cap itself still reads: the limit is "larger than", not "as large as".
+func TestReadNoFollow_ReadsAFileExactlyAtTheCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "atcap")
+	if err := os.WriteFile(path, make([]byte, maxReadBytes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadNoFollow(path)
+	if err != nil {
+		t.Fatalf("ReadNoFollow(at cap): %v", err)
+	}
+	if len(got) != maxReadBytes {
+		t.Fatalf("read %d bytes, want %d", len(got), maxReadBytes)
+	}
+}
+
 // failSyncDir makes the post-rename directory flush fail for one test.
 func failSyncDir(t *testing.T) {
 	t.Helper()

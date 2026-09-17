@@ -31,12 +31,21 @@ function Resolve-Tag {
     }
 
     # /releases/latest didn't point at a kit release -- the repo may host
-    # other release kinds too. GitHub lists releases newest-first, so the
-    # first kit-v* tag is the newest one.
+    # other release kinds too, and it answers 404 while every release is a
+    # prerelease. GitHub lists releases newest-first, so the first match is
+    # the newest one.
+    #
+    # Prereleases and drafts are skipped: this fallback is the one path
+    # reachable while no stable release exists, so without the filter a
+    # partner running the documented one-liner gets an RC and stays on the RC
+    # track, while selfupdate offers a prerelease only to a binary already on
+    # one. $env:RISE_X_KIT_VERSION above is how you ask for one on purpose.
     $releases = Invoke-RestMethod -Uri "$ApiBase/releases?per_page=100" -Headers $Headers -UseBasicParsing
-    $found = $releases | Where-Object { $_.tag_name -like 'kit-v*' } | Select-Object -First 1
+    $found = $releases |
+        Where-Object { -not $_.prerelease -and -not $_.draft -and $_.tag_name -match '^kit-v\d+\.\d+\.\d+$' } |
+        Select-Object -First 1
     if (-not $found) {
-        throw "No kit-v* release found in $Repo"
+        throw "No stable kit-v* release found in $Repo. Prereleases are not installed by default; to install one, set `$env:RISE_X_KIT_VERSION (e.g. 'v0.1.0-rc.1')."
     }
     return $found.tag_name
 }
@@ -80,11 +89,31 @@ try {
     New-Item -ItemType Directory -Path $extractDir | Out-Null
     Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
 
-    if (Test-Path $installDir) {
-        Remove-Item -Path $installDir -Recurse -Force
-    }
+    # The existing install is renamed aside rather than deleted, and only
+    # removed once the new one is in place. Move-Item can still fail here --
+    # antivirus holding a handle, a permission change, a full disk -- and
+    # deleting first would leave the partner with no kit at all and no copy to
+    # put back, since $tempDir goes with the finally block. This backup sits
+    # beside $installDir, not under $tempDir, so the finally cannot take it.
+    $backupDir = "$installDir.old-" + [Guid]::NewGuid().ToString('N')
     New-Item -ItemType Directory -Path (Split-Path $installDir -Parent) -Force | Out-Null
-    Move-Item -Path $extractDir -Destination $installDir
+    $movedAside = $false
+    if (Test-Path $installDir) {
+        Move-Item -Path $installDir -Destination $backupDir
+        $movedAside = $true
+    }
+    try {
+        Move-Item -Path $extractDir -Destination $installDir
+    } catch {
+        if ($movedAside) {
+            Move-Item -Path $backupDir -Destination $installDir
+            throw "Could not install the new version; the previous one is still in place. $_"
+        }
+        throw
+    }
+    if ($movedAside) {
+        Remove-Item -Path $backupDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     $exePath = Join-Path $installDir 'rise-x-kit.exe'
     # Strips the mark of the web, which is the only reason an unsigned exe

@@ -224,5 +224,15 @@ func writeBinary(dest string, src io.Reader) error {
 		f.Close()
 		return err
 	}
+	// The bytes have to reach the disk before Apply renames this file over the
+	// running binary: the rename is durable long before the content is, so a
+	// power loss in that window leaves the new name pointing at a truncated
+	// file and the old inode already unlinked. There is no second copy to fall
+	// back to on unix, and the app cannot report a failure it cannot start to
+	// find. fsutil does the same thing everywhere else it writes.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
 	return f.Close()
 }

@@ -198,8 +198,9 @@ It has its own release track, independent of `release/*`: a PR touches
    `kit-ci.yml` gates every PR into it.
 3. **Release.** `kit/VERSION` is the single version source for the kit. The
    PR from `release-kit/*` to `main` must raise it, in strict semver, above
-   the value already on `main`; `kit-ci.yml` enforces that for any PR into
-   `main` by running `scripts/check-kit-version.sh`. Merging that PR with a
+   the value already on `main`; `validate` and `kit-ci.yml` both enforce that
+   for any PR into `main` by running `scripts/check-kit-version.sh`, and
+   `validate` is the one that is a required check. Merging that PR with a
    **merge commit** is the release: the merge pushes the changed
    `kit/VERSION` to `main`, which triggers `kit-release.yml` to build, sign,
    tag the commit `kit-v<VERSION>`, and publish the GitHub Release. Nobody
@@ -223,7 +224,16 @@ team), then switch it to **Active** after the first release shows the tag was
 created. Do not make `kit-ci.yml` a
 required check on `main`: it runs only when a PR touches `kit/**`, and a
 required check that never reports leaves every plugin release PR pending.
-The version bump is enforced by `kit-ci.yml` running on the PR itself.
+The version bump is enforced instead by `validate`, which is required on
+`main` and runs `scripts/check-kit-version.sh` on every main-bound PR; the
+script exits 0 when the diff touches no kit path, so a plugin-only release
+PR passes it untouched. `kit-ci.yml` runs the same check for the feedback,
+but nothing blocks a merge on it.
+
+`protect-release-kit.json` requires the matrix check names
+(`test (ubuntu-latest)` and the two other legs), not a bare `test`: a
+matrixed job never reports its own job id, so requiring it leaves every kit
+PR pending forever.
 Unconfirmed: whether the enterprise policy lets GitHub
 Actions create tags and releases at all. If it doesn't, the fallback is one
 maintainer running `gh release create` by hand, and `kit-tags.json` should

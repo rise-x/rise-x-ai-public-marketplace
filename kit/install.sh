@@ -38,14 +38,25 @@ resolve_tag() {
   esac
 
   # /releases/latest didn't point at a kit release -- the repo may host other
-  # release kinds too. GitHub lists releases newest-first, so the first
-  # kit-v* tag we see is the newest one.
+  # release kinds too, and it answers 404 while every release is a
+  # prerelease. GitHub lists releases newest-first, so the first match is the
+  # newest one.
+  #
+  # Only a X.Y.Z tag is a match: kit/VERSION is strict semver, so every
+  # release the workflow cuts carries one, and a prerelease is exactly the
+  # tag with a -rc.N suffix. Without this the fallback -- the one path
+  # reachable while no stable release exists -- hands a partner running the
+  # documented one-liner an RC and leaves them on the RC track, while
+  # selfupdate offers a prerelease only to a binary already on one.
+  # RISE_X_KIT_VERSION above is how you ask for one on purpose.
   tag="$(api_get "${API}/releases?per_page=100" \
     | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' \
-    | grep '^kit-v' | head -n1 || true)"
+    | grep -E '^kit-v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
 
   if [ -z "$tag" ]; then
-    echo "error: no kit-v* release found in ${REPO}" >&2
+    echo "error: no stable kit-v* release found in ${REPO}" >&2
+    echo "       Prereleases are not installed by default; to install one:" >&2
+    echo "       RISE_X_KIT_VERSION=v0.1.0-rc.1 ..." >&2
     exit 1
   fi
   printf '%s\n' "$tag"
