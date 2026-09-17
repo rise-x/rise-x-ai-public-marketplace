@@ -1,0 +1,305 @@
+name: kit-release
+
+# Builds, signs and publishes rise-x-kit. Merging a release-kit/* branch into
+# main IS the kit release: this fires when kit/VERSION changes on main, reads
+# the version out of that file, and cuts the kit-v<version> tag and the GitHub
+# Release itself. Nobody pushes a tag by hand, and there is no separate
+# approval gate here -- the merge into main already carried the release PR's
+# code-owner review.
+#
+# macOS notarization only runs once the APPLE_CERT_P12 secret is set; until
+# then the mac binary is ad-hoc signed so Gatekeeper doesn't block it
+# outright.
+#
+# UNVERIFIED: this enterprise forbids Actions from creating pull requests, and
+# whether the same policy stops Actions from creating tags or releases has not
+# been tested. If the publish step fails on permissions, do it by hand from the
+# merge commit:
+#   v="$(tr -d '[:space:]' < kit/VERSION)"
+#   git tag "kit-v${v}" <merge-sha> && git push origin "kit-v${v}"
+#   gh release create "kit-v${v}" artifacts/* kit/install.sh kit/install.ps1 \
+#     --repo rise-x/rise-x-ai-public-marketplace --generate-notes
+# The kit-tags ruleset (.github/rulesets/kit-tags.json) restricts who may
+# create a kit-v* tag. It ships in Evaluate with an empty bypass list: import
+# it, add the bypass in the UI (GitHub Actions if offered, otherwise the
+# marketplace approvers team), then switch it to Active after the first release
+# shows the tag was created.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - kit/VERSION
+  # Run by hand on main to retry a failed publish, or to ship a version whose
+  # merge predates this workflow. It refuses to run anywhere but main.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time. Two runs - a workflow_dispatch retry alongside the
+# push that triggered it, or two merges touching kit/VERSION in quick
+# succession - would both pass the tag check below before either had created
+# the tag, and both would then try to publish it. Queued rather than
+# cancelled: a cancelled run can stop between creating the release and
+# uploading its assets, which is the state this workflow works hardest to
+# avoid.
+concurrency:
+  group: kit-release
+  cancel-in-progress: false
+
+env:
+  GO_MODULE: github.com/rise-x/rise-x-ai-public-marketplace/kit
+
+jobs:
+  version:
+    # kit/VERSION is the single source of truth for the tag, the release, the
+    # asset names and the binary's own version output. Reading it once, here,
+    # keeps those four from disagreeing.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # v-prefixed, the way the assets and buildinfo have always spelled it.
+      version: ${{ steps.read.outputs.version }}
+      tag: ${{ steps.read.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Read kit/VERSION and check the tag is free
+        id: read
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "::error::kit-release publishes from main only, not '${GITHUB_REF_NAME}'"
+            exit 1
+          fi
+          raw="$(tr -d '[:space:]' < kit/VERSION)"
+          if ! [[ "$raw" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::kit/VERSION '${raw}' is not valid semver (expected X.Y.Z, no leading v)"
+            exit 1
+          fi
+          tag="kit-v${raw}"
+          # A re-run, or a merge that set kit/VERSION back to a shipped value,
+          # would otherwise rebuild everything and fail at publish time with
+          # artifacts already uploaded. Refuse up front instead.
+          #
+          # Except when the tag is a draft's: the release is published as a
+          # draft and only flipped once every asset is up, so a tag with a
+          # draft behind it is a publish that died halfway. Refusing that is
+          # what made the documented "run by hand to retry" impossible, since
+          # the tag the failed run created blocked every re-run.
+          if [[ -n "$(git ls-remote --tags origin "refs/tags/${tag}")" ]]; then
+            state="$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+            if [[ "$state" != "true" ]]; then
+              echo "::error::tag ${tag} already exists; raise kit/VERSION for a new kit release"
+              exit 1
+            fi
+            echo "::notice::${tag} exists as a draft from an unfinished publish; this run will replace and finish it"
+          fi
+          echo "version=v${raw}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${tag} from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+
+  build-mac:
+    needs: version
+    runs-on: macos-14
+    # notarytool --wait is the step that can hang; without this it runs at
+    # the 6-hour job default on the most expensive runner in the matrix.
+    timeout-minutes: 45
+    env:
+      # `secrets` isn't a legal context in a step `if:`, and the Apple secret
+      # *values* no longer sit in job-level env (they used to leak into `go
+      # test`/`go build`'s environment) -- this boolean is safe at job level;
+      # the real values are step-level env on only the steps that need them.
+      APPLE_SIGNING: ${{ secrets.APPLE_CERT_P12 != '' }}
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        working-directory: kit
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: kit/go.mod
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Build darwin/arm64
+        env:
+          CGO_ENABLED: 0
+          GOOS: darwin
+          GOARCH: arm64
+        run: go build -trimpath -ldflags "-s -w -X ${GO_MODULE}/internal/buildinfo.Version=${VERSION} -X ${GO_MODULE}/internal/buildinfo.Commit=${GITHUB_SHA}" -o dist/rise-x-kit-arm64 ./cmd/rise-x-kit
+
+      - name: Build darwin/amd64
+        env:
+          CGO_ENABLED: 0
+          GOOS: darwin
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w -X ${GO_MODULE}/internal/buildinfo.Version=${VERSION} -X ${GO_MODULE}/internal/buildinfo.Commit=${GITHUB_SHA}" -o dist/rise-x-kit-amd64 ./cmd/rise-x-kit
+
+      - name: Create universal binary
+        run: lipo -create -output dist/rise-x-kit dist/rise-x-kit-arm64 dist/rise-x-kit-amd64
+
+      - name: Sign (macOS)
+        run: codesign -s - --force dist/rise-x-kit
+
+      # Everything below is hardened but inactive until an Apple Developer ID
+      # certificate exists -- APPLE_SIGNING gates the whole path.
+      - name: Import Developer ID certificate
+        if: env.APPLE_SIGNING == 'true'
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/kit-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          echo "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" "$(security list-keychains -d user | tr -d '"[:space:]')"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Sign with Developer ID
+        if: env.APPLE_SIGNING == 'true'
+        run: |
+          set -euo pipefail
+          identity="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Developer ID Application' | head -n1 | sed -E 's/.*"(.+)"/\1/')"
+          codesign --force --options runtime --timestamp -s "$identity" --keychain "$KEYCHAIN_PATH" dist/rise-x-kit
+
+      - name: Notarize
+        if: env.APPLE_SIGNING == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent dist/rise-x-kit "$RUNNER_TEMP/notarize.zip"
+          # `--wait` alone has no reliable exit status for "Invalid" --
+          # read the actual status out of the JSON result instead.
+          result="$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait --output-format json)"
+          echo "$result"
+          status="$(jq -r '.status' <<<"$result")"
+          if [[ "$status" != "Accepted" ]]; then
+            echo "::error::notarization status: $status"
+            exit 1
+          fi
+
+      - name: Package
+        run: |
+          mkdir -p out
+          tar -C dist -czf "out/rise-x-kit_${VERSION}_darwin_universal.tar.gz" rise-x-kit
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: darwin-universal
+          path: kit/out/*
+
+  build-windows:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        working-directory: kit
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: kit/go.mod
+
+      - name: Build windows/amd64
+        env:
+          CGO_ENABLED: 0
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w -X ${GO_MODULE}/internal/buildinfo.Version=${VERSION} -X ${GO_MODULE}/internal/buildinfo.Commit=${GITHUB_SHA}" -o dist/rise-x-kit.exe ./cmd/rise-x-kit
+
+      # Azure Trusted Signing lands once the org has a signing cert; nothing
+      # to do here today.
+      - name: Sign (Windows)
+        run: echo "no-op (unsigned) until Azure Trusted Signing is wired up"
+
+      - name: Package
+        run: |
+          mkdir -p out
+          (cd dist && zip -j "../out/rise-x-kit_${VERSION}_windows_amd64.zip" rise-x-kit.exe)
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-amd64
+          path: kit/out/*
+
+  release:
+    needs: [version, build-mac, build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # write, because this job creates the tag and the release, not just the
+      # assets.
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: artifacts
+        run: sha256sum * > checksums.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            artifacts/*_darwin_universal.tar.gz
+            artifacts/*_windows_amd64.zip
+
+      # action-gh-release creates tag_name at target_commitish when that tag
+      # does not exist, which is how the tag gets cut with nobody pushing one.
+      # It goes through the releases API rather than a git push, so the
+      # kit-tags ruleset sees the GitHub Actions app as the actor.
+      #
+      # Asset names are unchanged from the tag-driven version of this workflow:
+      # kit/install.sh and install.ps1 look for rise-x-kit_<version>_* and
+      # checksums.txt by name.
+      #
+      # Published as a draft, then flipped below. The action creates the
+      # release - and with it the tag - before it uploads anything, so a
+      # publish that dies mid-upload would otherwise leave /releases/latest
+      # pointing at a release whose assets are missing, and install.sh 404s on
+      # every new partner install until someone intervenes by hand.
+      - name: Publish release (draft)
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          draft: true
+          files: |
+            artifacts/*
+            kit/install.sh
+            kit/install.ps1
+
+      # Every asset is up by here, so the release becomes the one install.sh
+      # and install.ps1 resolve through /releases/latest.
+      - name: Mark the release published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --latest

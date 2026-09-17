@@ -37,3 +37,15 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: bash scripts/check-version.sh "origin/$BASE_REF"
+      # kit-ci runs this too, but kit-ci is not a required check on main and
+      # cannot become one: its path filter keeps it from ever reporting on a
+      # plugin-only release PR, and a required check that never reports blocks
+      # the PR forever. validate is required on main and runs on every PR, so
+      # the gate belongs here as well. The script exits 0 when the diff touches
+      # no kit path, which is what makes that safe. Only main-bound PRs ship a
+      # kit release, so a PR into release-kit/* is collecting work and skips.
+      - name: Check kit version bump
+        if: github.base_ref == 'main'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bash scripts/check-kit-version.sh "origin/$BASE_REF"

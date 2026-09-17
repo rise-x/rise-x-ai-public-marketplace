@@ -1,6 +1,6 @@
 ---
 name: rise-x-apps
-description: Create a Rise-X (Diana) federated app end-to-end - design interview, single-file HTML design mock on the Rise-X design system, scaffold (standalone in your own project, or under apps/ in the rise-x-app monorepo), implement with @rise-x/apps-sdk, deploy via the Rise-X MCP (test environment by default). Also use for app code in an existing app - shell hooks/accessors, connectors, query hooks, @rise-x/apps-sdk/ui components, lifecycle hooks. TRIGGERS on "create/design/build a Rise app", "scaffold an app", "deploy the app", and apps-sdk usage in app code. DO NOT TRIGGER when editing the @rise-x/apps-sdk package itself (packages/apps-sdk/ in the rise-x-app monorepo).
+description: Create a Rise-X (Diana) federated app end-to-end - design interview, single-file HTML design mock on the Rise-X design system, scaffold (standalone in your own project, or under apps/ in the rise-x-app monorepo), implement with @rise-x/apps-sdk, deploy via the Rise-X MCP (test environment by default). Also use for app code in an existing app - shell hooks/accessors, connectors, query hooks, @rise-x/apps-sdk/ui components, lifecycle hooks. TRIGGERS on "create/design/build a Rise app", "scaffold an app", "deploy the app", "make the app work offline" / offline support, and apps-sdk usage in app code. DO NOT TRIGGER when editing the @rise-x/apps-sdk package itself (packages/apps-sdk/ in the rise-x-app monorepo).
 ---
 
 # rise-x-apps
@@ -23,7 +23,7 @@ phase you're in *before* acting.
 | Phase | What happens | Read |
 | --- | --- | --- |
 | 1. Design | Interview the user: understand the problem first, then ask targeted questions about the gaps. Pick the mobile UX level from the personas' devices. Build an HTML design mock on the Rise-X design system (`@rise-x/apps-sdk/ui`) and iterate until **explicit approval**. | `references/design.md` |
-| 2. Integrate | Ask whether the app connects to existing flows/assets/agents; if nothing exists, offer to build them via the Rise-X MCP first (agents: `create_agent` — its returned id is the agent id the app uses). Without the MCP, the user creates them in the Rise-X app and supplies the ids, or connects the MCP. Record origin ids. | `references/design.md` |
+| 2. Integrate | Ask whether the app connects to existing flows/assets/agents; if nothing exists, offer to build them via the Rise-X MCP first (agents: `create_agent` — its returned id is the agent id the app uses). Without the MCP, the user creates them in the Rise-X app and supplies the ids, or connects the MCP. Record flow/asset-type origin ids and agent ids per environment — they all go into `rise-x-app.json`, never into source. | `references/design.md` |
 | 3. Implement | Scaffold with the CLI, write app code on `@rise-x/apps-sdk`. | `references/build.md` |
 | 4. Deploy | Ask whether to deploy, then deploy via the Rise-X MCP — **test environment unless the user names another**. | `references/build.md` §Build and deploy |
 
@@ -35,6 +35,7 @@ Existing-app work skips straight to the matching phase:
 | Shell hooks / connectors / query layer / lifecycle hooks — no UI change | `references/build.md` |
 | "Redesign screen X" / "what should this look like" / migrate to the design system | `references/design.md` (mock → approval), then `references/build.md` |
 | The app is OLD — a `webpack.config.js` at its root, hand-rolled UI, no `APP.md` | `references/upgrade.md` — ask about migrating before changing it; a design-system migration goes mock-first, a build-only swap does not |
+| "Make the app work offline" — offline reads/writes, downloads, sync, the offline flags (SDK >= 0.12) | `references/offline.md` |
 | "Build/deploy the app" | `references/build.md` §Build and deploy |
 | Changing the `@rise-x/apps-sdk` package itself | Not this skill — that's SDK development inside the rise-x-app monorepo (see its root `AGENTS.md`). |
 
@@ -48,4 +49,5 @@ Existing-app work skips straight to the matching phase:
 6. **Deploys are asked-for, and default to test.** Never deploy unprompted; when the user says deploy without naming an environment, use test (`rise-x-test` MCP server).
 7. **Load the `rise-x-mcp` skill before any Rise-X MCP call** — discovery, flow/asset building, and deploys alike. It ships in the `rise-x-mcp` plugin from this marketplace — if it isn't installed, ask the user to install it before MCP work.
 8. **The contract is `@rise-x/apps-sdk`** — never import shell internals, never bundle your own React (full Don'ts list in `references/build.md`).
-9. **`APP.md` is the app's living context.** Create it at scaffold time from the design interview — the problem the app solves, the personas, and their full user journeys. Read it before changing an existing app; update it in the same change whenever behaviour or a journey changes. If an existing app has none, study the app and write it first (`references/upgrade.md` §Missing APP.md).
+9. **A flow, asset-type, or agent GUID in app source is a bug.** Declare those ids in `rise-x-app.json` under aliases and read them through `useAppDependencies()` from `@rise-x/apps-sdk/dependencies`; needs `@rise-x/apps-sdk` 0.12.0 or later, and `scan` first when migrating an old app (full rules in `references/build.md` §App dependencies).
+10. **`APP.md` is the app's living context.** Create it at scaffold time from the design interview — the problem the app solves, the personas, and their full user journeys. Read it before changing an existing app; update it in the same change whenever behaviour or a journey changes. If an existing app has none, study the app and write it first (`references/upgrade.md` §Missing APP.md).

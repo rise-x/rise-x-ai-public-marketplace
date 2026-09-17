@@ -132,7 +132,7 @@ These five values are the **only** valid `currentState` strings. Use them verbat
 | `"Deleted"` | Soft-deleted. Rare. |
 | `"Ok"` | Sync-process flag. Almost never used in user-facing filters. |
 
-⚠️ **Do NOT use:** `"InProgress"`, `"Complete"` (no `-d`), `"New"`, `"Draft"`, `"Cancelled"`, or anything you see in `work.state` / `work.status` / `work.statusLabel`. Those come from different enums and silently produce `NO DATA` when used as `currentState`.
+⚠️ **Do NOT use:** `"InProgress"`, `"Complete"` (no `-d`), `"New"`, `"Draft"`, `"Cancelled"`, or anything you see in `work.state` / `work.statusLabel`. Those come from different enums and silently produce `NO DATA` when used as `currentState`. `work.status` carries the same five `DianaWorkState` values as the table above, but copy the value from `workStateName` all the same.
 
 **How to verify a value before authoring a filter.** If you're unsure which `currentState` value applies to a specific work, call `get_work(workId)` and read the `workStateName` field — it always contains the exact string to use:
 

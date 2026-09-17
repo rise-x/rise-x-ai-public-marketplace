@@ -10,6 +10,9 @@
   - [Work ↔ Asset with Data Sync](#work--asset-with-data-sync)
 - [`relatedFlows` Schema Reference](#relatedflows-schema-reference)
   - [`publishDataDirection` Values](#publishdatadirection-values)
+  - [`stepStatuses` Values](#stepstatuses-values)
+  - [`stepNames` Matching](#stepnames-matching)
+  - [`stepNames` and Step Delegation](#stepnames-and-step-delegation)
   - [`workFilters` — Finding Target Work](#workfilters--finding-target-work)
   - [`options` Object](#options-object)
 - [Data Operations (PublishDataOperation)](#data-operations-publishdataoperation)
@@ -186,8 +189,9 @@ Each entry in the `relatedFlows` array has these properties:
 | `targetName` | string | Relationship name stored on the **target** flow's work items |
 | `publishDataDirection` | enum | Direction data flows (see below) |
 | `workFilters` | array | Matching rules to find target work items |
-| `stepStatuses` | array | Only match target work in these states (e.g. `["InProgress"]`) |
-| `stepNames` | array | Only match target work in these steps |
+| `stepStatuses` | array | Step states the target work must be in (see below) |
+| `stepNames` | array | The target step to match, plus optional delegation entries (see below) |
+| `exactStepNameMatch` | bool | Compare the whole step name instead of a suffix (default `false`; see below) |
 | `createWorkIfNotFound` | bool | Create a new work item if no match found |
 | `operations` | array | Data mapping operations (see Data Operations) |
 | `attachmentOperations` | array | Attachment sync rules (`sourceFolder` → `destinationFolder`) |
@@ -201,6 +205,28 @@ Each entry in the `relatedFlows` array has these properties:
 | `FromRelatedEntity` | Pull data from target back to source |
 | `ToSelf` | Apply data within the same work item |
 | `BetweenRelatedEntities` | Bidirectional data sync between already-related entities |
+
+### `stepStatuses` Values
+
+Step states of the target work item that count as a match, from `DianaStepState`: `NotStarted`, `Created`, `New`, `InProgress`, `Rework`, `Complete`, `Skipped`, `Cancelled`, `Declined`, `Deleted`. Omitting the property is not the same as listing every state: the config initialiser (`RelatedWorkConfig`) supplies `["InProgress"]`. Pass it explicitly, as the examples in this file do.
+
+### `stepNames` Matching
+
+Entries are internal `stepName` values, not display labels: `["supplierOffer"]`, never `["Supplier Offer"]`. Read them from `get_flow_steps(flow_id)` on the **target** flow; its `stepName` column is the value to use. The related-work lookup uses the **first** entry only; the others are delegation entries (next section). To match without delegating beyond the matched step, pass one entry.
+
+The first entry matches the target work's step names as a case-insensitive **suffix** (Mongo regex `.*<name>$`, flag `i`). For a slash-form name pass the trailing segment: `"Generated-<guid>"` matches `"UntitledStep/Generated-<guid>"`, while a leading segment alone (`"UntitledStep"`) does not. A suffix can match more than one step (`"Step_1"` is a suffix of `"Step_11"`) and the lookup returns at most one work item, so when you have the full name, pass it and set `exactStepNameMatch: true`. This rule is separate from `ByStepName` action routing (`actions-and-statuses.md`, Common Mistakes #2), which needs the exact name.
+
+### `stepNames` and Step Delegation
+
+Every entry, the first included, also grants the target flow access on the source work item for the steps of **this** flow whose `stepName` ends with the entry (case-insensitive). `"*"` grants it for every step. Entries after the first do only this; they never widen the match.
+
+| `stepNames` | Match | Access granted on this work item |
+|---|---|---|
+| `["supplierOffer"]` | target work at a step ending `supplierOffer` | this flow's steps ending `supplierOffer` |
+| `["supplierOffer", "buyerReview"]` | same as above, not `buyerReview` | steps ending `supplierOffer` or `buyerReview` |
+| `["supplierOffer", "*"]` | same as above | every step of this flow |
+
+Neither example in this file passes `stepNames`; both rely on `workFilters` alone.
 
 ### `workFilters` — Finding Target Work
 
