@@ -18,7 +18,7 @@
 # The kit ships as one binary, so there is one section rather than one per
 # plugin, and its heading is the kit's own:
 #   ## rise-x-kit <old> -> <new>            version bumped this release
-#   ## rise-x-kit <version> (NOT BUMPED)    kit changed but unbumped; kit-ci blocks
+#   ## rise-x-kit <version> (NOT BUMPED)    kit changed but unbumped; validate blocks
 #   ## rise-x-kit <version> (no bump needed) nothing under kit/ or the kit
 #                                            workflows changed
 #   ## rise-x-kit <version> (new)           kit/VERSION absent on main
@@ -180,7 +180,7 @@ pr_rows="$(printf '%s' "$prs" | jq -r --arg delta "$changed_files" '
     printf '## rise-x-kit %s (new)\n\n' "$new"
   elif [[ "$old" == "$new" ]]; then
     if [[ -n "$kit_changed" ]]; then
-      # kit-ci blocks the release PR while this is true; surface it here.
+      # validate blocks the release PR while this is true; surface it here.
       printf '## rise-x-kit %s (NOT BUMPED)\n\n' "$new"
     else
       printf '## rise-x-kit %s (no bump needed)\n\n' "$new"

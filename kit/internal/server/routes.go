@@ -19,6 +19,7 @@ import (
 
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/claudecli"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/doctor"
+	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/fsutil"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/instance"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/jobs"
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/mcp"
@@ -473,13 +474,21 @@ func (s *Server) handleKitUpdate(w http.ResponseWriter, action string) {
 			}
 			return -1, err
 		}
-		if err := selfupdate.Apply(newPath, s.exePath); err != nil {
+		// ErrNotDurable is the one error that means the update landed: the
+		// rename is done and only the directory flush behind it failed, which
+		// some network and FUSE mounts simply do not support. Treating it as
+		// a failure here would report a finished update as broken and skip
+		// the restart, leaving the partner running a binary that is already
+		// the new one. Say it and carry on.
+		if err := selfupdate.Apply(newPath, s.exePath); err != nil && !errors.Is(err, fsutil.ErrNotDurable) {
 			os.RemoveAll(filepath.Dir(newPath))
 			if errors.Is(err, fs.ErrPermission) {
 				return -1, fmt.Errorf("Rise-X Kit cannot replace itself at %s: %w. Download %s from %s and run the installer again",
 					s.exePath, err, rel.Version, rel.URL)
 			}
 			return -1, fmt.Errorf("replace %s: %w", s.exePath, err)
+		} else if err != nil {
+			onLine("note: the new version is in place, but the folder entry could not be flushed to disk")
 		}
 		os.RemoveAll(filepath.Dir(newPath))
 		onLine("restarting Rise-X Kit")

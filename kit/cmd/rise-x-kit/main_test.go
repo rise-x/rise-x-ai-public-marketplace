@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
+	"net"
 	"testing"
+	"time"
 )
 
 // The reopen/lock ladder, as a table. The -port rows are the ones that went
@@ -60,5 +62,48 @@ func TestGivenOf_ReportsOnlyTheFlagsActuallyGiven(t *testing.T) {
 	}
 	if given("port") {
 		t.Error("given reported -port for a flag left at its default")
+	}
+}
+
+// A port somebody else holds still fails, and only after the retry window: the
+// point of the retry is that it waits, so a test that just asserts the error
+// would pass with the retry deleted.
+func TestListenLoopback_NamedPortRetriesThenFails(t *testing.T) {
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	port := held.Addr().(*net.TCPAddr).Port
+
+	real := listenRetryWindow
+	listenRetryWindow = 300 * time.Millisecond
+	t.Cleanup(func() { listenRetryWindow = real })
+
+	start := time.Now()
+	ln, err := listenLoopback(port)
+	if err == nil {
+		ln.Close()
+		t.Fatal("bound a port another listener holds")
+	}
+	if waited := time.Since(start); waited < listenRetryWindow {
+		t.Fatalf("gave up after %s, want at least the %s window", waited, listenRetryWindow)
+	}
+}
+
+// Port 0 is the OS picking, so it binds first time and never enters the loop.
+func TestListenLoopback_PortZeroBinds(t *testing.T) {
+	real := listenRetryWindow
+	listenRetryWindow = time.Minute
+	t.Cleanup(func() { listenRetryWindow = real })
+
+	start := time.Now()
+	ln, err := listenLoopback(0)
+	if err != nil {
+		t.Fatalf("listenLoopback(0): %v", err)
+	}
+	defer ln.Close()
+	if waited := time.Since(start); waited > 5*time.Second {
+		t.Fatalf("took %s, so it went through the retry loop", waited)
 	}
 }

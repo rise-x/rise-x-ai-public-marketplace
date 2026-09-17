@@ -24,18 +24,23 @@ request, one approval that satisfies `CODEOWNERS`, resolved review threads, a
 passing `kit-ci`, and no force-push. It deliberately carries no `deletion`
 rule, because every kit release deletes its branch afterwards.
 
-The required checks are `kit-ci`'s job names:
+The required checks are the names `kit-ci` reports under:
 
-- `test`
+- `test (ubuntu-latest)`
+- `test (windows-latest)`
+- `test (macos-latest)`
 - `build (darwin, arm64)`
 - `build (darwin, amd64)`
 - `build (windows, amd64)`
 
 Two things to know about them:
 
-- The names come from the job ids and the build matrix in
-  `.github/workflows/kit-ci.yml`. Renaming a job, or adding a matrix entry,
-  changes or adds a check name and the ruleset has to be re-imported.
+- The names come from the job ids and the matrices in
+  `.github/workflows/kit-ci.yml`. A matrixed job reports one check per matrix
+  entry, named `<job> (<entry>)`, and never a bare `<job>` — requiring `test`
+  on its own leaves every pull request pending forever, because nothing ever
+  reports that name. Renaming a job, or adding or removing a matrix entry,
+  changes the check names and the ruleset has to be re-imported.
 - The JSON pins no app, so any check reporting those names satisfies the rule.
   This repo runs only GitHub Actions, so that is fine; to tighten it, set the
   check's source to **GitHub Actions** in the UI after import.
@@ -81,5 +86,16 @@ runs, but it would also block every plugin release pull request that touches
 no kit path, because `kit-ci`'s path filter keeps it from ever reporting
 there. Requiring it is therefore only safe alongside a second `protect-main`
 condition or ruleset scoped to kit-only pull requests, which rulesets cannot
-express by changed path today. Until then the bump check is enforced by
-`kit-ci` running on the pull request, not by a required check.
+express by changed path today.
+
+`validate` runs `scripts/check-kit-version.sh` itself instead, on every
+main-bound pull request. That is what makes the kit bump an enforced gate on
+`main` rather than a red check somebody has to notice: `kit-ci` reports the
+same failure, but nothing stops a merge on it. The script exits 0 when the
+diff touches no kit path, so a plugin-only release PR passes it without
+knowing the kit exists.
+
+It compares versions from the **second** kit release onward. `main` carries no
+`kit/VERSION` until the first one lands, and the script passes explicitly on
+that bootstrap case rather than inventing a base to compare against, so the
+first release ships whatever the branch holds.

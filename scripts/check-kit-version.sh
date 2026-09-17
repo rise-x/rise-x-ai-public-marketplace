@@ -7,8 +7,9 @@
 # changes the kit without raising it would therefore ship nothing.
 #
 # Only PRs into main need the bump. A PR into an open release-kit/* branch is
-# collecting work for a release that has not happened yet, so kit-ci runs this
-# check on the main-bound PR only (see .github/workflows/kit-ci.yml).
+# collecting work for a release that has not happened yet, so both callers run
+# this check on the main-bound PR only: validate.yml, which is the required
+# check that enforces it, and kit-ci.yml, which reports it alongside the build.
 #
 # Usage:
 #   ./scripts/check-kit-version.sh [<base-ref>]
@@ -39,9 +40,11 @@ base="${1:-origin/main}"
 
 git -C "$repo_root" rev-parse "$base" >/dev/null 2>&1 || die "cannot resolve base ref '$base'. Try: git fetch origin"
 
-# Same set of paths kit-ci gates on: the kit itself and the workflows that
-# build and ship it. A change to either alters what the next kit release
-# contains, so either requires a bump.
+# The kit itself and the workflows that build and ship it: a change to either
+# alters what the next kit release contains, so either requires a bump. Note
+# this is narrower than what kit-ci runs on -- that also triggers on this
+# script and release-kit-pr-body.sh, which change the release machinery
+# without changing what it produces.
 kit_regex='(^kit/|^\.github/workflows/kit-[^/]*\.yml$)'
 
 if ! changed_files="$(git -C "$repo_root" diff --name-only "${base}...HEAD")"; then

@@ -350,7 +350,15 @@ func LocalHEAD(installLocation string) (string, error) {
 
 	packed, err := fsutil.ReadNoFollow(filepath.Join(gitDir, "packed-refs"))
 	if err != nil {
-		return "", fmt.Errorf("ref %s not found as a loose or packed ref", ref)
+		// A repo with only loose refs has no packed-refs at all, so absence is
+		// the ordinary case and reads as "not found". Anything else -- a
+		// symlink planted at the name, a file past the read cap -- means the
+		// ref could not be read rather than that it is not there, and the
+		// difference is the whole reason ReadNoFollow refuses those.
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("ref %s not found as a loose or packed ref", ref)
+		}
+		return "", fmt.Errorf("ref %s: read packed-refs: %w", ref, err)
 	}
 	for _, l := range strings.Split(string(packed), "\n") {
 		l = strings.TrimSpace(l)

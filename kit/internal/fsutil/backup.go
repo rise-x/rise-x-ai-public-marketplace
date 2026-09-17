@@ -176,11 +176,25 @@ const maxReadBytes = 1 << 20
 // It is for files trusted only because of where they sit: following a link
 // planted there would report some unrelated file's bytes instead. Both
 // platforms refuse; see openNoFollow for how each does it.
+//
+// A file over maxReadBytes is an error, not a truncated read. The callers
+// parse what comes back as complete git metadata, so handing them the first
+// megabyte of a larger packed-refs would have them read a valid-looking but
+// partial ref list and report the wrong commit.
 func ReadNoFollow(path string) ([]byte, error) {
 	f, err := openNoFollow(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	return io.ReadAll(io.LimitReader(f, maxReadBytes))
+	// One byte past the cap, so a file sitting exactly on it still reads and
+	// anything larger is visible here rather than silently cut.
+	data, err := io.ReadAll(io.LimitReader(f, maxReadBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxReadBytes {
+		return nil, fmt.Errorf("%s: larger than %d bytes", path, maxReadBytes)
+	}
+	return data, nil
 }

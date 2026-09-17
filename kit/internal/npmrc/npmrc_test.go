@@ -70,11 +70,12 @@ func TestClean_GoldenCases(t *testing.T) {
 				"//npm.pkg.github.com/:_authToken=ghp_xxx\n",
 		},
 		{
-			// Igor's shape: a leftover @rise-x:registry line pointing at GHP,
-			// six private-feed auth lines (still legitimate: that scope stays on the private feed),
-			// and one GHP token. Only the registry line's value changes; every
-			// other byte, both sets of auth lines included, is untouched.
-			name: "Igor's shape: only the @rise-x:registry line changes",
+			// The shape a real developer machine ends up in: a leftover
+			// @rise-x:registry line pointing at GHP, six private-feed auth lines
+			// (still legitimate: that scope stays on the private feed), and one
+			// GHP token. Only the registry line's value changes; every other byte,
+			// both sets of auth lines included, is untouched.
+			name: "leftover-registry-line shape: only the @rise-x:registry line changes",
 			in: "registry=https://registry.npmjs.org/\n" +
 				"@rise-x:registry=https://npm.pkg.github.com\n" +
 				"//packages.example.com/_packaging/Example/npm/registry/:username=rise-x\n" +

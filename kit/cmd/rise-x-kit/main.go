@@ -35,6 +35,45 @@ import (
 // job to notice its cancelled context, then draining HTTP connections.
 const shutdownGrace = 5 * time.Second
 
+// listenRetryWindow bounds the wait for a port a predecessor has just let go
+// of. An update relaunches on the same port while the old process is still
+// on its way out, and a bind that close behind a Shutdown can fail briefly on
+// Windows, where Go sets no SO_REUSEADDR.
+//
+// The cause is not pinned down, and the obvious suspect does not fit: if
+// TIME_WAIT on the connections the page held were the whole story, Windows
+// keeps those for TcpTimedWaitDelay, 120 s by default and 30 s at the lowest
+// setting, and no retry this side of a minute would help. So this window
+// covers a short transient rather than a mechanism anybody has measured.
+// Verify it on real Windows before writing anything stronger here; the retry
+// is cheap and harmless either way, and the failure it guards against is the
+// first update a partner ever runs.
+//
+// A var so a test can shrink it.
+var listenRetryWindow = 3 * time.Second
+
+// listenRetryInterval is short enough that a normal launch never notices the
+// retry at all.
+const listenRetryInterval = 100 * time.Millisecond
+
+// listenLoopback binds the local port, retrying briefly when one was asked
+// for by name. Port 0 is the OS handing out a free port, so there is nothing
+// to wait for and no retry. Every error is retried rather than just the
+// address-in-use one: that errno is WSAEADDRINUSE on Windows and EADDRINUSE
+// elsewhere, and telling them apart portably costs more than letting a
+// genuinely permanent failure take listenRetryWindow to report itself.
+func listenLoopback(port int) (net.Listener, error) {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(listenRetryWindow)
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil || port == 0 || !time.Now().Before(deadline) {
+			return ln, err
+		}
+		time.Sleep(listenRetryInterval)
+	}
+}
+
 // main is a thin wrapper so run's defers - releasing the single-instance lock
 // above all - still run on every failure. log.Fatal skips them, which is what
 // left a lock behind after a bad -port.
@@ -125,7 +164,7 @@ func run() int {
 		selfupdate.Cleanup(exe)
 	}
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
+	ln, err := listenLoopback(*port)
 	if err != nil {
 		log.Printf("listen: %v", err)
 		return 1

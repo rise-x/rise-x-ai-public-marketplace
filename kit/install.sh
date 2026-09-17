@@ -14,6 +14,7 @@ fi
 
 REPO="rise-x/rise-x-ai-public-marketplace"
 API="https://api.github.com/repos/${REPO}"
+RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 
 api_get() {
   curl -fsSL -H "Accept: application/vnd.github+json" "$1"
@@ -38,14 +39,25 @@ resolve_tag() {
   esac
 
   # /releases/latest didn't point at a kit release -- the repo may host other
-  # release kinds too. GitHub lists releases newest-first, so the first
-  # kit-v* tag we see is the newest one.
+  # release kinds too, and it answers 404 while every release is a
+  # prerelease. GitHub lists releases newest-first, so the first match is the
+  # newest one.
+  #
+  # Only a X.Y.Z tag is a match: kit/VERSION is strict semver, so every
+  # release the workflow cuts carries one, and a prerelease is exactly the
+  # tag with a -rc.N suffix. Without this the fallback -- the one path
+  # reachable while no stable release exists -- hands a partner running the
+  # documented one-liner an RC and leaves them on the RC track, while
+  # selfupdate offers a prerelease only to a binary already on one.
+  # RISE_X_KIT_VERSION above is how you ask for one on purpose.
   tag="$(api_get "${API}/releases?per_page=100" \
     | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' \
-    | grep '^kit-v' | head -n1 || true)"
+    | grep -E '^kit-v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
 
   if [ -z "$tag" ]; then
-    echo "error: no kit-v* release found in ${REPO}" >&2
+    echo "error: no stable kit-v* release found in ${REPO}" >&2
+    echo "       Pre-releases are not installed by default. To install one:" >&2
+    echo "       curl -fsSL ${RAW_BASE}/kit/install.sh | RISE_X_KIT_VERSION=v0.1.0-rc.1 bash" >&2
     exit 1
   fi
   printf '%s\n' "$tag"
@@ -110,8 +122,14 @@ else
 fi
 
 dest="$dest_dir/rise-x-kit"
-cp "$tmp/rise-x-kit" "$dest"
-chmod +x "$dest"
+# Written beside the target and renamed into place, never over it: a cp
+# interrupted partway through leaves a truncated rise-x-kit on PATH and no copy
+# to restore, which is the failure the Windows installer and the self-updater
+# are both built to avoid. The rename is atomic on the same filesystem, and
+# .new is a sibling of $dest so it always is one.
+cp "$tmp/rise-x-kit" "$dest.new"
+chmod +x "$dest.new"
+mv -f "$dest.new" "$dest"
 # Only defensible while the builds are unsigned: this is what lets an ad-hoc
 # signed binary run at all. Once APPLE_CERT_P12 exists and kit-release.yml
 # notarises, this line discards the Gatekeeper check that pays for, and a

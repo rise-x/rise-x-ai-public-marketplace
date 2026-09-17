@@ -88,7 +88,7 @@ jobs:
             echo '```'
             echo
             echo "   Every later push to \`${branch}\` refreshes that PR's changelog body."
-            echo "3. To release: raise \`kit/VERSION\` on the branch (kit-ci requires it),"
+            echo "3. To release: raise \`kit/VERSION\` on the branch (validate requires it),"
             echo "   merge \`main\` in if it moved, mark the PR ready for review, get the"
             echo "   code-owner approval, and merge it with a merge commit. The merge is"
             echo "   the release: kit-release cuts \`kit-v<version>\` from it."
