@@ -13,9 +13,9 @@ their argument traps, the `onOfflineDownload` lifecycle hook, and which `@rise-x
 offline behaviour needs.
 
 Verified against `@rise-x/apps-sdk` **0.12.0** (bridge protocol v4) — the release the offline SDK
-surface documented here lands in, and **not yet published to npm at the time of writing**. Before
-telling anyone they can install it, confirm it has shipped (`npm view @rise-x/apps-sdk version`);
-where a claim is version-sensitive, the text says so.
+surface documented here lands in. Where a claim is version-sensitive, the text says so. Read the
+app's installed version out of its `package.json` when a method below is missing at runtime; the
+rest of this skill assumes 0.12.0 or later throughout.
 
 Not needed for an app that only wants a "you're offline" banner for UX copy — the browser's own
 `window` `online`/`offline` events cover that alone (§6; `offline.isOnline()` is the synchronous
