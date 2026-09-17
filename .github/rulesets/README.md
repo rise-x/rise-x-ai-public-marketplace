@@ -24,7 +24,7 @@ request, one approval that satisfies `CODEOWNERS`, resolved review threads, a
 passing `kit-ci`, and no force-push. It deliberately carries no `deletion`
 rule, because every kit release deletes its branch afterwards.
 
-The required checks are `kit-ci`'s job names:
+The required checks are the names `kit-ci` reports under:
 
 - `test (ubuntu-latest)`
 - `test (windows-latest)`
@@ -94,3 +94,8 @@ main-bound pull request. That is what makes the kit bump an enforced gate on
 same failure, but nothing stops a merge on it. The script exits 0 when the
 diff touches no kit path, so a plugin-only release PR passes it without
 knowing the kit exists.
+
+It compares versions from the **second** kit release onward. `main` carries no
+`kit/VERSION` until the first one lands, and the script passes explicitly on
+that bootstrap case rather than inventing a base to compare against, so the
+first release ships whatever the branch holds.

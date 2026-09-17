@@ -188,6 +188,13 @@ PR branch, with assets built the way `kit-release.yml` builds them. That is
 the one exception to the rule below: `kit-release.yml` never emits an `-rc`
 tag, so the two cannot collide.
 
+That non-collision is itself a contract, and `install.sh` is the file that
+depends on it: with no `jq` to read the `prerelease` flag, it tells a stable
+release from a pre-release by tag shape alone, matching
+`^kit-v[0-9]+\.[0-9]+\.[0-9]+$`. `install.ps1` has the real flag and checks
+both. So a stable release must never be published under a tag carrying a
+suffix, and a hand-published pre-release must always carry one.
+
 It has its own release track, independent of `release/*`: a PR touches
 `plugins/**` or `kit/**`, never both.
 
@@ -228,7 +235,9 @@ The version bump is enforced instead by `validate`, which is required on
 `main` and runs `scripts/check-kit-version.sh` on every main-bound PR; the
 script exits 0 when the diff touches no kit path, so a plugin-only release
 PR passes it untouched. `kit-ci.yml` runs the same check for the feedback,
-but nothing blocks a merge on it.
+but nothing blocks a merge on it. The comparison starts at the **second**
+kit release: `main` has no `kit/VERSION` before the first one, and the
+script passes that bootstrap case explicitly.
 
 `protect-release-kit.json` requires the matrix check names
 (`test (ubuntu-latest)` and the two other legs), not a bare `test`: a

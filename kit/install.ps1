@@ -83,36 +83,72 @@ try {
         throw "Checksum mismatch for $asset (expected $expectedHash, got $actualHash)"
     }
 
-    # Extract to a scratch dir first and swap only once extraction succeeds,
-    # so a failed Expand-Archive can't leave the existing install removed.
-    $extractDir = Join-Path $tempDir 'extracted'
-    New-Item -ItemType Directory -Path $extractDir | Out-Null
-    Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+    $parentDir = Split-Path $installDir -Parent
+    New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
 
-    # The existing install is renamed aside rather than deleted, and only
-    # removed once the new one is in place. Move-Item can still fail here --
-    # antivirus holding a handle, a permission change, a full disk -- and
-    # deleting first would leave the partner with no kit at all and no copy to
-    # put back, since $tempDir goes with the finally block. This backup sits
-    # beside $installDir, not under $tempDir, so the finally cannot take it.
-    $backupDir = "$installDir.old-" + [Guid]::NewGuid().ToString('N')
-    New-Item -ItemType Directory -Path (Split-Path $installDir -Parent) -Force | Out-Null
-    $movedAside = $false
-    if (Test-Path $installDir) {
-        Move-Item -Path $installDir -Destination $backupDir
-        $movedAside = $true
+    # Sweep leftovers an earlier run could not remove -- both cleanups here are
+    # best-effort, and nothing else ever looks in this directory: the kit's own
+    # Cleanup sweeps only inside the install directory. Without this every
+    # interrupted reinstall leaves another full copy behind for good. Runs
+    # before this run's own scratch directory exists, so it cannot take it.
+    foreach ($stale in @('rise-x-kit.old-*', 'rise-x-kit.new-*')) {
+        Get-ChildItem -Path $parentDir -Directory -Filter $stale -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     }
+
+    # Extract beside $installDir rather than under $tempDir, so both swaps
+    # below are same-volume renames. $env:TEMP is redirected to another volume
+    # on plenty of corporate images, and across volumes Move-Item is
+    # copy-then-delete: a failure midway would leave a partial $installDir and
+    # no way to put the old one back. Same reason the Go self-updater
+    # downloads into the install directory rather than into a temp dir.
+    $extractDir = Join-Path $parentDir ('rise-x-kit.new-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+
     try {
-        Move-Item -Path $extractDir -Destination $installDir
-    } catch {
-        if ($movedAside) {
-            Move-Item -Path $backupDir -Destination $installDir
-            throw "Could not install the new version; the previous one is still in place. $_"
+        Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+
+        # The existing install is renamed aside rather than deleted, and only
+        # removed once the new one is in place. Move-Item can still fail here
+        # -- antivirus holding a handle, a permission change, a full disk --
+        # and deleting first would leave the partner with no kit at all and no
+        # copy to put back.
+        $backupDir = Join-Path $parentDir ('rise-x-kit.old-' + [Guid]::NewGuid().ToString('N'))
+        $movedAside = $false
+        if (Test-Path $installDir) {
+            Move-Item -Path $installDir -Destination $backupDir
+            $movedAside = $true
         }
-        throw
-    }
-    if ($movedAside) {
-        Remove-Item -Path $backupDir -Recurse -Force -ErrorAction SilentlyContinue
+        try {
+            Move-Item -Path $extractDir -Destination $installDir
+        } catch {
+            $installError = $_
+            if (-not $movedAside) { throw }
+            # Clear whatever the failed move left at the destination first, or
+            # the restore fails too and the partner is shown that error rather
+            # than this one. The throws are outside the try on purpose: inside,
+            # the success message would be caught by its own catch block.
+            $restored = $false
+            try {
+                if (Test-Path $installDir) {
+                    Remove-Item -Path $installDir -Recurse -Force
+                }
+                Move-Item -Path $backupDir -Destination $installDir
+                $restored = $true
+            } catch {
+                $restored = $false
+            }
+            if ($restored) {
+                throw "Could not install the new version; the previous one is still in place. $installError"
+            }
+            throw ("Could not install the new version, and could not put the previous one back. " +
+                "Your install is at '$backupDir' -- rename that folder to '$installDir' to recover. $installError")
+        }
+        if ($movedAside) {
+            Remove-Item -Path $backupDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } finally {
+        Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     $exePath = Join-Path $installDir 'rise-x-kit.exe'

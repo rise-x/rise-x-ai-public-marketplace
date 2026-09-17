@@ -14,6 +14,7 @@ fi
 
 REPO="rise-x/rise-x-ai-public-marketplace"
 API="https://api.github.com/repos/${REPO}"
+RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 
 api_get() {
   curl -fsSL -H "Accept: application/vnd.github+json" "$1"
@@ -55,8 +56,8 @@ resolve_tag() {
 
   if [ -z "$tag" ]; then
     echo "error: no stable kit-v* release found in ${REPO}" >&2
-    echo "       Prereleases are not installed by default; to install one:" >&2
-    echo "       RISE_X_KIT_VERSION=v0.1.0-rc.1 ..." >&2
+    echo "       Pre-releases are not installed by default. To install one:" >&2
+    echo "       curl -fsSL ${RAW_BASE}/kit/install.sh | RISE_X_KIT_VERSION=v0.1.0-rc.1 bash" >&2
     exit 1
   fi
   printf '%s\n' "$tag"
@@ -121,8 +122,14 @@ else
 fi
 
 dest="$dest_dir/rise-x-kit"
-cp "$tmp/rise-x-kit" "$dest"
-chmod +x "$dest"
+# Written beside the target and renamed into place, never over it: a cp
+# interrupted partway through leaves a truncated rise-x-kit on PATH and no copy
+# to restore, which is the failure the Windows installer and the self-updater
+# are both built to avoid. The rename is atomic on the same filesystem, and
+# .new is a sibling of $dest so it always is one.
+cp "$tmp/rise-x-kit" "$dest.new"
+chmod +x "$dest.new"
+mv -f "$dest.new" "$dest"
 # Only defensible while the builds are unsigned: this is what lets an ad-hoc
 # signed binary run at all. Once APPLE_CERT_P12 exists and kit-release.yml
 # notarises, this line discards the Gatekeeper check that pays for, and a
