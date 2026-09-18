@@ -157,6 +157,61 @@ mutation tool in this skill (see main SKILL.md § Response Envelopes & Verificat
 - Practical pattern: `get_agent` → edit only the fields that change → send the full `mcpServers`
   list back with unchanged secrets left as `"***"` → `update_agent`.
 
+## Feeding a file to an agent
+
+### An agent cannot read a work attachment
+
+This is a hard architectural boundary, not a missing parameter.
+
+Work attachments live behind `getApiV4("attachment")` against `rise-x-api`
+(`references/attachments.md`). An agent run goes to `/api/v1/agent/run` against
+a **different host**. `RunAgentArgs` and `SendChatArgs` carry **no `workId` and
+no attachment id**. There is nothing on the run call that could name a file
+already sitting on a work item, and nothing on the attachment side that hands a
+file to the agent runtime.
+
+A file reaches an agent by exactly two routes:
+
+| Route | Shape | Good for |
+|---|---|---|
+| Per-turn `attachments` entry on the run | the file travels with that one turn | the document this question is about |
+| Indexed into a vector store, passed as `vector_store_ids` | the file is retrievable across runs | a corpus the agent searches (`references/managing-vector-stores.md`) |
+
+So an app that wants an agent to read a document **holds the file once and
+sends it twice**:
+
+```
+1. file = <the user's upload, held in the app>
+
+2. POST /api/v4/attachments/work/{workId}/{folder}
+     # the RECORD: what the work item carries, what auditors read later
+
+3. POST /api/v1/agent/run  with the same bytes as a per-turn `attachments`
+   entry (or add it to a vector store and pass `vector_store_ids`)
+     # the QUESTION: what the agent actually sees
+
+# CRITICAL: there is no one-step bridge. Uploading to the work does not make
+#   the file visible to the agent, and sending it to the agent does not put it
+#   on the record. Do both, from the one file you hold.
+```
+
+### An agent record has no structured-output field
+
+`create_agent` takes `name`, `model`, `description`, `system_prompt`,
+`mcp_servers`, and `default_open_ai_tools`, **and nothing else**. There is no
+`response_format`, no JSON-schema slot, no structured-output configuration
+anywhere on the stored config (see § Wire Schema above for the full field list).
+
+```
+# CRITICAL: a JSON contract therefore lives in the PROMPT, and the CALLER must
+#   validate what comes back. Nothing on the platform constrains the model to
+#   the shape you asked for, so do not trust that it honoured it.
+1. system_prompt: "...Reply with JSON only: {\"verdict\": \"pass\"|\"fail\", \"reason\": string}"
+2. caller: parse the response, validate it against the shape, and handle the
+   case where it does not match: a prose answer, a fenced code block, a
+   missing key, an extra key.
+```
+
 ## Config API vs. Runtime Capability Matrix
 
 `create_agent`/`update_agent` validate shape — required fields, enums, URL format, list caps — but
@@ -213,3 +268,10 @@ not a partial or best-effort degradation of just the offending server or tool.
 9. **`agent_id` must be a real UUID** — `get_agent`/`update_agent`/`delete_agent` validate the
    format client-side and fail fast (`validation` error, no network call) on anything else, so a
    copy-paste mistake is caught immediately instead of surfacing as a confusing 404.
+10. **Expecting an agent to read a work attachment.** It cannot. `/api/v1/agent/run` is a
+    different host from the attachment API and `RunAgentArgs`/`SendChatArgs` carry no `workId`
+    and no attachment id. Send the bytes to the run as a per-turn `attachments` entry, or index
+    them into a vector store and pass `vector_store_ids`. See § Feeding a file to an agent.
+11. **Expecting a structured-output / `response_format` setting.** There is none on the agent
+    record. The JSON contract goes in `systemPrompt` and the caller validates the reply. See
+    § An agent record has no structured-output field.

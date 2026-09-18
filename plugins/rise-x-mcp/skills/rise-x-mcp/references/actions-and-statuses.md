@@ -6,6 +6,7 @@
 - [Reading Actions](#reading-actions)
 - [Action Properties](#action-properties)
 - [Routing with `next`](#routing-with-next)
+- [Action conditions (`condition`)](#action-conditions-condition)
 - [Managing Actions](#managing-actions)
 - [Activities (Automation on Actions)](#activities-automation-on-actions)
   - [Managing Activities](#managing-activities)
@@ -51,6 +52,7 @@ Use `get_flow_step(flow_id, step_id)` to see the full step details including its
 | `color` | string | Button color: `"primary"` (default), `"error"` (red), `"warning"` (orange), `"secondary"` |
 | `skipValidation` | bool | If true, skip form validation when this action is clicked |
 | `next` | list | Routing destinations (see below) |
+| `condition` | string (`dynamicValue`) | Gates whether the platform treats this action as available. **Not enforced at submit** and **not reflected in the offered-actions list**. See § Action conditions below. |
 | `completedName` | string | Status label after this action completes (shown in kanban/grid) |
 | `completedColor` | string | Status color after completion |
 
@@ -76,6 +78,47 @@ The `next` array defines where work goes when the action is executed. Each entry
 | `"TerminateFlow"` | End the entire flow |
 | `"EndFlow"` | End flow (variant) |
 | `"Close"` | Close the work item |
+
+## Action conditions (`condition`)
+
+An action can carry a `condition`, in the same `dynamicValue` expression
+language as an activity's (`references/dynamicValue.md`). Two facts about it
+sound contradictory and both matter.
+
+**A condition governs availability, but does NOT gate the submit.** The platform
+uses it to decide whether it treats the action as available. It does not check
+it when the event arrives: a client that sends the event anyway can drive a
+transition whose condition is false.
+
+```
+# CRITICAL: an action condition is NOT a security boundary. Anything that must
+#   not happen on a false condition needs enforcing elsewhere: a validation
+#   rule, or the activity's own `condition` (which the engine does check
+#   before running the activity).
+```
+
+**And the offered-actions list does NOT reflect action conditions.** Both sides
+of a mutually exclusive conditioned pair appear in `get_work`'s `actions[]`.
+Observed twice in one session, in both polarities. The offered list is not a
+filtered view of what the conditions allow.
+
+### What this means for a client
+
+```
+1. Answer the condition YOURSELF, from the same data the flow reads.
+     # NOTE: read the work's data and evaluate the branch. The flow's condition
+     #   expression tells you which paths it looks at.
+2. THEN consult actions[] only to confirm the event you decided on is present.
+     # Decide, then check. Never the reverse.
+3. # CRITICAL: never choose between two mutually exclusive events by asking
+   #   which one is offered. Both are. And never fall back to the other event
+   #   because the one you wanted was missing: that puts the item on a branch
+   #   nobody intended.
+```
+
+Gating a **single** action on the offer remains correct, and is how you avoid
+drawing a button the server would refuse. The rule is only about *choosing
+between* alternatives.
 
 ## Managing Actions
 
@@ -117,6 +160,11 @@ Creates an activity of `activity_type` (with its schema defaults) on the action,
 Removes the activity from the action.
 
 **Note:** a step's default `Submit` action created by `AddAll` may already carry default (empty) `SendEmail` activities. If you want only your activity to run, `delete` those first.
+
+**Two activity types with verified quirks. Check these before debugging a configuration:**
+
+- `AddDataIntegrityHashActivity` writes the hash to a **mangled** path, not the configured one (pitfall #69 in `references/common-pitfalls.md`).
+- `UpdateAssetValueActivity`'s `entityTypeComponentId` is never dereferenced, and the schema itself says so (pitfall #70).
 
 ### Conditional activities (`condition`)
 
@@ -470,7 +518,10 @@ When created with `AddAll` flags, flows get these default columns automatically:
 
 1. **Duplicate `eventName`** — eventName uniqueness is enforced at the FLOW level (not per step): once any step's action fires an event on a work item, a same-named event on another step is blocked as a duplicate (runtime 403, the work gets stuck). `manage_action` rejects collisions at write time with the owning step's name.
 2. **Routing to a non-existent step** — when using `ByStepName`, the step name must match the internal camelCase name exactly (e.g. `"orderRequest"`, not `"Order Request"`). **Never use `ByStepDisplayName`** — it is deprecated and will block publishing.
+
+   Separately: `ByStepName`'s camelCase **step** name is not the name `submit_work` takes. `submit_work`'s `step_name` is the **action set** name (`reviewRouteApprove_set`, `purchaseOrderDetails/task1/Actionset`, `ActionSet_1`, …), read off the item's own `actions[].stepName`. Passing a task name there returns `ok: true` and moves nothing. See `references/managing-work-items.md` § `step_name` is the ACTION SET name.
 3. **Forgetting to draft before adding actions** — action changes require the flow to be in draft mode
 4. **Not publishing after action changes** — changes are invisible until `publish_flow` is called
 5. **Using `actionTypeName: "Stop"` for routing actions** — `"Stop"` terminates the step/flow. Use `"Submit"` for actions that route to other steps, even rejection actions.
 6. **Missing `next` configuration** — without `next`, the action defaults to advancing to the next sequential step
+7. **Treating an action `condition` as enforcement, or as a filter on `actions[]`.** It is neither. The submit is not gated by it, and both sides of a mutually exclusive pair are offered. Decide the branch yourself, then check the event is present. See § Action conditions (`condition`).
