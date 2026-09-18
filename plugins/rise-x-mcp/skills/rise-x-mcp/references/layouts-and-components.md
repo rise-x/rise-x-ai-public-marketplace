@@ -19,6 +19,8 @@
   - [`readOnlyWhen` — Conditional Editability](#mechanism-3-readonlywhen--conditional-editability)
   - [Expression Engine Reference (`dynamicValue()`)](#expression-engine-reference-dynamicvalue)
 - [Component Types Reference](#component-types-reference)
+- [richtext-input stores HTML](#richtext-input-stores-html)
+- [attachments needs `properties.folder`](#attachments-needs-propertiesfolder)
 - [date-picker Properties (Critical)](#date-picker-properties-critical)
 - [AI Import (for data-grid and timesheet-table)](#ai-import-for-data-grid-and-timesheet-table)
 - [search-things Component Reference](#search-things-component-reference)
@@ -261,9 +263,16 @@ Properties are split between **top-level** (on the component dict) and **nested*
 
 | Property | Type | Effect |
 |---|---|---|
-| `required` | `boolean` | Mark field as required |
+| `required` | `boolean` | Mark field as required. ⚠️ **May not enforce at submit** — see the note under the table |
 | `readOnly` | `boolean` | Make field read-only |
 | `defaultValue` | `string` | Default value — supports expressions (see below) |
+
+> ⚠️ **`required: true` is not reliably enforced at submit.** One field was
+> `required: true`, left empty, and the submit advanced anyway. Enforcement
+> appears to need a **validation rule** (`references/validation.md`) rather
+> than the flag alone. Whether the flag ever enforces on its own was not
+> established — so when a field genuinely must be filled, author a validation
+> rule and treat `required` as a UI hint.
 
 #### copyData / cloneData (inert flags — NOT duplicate control)
 
@@ -601,12 +610,12 @@ All `isHiddenDataPath` and `readOnlyWhen` expressions are evaluated by the `dyna
 | Component | Default Width | Use for |
 |---|---|---|
 | `input-text` | `col-6` | Short text, names, numbers, IDs |
-| `richtext-input` | `col-12` | Long-form text with formatting |
+| `richtext-input` | `col-12` | Long-form text with formatting. **Stores HTML** — see § richtext-input stores HTML |
 | `date-picker` | `col-6` | Date/datetime fields. Use `showRange: true` for date range selection |
 | `input-select` | `col-6` | Single dropdown selection |
 | `check-box` | `col-6` | Boolean yes/no |
 | `product-toggle-switch` | `col-6` | On/off toggles. **Preferred.** `switch` and `toggle` schemas also exist on the server but may behave differently — use `product-toggle-switch` when creating components. |
-| `attachments` | `col-12` | File uploads |
+| `attachments` | `col-12` | File uploads. **Requires `properties.folder`** or no upload control renders — see `references/attachments.md` |
 | `comments-box` | `col-12` | Comment threads |
 | `data-grid` | `col-12` | Tabular data entry |
 | `search-things` | `col-6` | Entity lookup / reference to assets |
@@ -641,6 +650,37 @@ All `isHiddenDataPath` and `readOnlyWhen` expressions are evaluated by the `dyna
 > Check the returned warnings to see what was changed.
 
 Use `get_schema("components", "type-name")` to discover all configurable properties for any type. See `references/schemas-and-compare.md`.
+
+## richtext-input stores HTML
+
+A `richtext-input` persists **HTML**, not plain text. A one-word answer comes
+back as `<p>test</p>`.
+
+```
+# Reading:
+# NOTE: expect markup. STRIP it rather than rendering it — the stored string
+#   came from a user and rendering it is an injection surface.
+value = work.data.notes.summary   # "<p>test</p>", not "test"
+
+# Writing:
+# NOTE: write HTML, not a bare string. A bare string persists, but it loses
+#   the author's paragraph breaks and mis-reads a typed angle bracket
+#   (a "<" the user meant literally becomes the start of a tag).
+update_work_data(workId, "$.notes.summary", "set", "<p>First.</p><p>Second.</p>", section_name=…)
+```
+
+## attachments needs `properties.folder`
+
+An `attachments` component with no `folder` in its `properties` renders and
+shows **no upload control at all**. The folder also couples the component to
+the upload route — a file posted to `/{folder}` appears only in the component
+whose `folder` matches. Full contract, including that the route enforces no
+size limit and runs no malware scan, in `references/attachments.md`.
+
+```
+{"component": "attachments", "label": "Evidence",
+ "properties": {"width": "col-12", "folder": "evidence"}}   # CRITICAL: folder
+```
 
 ## date-picker Properties (Critical)
 

@@ -100,7 +100,20 @@ Step 3: Finalize
       }]
     }
   )
+
+  # CRITICAL: verify the submit LANDED. `ok: true` is not evidence of a
+  #   transition — a wrong step_name returns ok: true, moves nothing and saves
+  #   nothing. Re-read and confirm the status actually changed; an unchanged
+  #   `statusLabel` (still `Draft`) with ok: true means the name was wrong.
+  get_asset(entityId)   # → status / currentState must have MOVED
 ```
+
+> ⚠️ **The name in `stepName` / `sourceStepName` is an ACTION SET name.** It is
+> not the task name, and not the `ByStepName` camelCase step name that action
+> routing takes. That is why it must be copied verbatim from the
+> `create_asset` / `edit_asset` response rather than constructed — the shapes
+> vary within a single ecosystem (`…/Actionset`, `…_set`, `ActionSet_1`, bare).
+> See `references/managing-work-items.md` § `step_name` is the ACTION SET name.
 
 ### Editing an Existing Asset
 
