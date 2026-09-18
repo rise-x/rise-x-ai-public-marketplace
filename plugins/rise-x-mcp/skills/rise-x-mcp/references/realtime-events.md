@@ -20,7 +20,7 @@ A SignalR hub is served at:
 /events?environment=<env>
 ```
 
-Four events are sent. **The client event name is the literal enum name.** No
+Four events are sent. **The client event name is the literal enum name** — no
 camelCasing, no prefix:
 
 | Event | Meaning |
@@ -39,7 +39,7 @@ re-read it:
 ```
 1. on("WorkUpdated", ({Id, DisplayName}) => …)
      # NOTE: the payload is the whole message. No form data, no status,
-     #   no activeStepName. Re-read the work to find out what changed.
+     #   no activeStepName — re-read the work to find out what changed.
 2. if (Id === theWorkIAmShowing) get_work(Id)   # or the app's own query refetch
 ```
 
@@ -49,17 +49,15 @@ There is no per-work-item group to join. An event is sent to a **user**, fanned
 out to every user in the work's ACL. A subscriber therefore receives every
 event for every work item it can see, and **filters by `Id` itself**.
 
-```
-# CRITICAL: do not assume a subscription is scoped. A user watching one work
-#   item receives events for all of theirs, so an unfiltered handler will
-#   refetch on unrelated activity.
-```
+> ⚠️ **Do not assume a subscription is scoped.** A user watching one work item
+> receives events for all of theirs, so an unfiltered handler refetches on
+> unrelated activity.
 
 ## Why an app cannot use any of this
 
 The host shell already holds a live connection. It does **not** expose it.
 
-`window.__DIANA_SHELL__`, the shell bridge a federated app reads, offers:
+`window.__DIANA_SHELL__` — the shell bridge a federated app reads — offers:
 
 - `getApi`
 - `getApiV4`
@@ -76,17 +74,14 @@ connection of its own is not a supported route.
 
 ## What to do instead, today
 
-```
-1. Refresh on the user's own action.
-     # The app made the change, so it knows when to refetch. This covers the
-     #   overwhelming majority of what a user notices as staleness.
-2. Refresh on window focus.
-     # Catches a change made in another tab or by another party while the
-     #   app was in the background.
-3. Do NOT poll the work on a timer as a substitute for a subscription.
-     # It costs a request per interval per viewer for a change that is rare,
-     #   and it still is not realtime.
-```
+- **Refresh on the user's own action.** The app made the change, so it knows
+  when to refetch. This covers the overwhelming majority of what a user
+  notices as staleness.
+- **Refresh on window focus.** Catches a change made in another tab, or by
+  another party while the app was in the background.
+- **Do NOT poll the work on a timer** as a substitute for a subscription. It
+  costs a request per interval per viewer for a change that is rare, and it
+  still is not realtime.
 
 Say this plainly to anyone asking for live updates: the platform emits the
 events, the shell consumes them, and the app tier has no access. Do not imply

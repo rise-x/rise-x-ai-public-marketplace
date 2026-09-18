@@ -11,7 +11,7 @@ route that none of the layout or work tools cover.
 > the missing Kestrel cap are visible in the handler; no oversized upload was
 > actually pushed through). Which codebase implements the deployed
 > `upload_attachment` / `request_attachment_upload` MCP tools is **not
-> established**. See § MCP tools at the end. The wire contract below holds
+> established** — see § MCP tools at the end. The wire contract below holds
 > regardless of which server serves it.
 
 ## The upload route
@@ -33,7 +33,7 @@ Form field:   files          # repeated once per file, same field name
 
 ```
 # CRITICAL: never set the multipart Content-Type header by hand. The boundary
-#   token is generated with the body, so a hand-written header carries the wrong
+#   token is generated with the body — a hand-written header carries the wrong
 #   boundary and the server parses zero parts. Hand a FormData to fetch and let
 #   the browser write the header.
 form = new FormData()
@@ -51,7 +51,7 @@ building the URL itself:
 2. api.post(`work/${workId}/${folder}`, form)
 ```
 
-Authoring a federated app is otherwise out of scope here. See the
+Authoring a federated app is otherwise out of scope here — see the
 `rise-x-apps` skill in this marketplace for the SDK, the shell accessors, and
 the app lifecycle.
 
@@ -68,7 +68,7 @@ instead of leaving two files for a reader to choose between. It also means an
 app that uploads under a fixed name cannot accumulate a history.
 
 ```
-# NOTE: to keep every upload, make the filename unique yourself. The server
+# NOTE: to keep every upload, make the filename unique yourself — the server
 #   will not disambiguate for you.
 upload(workId, "evidence", file named `${workCode}-${timestamp}.pdf`)
 
@@ -82,14 +82,10 @@ The endpoint carries `[DisableRequestSizeLimit]` and there is no Kestrel cap in
 front of it, so the server enforces **no** upload size. Nor does it run a
 malware scan. Validation is **filename-extension only**.
 
-```
-# CRITICAL: the caller's own UI is the only bound that exists. An app that
-#   wants a size ceiling, a content-type check, or a scan must implement it
-#   before the POST. Nothing downstream will.
-```
-
-Treat a stored attachment as untrusted content, the same as any other
-user-supplied file.
+> ⚠️ **The caller's own UI is the only bound that exists.** An app that wants a
+> size ceiling, a content-type check, or a scan must implement it before the
+> POST — nothing downstream will. Treat a stored attachment as untrusted
+> content, the same as any other user-supplied file.
 
 ### 3. The layout component needs `properties.folder`
 
@@ -115,13 +111,13 @@ to show the same files.
 ## Reading attachments back
 
 `get_work(id)` carries an `attachments` key in its summary projection.
-`get_asset(entity_id)` drops it. Its `omitted` note lists `attachments` among
+`get_asset(entity_id)` drops it — its `omitted` note lists `attachments` among
 the keys that carried a value, so pass `format="full"` on an asset. See
 `references/managing-assets.md` § `get_asset`.
 
 Relationship sync can copy attachments between related items with
 `attachmentOperations` (`sourceFolder` → `destinationFolder`) and the
-`includeAttachments` flag. See `references/relationships.md`.
+`includeAttachments` flag — see `references/relationships.md`.
 
 ## An agent cannot read a work attachment
 
@@ -136,7 +132,7 @@ two ways a file does reach an agent, are in
 Some deployments expose `upload_attachment`, `request_attachment_upload`,
 `list_attachments`, `update_attachment`, and `delete_attachment` as MCP tools.
 Their signatures and behaviour are **not documented here** because they were
-not exercised, and which codebase implements them is still being established.
-Do not assume they mirror the route above. If they are absent on the server you
+not exercised, and which codebase implements them is still being established —
+do not assume they mirror the route above. If they are absent on the server you
 are talking to, read that as not supported there, not as a permissions
 problem. The route in § The upload route is the contract that was verified.

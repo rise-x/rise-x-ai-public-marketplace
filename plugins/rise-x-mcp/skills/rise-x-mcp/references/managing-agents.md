@@ -166,7 +166,7 @@ This is a hard architectural boundary, not a missing parameter.
 Work attachments live behind `getApiV4("attachment")` against `rise-x-api`
 (`references/attachments.md`). An agent run goes to `/api/v1/agent/run` against
 a **different host**. `RunAgentArgs` and `SendChatArgs` carry **no `workId` and
-no attachment id**. There is nothing on the run call that could name a file
+no attachment id** — there is nothing on the run call that could name a file
 already sitting on a work item, and nothing on the attachment side that hands a
 file to the agent runtime.
 
@@ -184,11 +184,11 @@ sends it twice**:
 1. file = <the user's upload, held in the app>
 
 2. POST /api/v4/attachments/work/{workId}/{folder}
-     # the RECORD: what the work item carries, what auditors read later
+     # the RECORD — what the work item carries, what auditors read later
 
 3. POST /api/v1/agent/run  with the same bytes as a per-turn `attachments`
    entry (or add it to a vector store and pass `vector_store_ids`)
-     # the QUESTION: what the agent actually sees
+     # the QUESTION — what the agent actually sees
 
 # CRITICAL: there is no one-step bridge. Uploading to the work does not make
 #   the file visible to the agent, and sending it to the agent does not put it
@@ -198,7 +198,7 @@ sends it twice**:
 ### An agent record has no structured-output field
 
 `create_agent` takes `name`, `model`, `description`, `system_prompt`,
-`mcp_servers`, and `default_open_ai_tools`, **and nothing else**. There is no
+`mcp_servers`, and `default_open_ai_tools` — **and nothing else**. There is no
 `response_format`, no JSON-schema slot, no structured-output configuration
 anywhere on the stored config (see § Wire Schema above for the full field list).
 
@@ -208,7 +208,7 @@ anywhere on the stored config (see § Wire Schema above for the full field list)
 #   the shape you asked for, so do not trust that it honoured it.
 1. system_prompt: "...Reply with JSON only: {\"verdict\": \"pass\"|\"fail\", \"reason\": string}"
 2. caller: parse the response, validate it against the shape, and handle the
-   case where it does not match: a prose answer, a fenced code block, a
+   case where it does not match — a prose answer, a fenced code block, a
    missing key, an extra key.
 ```
 
@@ -268,10 +268,10 @@ not a partial or best-effort degradation of just the offending server or tool.
 9. **`agent_id` must be a real UUID** — `get_agent`/`update_agent`/`delete_agent` validate the
    format client-side and fail fast (`validation` error, no network call) on anything else, so a
    copy-paste mistake is caught immediately instead of surfacing as a confusing 404.
-10. **Expecting an agent to read a work attachment.** It cannot. `/api/v1/agent/run` is a
+10. **Expecting an agent to read a work attachment** — it cannot. `/api/v1/agent/run` is a
     different host from the attachment API and `RunAgentArgs`/`SendChatArgs` carry no `workId`
     and no attachment id. Send the bytes to the run as a per-turn `attachments` entry, or index
     them into a vector store and pass `vector_store_ids`. See § Feeding a file to an agent.
-11. **Expecting a structured-output / `response_format` setting.** There is none on the agent
+11. **Expecting a structured-output / `response_format` setting** — there is none on the agent
     record. The JSON contract goes in `systemPrompt` and the caller validates the reply. See
     § An agent record has no structured-output field.

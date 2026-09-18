@@ -263,7 +263,7 @@ Properties are split between **top-level** (on the component dict) and **nested*
 
 | Property | Type | Effect |
 |---|---|---|
-| `required` | `boolean` | Mark field as required. ⚠️ **May not enforce at submit.** See the note under the table |
+| `required` | `boolean` | Mark field as required. ⚠️ **May not enforce at submit** — see the note under the table |
 | `readOnly` | `boolean` | Make field read-only |
 | `defaultValue` | `string` | Default value — supports expressions (see below) |
 
@@ -271,7 +271,7 @@ Properties are split between **top-level** (on the component dict) and **nested*
 > `required: true`, left empty, and the submit advanced anyway. Enforcement
 > appears to need a **validation rule** (`references/validation.md`) rather
 > than the flag alone. Whether the flag ever enforces on its own was not
-> established. So when a field genuinely must be filled, author a validation
+> established — so when a field genuinely must be filled, author a validation
 > rule and treat `required` as a UI hint.
 
 #### copyData / cloneData (inert flags — NOT duplicate control)
@@ -610,12 +610,12 @@ All `isHiddenDataPath` and `readOnlyWhen` expressions are evaluated by the `dyna
 | Component | Default Width | Use for |
 |---|---|---|
 | `input-text` | `col-6` | Short text, names, numbers, IDs |
-| `richtext-input` | `col-12` | Long-form text with formatting. **Stores HTML.** See § richtext-input stores HTML |
+| `richtext-input` | `col-12` | Long-form text with formatting. **Stores HTML** — see § richtext-input stores HTML |
 | `date-picker` | `col-6` | Date/datetime fields. Use `showRange: true` for date range selection |
 | `input-select` | `col-6` | Single dropdown selection |
 | `check-box` | `col-6` | Boolean yes/no |
 | `product-toggle-switch` | `col-6` | On/off toggles. **Preferred.** `switch` and `toggle` schemas also exist on the server but may behave differently — use `product-toggle-switch` when creating components. |
-| `attachments` | `col-12` | File uploads. **Requires `properties.folder`** or no upload control renders. See `references/attachments.md` |
+| `attachments` | `col-12` | File uploads. **Requires `properties.folder`** or no upload control renders — see `references/attachments.md` |
 | `comments-box` | `col-12` | Comment threads |
 | `data-grid` | `col-12` | Tabular data entry |
 | `search-things` | `col-6` | Entity lookup / reference to assets |
@@ -658,8 +658,8 @@ back as `<p>test</p>`.
 
 ```
 # Reading:
-# NOTE: expect markup. STRIP it rather than rendering it. The stored string
-#   came from a user, so rendering it is an injection surface.
+# NOTE: expect markup. STRIP it rather than rendering it — the stored string
+#   came from a user and rendering it is an injection surface.
 value = work.data.notes.summary   # "<p>test</p>", not "test"
 
 # Writing:
@@ -673,7 +673,7 @@ update_work_data(workId, "$.notes.summary", "set", "<p>First.</p><p>Second.</p>"
 
 An `attachments` component with no `folder` in its `properties` renders and
 shows **no upload control at all**. The folder also couples the component to
-the upload route: a file posted to `/{folder}` appears only in the component
+the upload route — a file posted to `/{folder}` appears only in the component
 whose `folder` matches. Full contract, including that the route enforces no
 size limit and runs no malware scan, in `references/attachments.md`.
 

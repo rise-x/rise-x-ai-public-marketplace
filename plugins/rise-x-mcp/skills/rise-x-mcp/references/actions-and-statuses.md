@@ -52,7 +52,7 @@ Use `get_flow_step(flow_id, step_id)` to see the full step details including its
 | `color` | string | Button color: `"primary"` (default), `"error"` (red), `"warning"` (orange), `"secondary"` |
 | `skipValidation` | bool | If true, skip form validation when this action is clicked |
 | `next` | list | Routing destinations (see below) |
-| `condition` | string (`dynamicValue`) | Gates whether the platform treats this action as available. **Not enforced at submit** and **not reflected in the offered-actions list**. See § Action conditions below. |
+| `condition` | string (`dynamicValue`) | Gates whether the platform treats this action as available. **Not enforced at submit** and **not reflected in the offered-actions list** — see § Action conditions below. |
 | `completedName` | string | Status label after this action completes (shown in kanban/grid) |
 | `completedColor` | string | Status color after completion |
 
@@ -81,9 +81,9 @@ The `next` array defines where work goes when the action is executed. Each entry
 
 ## Action conditions (`condition`)
 
-An action can carry a `condition`, in the same `dynamicValue` expression
-language as an activity's (`references/dynamicValue.md`). Two facts about it
-sound contradictory and both matter.
+An action can carry a `condition` — the same `dynamicValue` expression language
+as an activity's (`references/dynamicValue.md`). Two facts about it sound
+contradictory and both matter.
 
 **A condition governs availability, but does NOT gate the submit.** The platform
 uses it to decide whether it treats the action as available. It does not check
@@ -92,14 +92,14 @@ transition whose condition is false.
 
 ```
 # CRITICAL: an action condition is NOT a security boundary. Anything that must
-#   not happen on a false condition needs enforcing elsewhere: a validation
-#   rule, or the activity's own `condition` (which the engine does check
-#   before running the activity).
+#   not happen on a false condition needs enforcing elsewhere — a validation
+#   rule, or the activity's own `condition` (which the engine does check before
+#   running the activity).
 ```
 
 **And the offered-actions list does NOT reflect action conditions.** Both sides
 of a mutually exclusive conditioned pair appear in `get_work`'s `actions[]`.
-Observed twice in one session, in both polarities. The offered list is not a
+Observed twice in one session, in both polarities — the offered list is not a
 filtered view of what the conditions allow.
 
 ### What this means for a client
@@ -111,7 +111,7 @@ filtered view of what the conditions allow.
 2. THEN consult actions[] only to confirm the event you decided on is present.
      # Decide, then check. Never the reverse.
 3. # CRITICAL: never choose between two mutually exclusive events by asking
-   #   which one is offered. Both are. And never fall back to the other event
+   #   which one is offered — both are. And never fall back to the other event
    #   because the one you wanted was missing: that puts the item on a branch
    #   nobody intended.
 ```
@@ -161,10 +161,10 @@ Removes the activity from the action.
 
 **Note:** a step's default `Submit` action created by `AddAll` may already carry default (empty) `SendEmail` activities. If you want only your activity to run, `delete` those first.
 
-**Two activity types with verified quirks. Check these before debugging a configuration:**
+**Two activity types with verified quirks — check these before debugging a configuration:**
 
 - `AddDataIntegrityHashActivity` writes the hash to a **mangled** path, not the configured one (pitfall #69 in `references/common-pitfalls.md`).
-- `UpdateAssetValueActivity`'s `entityTypeComponentId` is never dereferenced, and the schema itself says so (pitfall #70).
+- `UpdateAssetValueActivity`'s `entityTypeComponentId` is never dereferenced — the schema itself says so (pitfall #70).
 
 ### Conditional activities (`condition`)
 
@@ -524,4 +524,4 @@ When created with `AddAll` flags, flows get these default columns automatically:
 4. **Not publishing after action changes** — changes are invisible until `publish_flow` is called
 5. **Using `actionTypeName: "Stop"` for routing actions** — `"Stop"` terminates the step/flow. Use `"Submit"` for actions that route to other steps, even rejection actions.
 6. **Missing `next` configuration** — without `next`, the action defaults to advancing to the next sequential step
-7. **Treating an action `condition` as enforcement, or as a filter on `actions[]`.** It is neither. The submit is not gated by it, and both sides of a mutually exclusive pair are offered. Decide the branch yourself, then check the event is present. See § Action conditions (`condition`).
+7. **Treating an action `condition` as enforcement, or as a filter on `actions[]`** — it is neither. The submit is not gated by it, and both sides of a mutually exclusive pair are offered. Decide the branch yourself, then check the event is present. See § Action conditions (`condition`).
