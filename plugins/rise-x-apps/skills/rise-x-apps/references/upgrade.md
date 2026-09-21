@@ -58,7 +58,11 @@ approval gate, because no screen changes. Don't run it through those out of
 habit.
 
 1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
-   outside), then `pnpm install`.
+   outside), then `pnpm install`. If the app passes `useHistory` to
+   `agents.run` or `deps.<alias>.agent.run` — `useHistory: false` is what the
+   old skill taught — delete the argument: 0.14.0 drops it, so the build fails
+   on it, and the gateway ignores the flag anyway, so those runs are already
+   being logged.
 2. **Move the build onto the preset.** Read the app's dev port out of
    `webpack.local.config.js` first (`devServer.port`) — that file goes in this
    step and is the only place the value lives. Then delete `webpack.config.js`
@@ -90,9 +94,9 @@ habit.
    in components; `/connectors` in event handlers and lifecycle hooks. In an
    offline-capable app, bump `@rise-x/apps-sdk` to >= 0.12 before this step —
    that is where the hooks' offline-cache behaviour lives
-   (`references/offline.md` §4). Check that version is available first
-   (`npm view @rise-x/apps-sdk version`) — on an older SDK this step lands
-   without the offline behaviour.
+   (`references/offline.md` §4). Check what the app resolved first
+   (`node -p "require('./node_modules/@rise-x/apps-sdk/package.json').version"`)
+   — on an older SDK this step lands without the offline behaviour.
 5. **Move ids into `rise-x-app.json`** (needs the SDK version named in
    `references/build.md` §App dependencies). **Start by finding them — don't
    read the code hunting for GUIDs by hand:**

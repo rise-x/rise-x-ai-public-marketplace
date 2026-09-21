@@ -171,7 +171,7 @@ cleanly and still fail when it's run.
 | `model` | any non-blank string accepted and saved | must be one of the three supported models — `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`. Any other model name (including older `gpt-5`/`gpt-5.1`/`gpt-4*` names) is rejected at validation and fails the run |
 | `systemPrompt` length | any length accepted and saved | rejected at run time above 65,536 characters |
 | `defaultOpenAiTools[].name` | any non-blank string | must be one of `file_search`, `web_search`, `code_interpreter`, `image_generation` — anything else fails the run |
-| `file_search` config | `config` dict accepted as-is, no shape check | requires a non-empty `config.vector_store_ids` list (snake_case key, passed through verbatim) — missing it fails the run |
+| `file_search` config | `config` dict accepted as-is, no shape check | requires a non-empty `config.vector_store_ids` list (snake_case key, passed through verbatim); get real ids from `create_vector_store` (`references/managing-vector-stores.md`). Missing the list fails the run. Put ids here only for a corpus every user of this agent should search; a per-conversation or per-work-item corpus goes on `vector_store_ids` in the run call instead, not on the agent config |
 | `mcpServers` count | up to 50 | server-configured cap (default 5) |
 | `defaultOpenAiTools` count | up to 50 | server-configured cap (default 8) |
 
@@ -197,7 +197,10 @@ not a partial or best-effort degradation of just the offending server or tool.
 5. **`file_search` needs `config.vector_store_ids`** — a `defaultOpenAiTools` entry named
    `file_search` with no `vector_store_ids` (or an empty list) in its `config` saves fine and fails
    at run time. The key is snake_case inside `config` — the dict passes through verbatim, not
-   camelCased like the rest of the wire format.
+   camelCased like the rest of the wire format. Get real ids from `create_vector_store`
+   (`references/managing-vector-stores.md`); every user of this agent searches the same store
+   through this config, so reserve it for a genuinely shared corpus. A per-conversation or
+   per-work-item corpus belongs on `vector_store_ids` in the run call, not here.
 6. **`model` isn't checked against the runtime allowlist at save time** — `create_agent`/
    `update_agent` only reject a blank string. A typo'd or unsupported model name saves without
    complaint and only surfaces as a run-time failure.

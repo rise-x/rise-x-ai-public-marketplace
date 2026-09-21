@@ -1,11 +1,15 @@
 name: close-direct-prs
 
-# main takes pull requests from release/* and hotfix/* only.
+# main takes pull requests from release/*, release-kit/* and hotfix/* only.
 #
 # main is the live marketplace, so a merge into it reaches customers straight
 # away. Work is staged on a release branch and ships when that branch merges,
 # which means a feature merged directly into main skips the release it was
 # meant to be part of. A fix that genuinely cannot wait goes through hotfix/*.
+#
+# There are two release tracks, running independently: release/* ships the
+# plugins, release-kit/* ships the kit binary (kit/VERSION drives its tag).
+# A PR belongs on whichever one matches what it changes.
 #
 # This closes a wrongly targeted PR and says how to retarget it, so the branch
 # and the review history survive. It is a guardrail, not a gate: a ruleset
@@ -32,7 +36,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read        # listing the release/* refs below
+  contents: read        # listing the release/* and release-kit/* refs below
   pull-requests: write
 
 concurrency:
@@ -41,13 +45,17 @@ concurrency:
 
 jobs:
   close:
-    name: Close PRs not from release/* or hotfix/*
+    name: Close PRs not from release/*, release-kit/* or hotfix/*
     # The state check keeps an edit to an already-closed PR from posting a
     # second comment, since edited fires on closed PRs too.
+    #
+    # release-kit/ needs its own clause: it is not a release/ prefix, so the
+    # startsWith above does not cover it.
     if: >-
       github.event.pull_request.state == 'open'
       && github.event.pull_request.head.repo.full_name == github.repository
       && !startsWith(github.event.pull_request.head.ref, 'release/')
+      && !startsWith(github.event.pull_request.head.ref, 'release-kit/')
       && !startsWith(github.event.pull_request.head.ref, 'hotfix/')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -79,14 +87,21 @@ jobs:
           # the count below is what decides whether the advice is trustworthy.
           # One ref per line so pages flatten; a per-page join would leave one
           # line each and only the first would be read.
-          if ! refs="$(gh api --paginate "repos/${REPO}/git/matching-refs/heads/release/" \
+          if ! refs="$(gh api --paginate "repos/${REPO}/git/matching-refs/heads/release" \
                         --jq '.[].ref | sub("^refs/heads/";"")')"; then
             echo "::error::cannot list release branches"
             exit 1
           fi
+          # One call covers both tracks: the prefix has no trailing slash, so
+          # it matches release/* and release-kit/* alike. Anything else that
+          # merely starts with "release" is neither and is dropped.
           branches=()
+          kit_branches=()
           while IFS= read -r line; do
-            [[ -n "$line" ]] && branches+=("$line")
+            case "$line" in
+              release/*) branches+=("$line") ;;
+              release-kit/*) kit_branches+=("$line") ;;
+            esac
           done <<< "$refs"
           listing="${branches[*]:-}"
 
@@ -117,8 +132,25 @@ jobs:
               ;;
           esac
 
+          # The kit ships on its own track, so a PR that only changes kit/**
+          # has a different home from a plugin change. Named here rather than
+          # folded into the case above, because the two tracks are open or
+          # closed independently of each other.
+          case "${#kit_branches[@]}" in
+            0)
+              kit_note="Changing the kit (\`kit/**\`) instead? That ships on its own \`release-kit/*\` branch, and none is open. Ask a maintainer to run the **create-release-kit** workflow."
+              ;;
+            1)
+              kit_note="Changing the kit (\`kit/**\`) instead? That ships on its own track, so retarget onto \`${kit_branches[0]//\`/}\` rather than the branch above: \`gh pr edit ${PR} --base $(sq "${kit_branches[0]}")\`."
+              ;;
+            *)
+              echo "::warning::${#kit_branches[@]} release-kit branches exist; only one should be open at a time"
+              kit_note="Changing the kit (\`kit/**\`) instead? That ships on its own \`release-kit/*\` branch, but ${#kit_branches[@]} are open at once. Check with a maintainer which is current."
+              ;;
+          esac
+
           {
-            echo "Closing this: \`main\` takes pull requests from \`release/*\` and \`hotfix/*\` only, and this one comes from \`${safe_ref}\`."
+            echo "Closing this: \`main\` takes pull requests from \`release/*\`, \`release-kit/*\` and \`hotfix/*\` only, and this one comes from \`${safe_ref}\`."
             echo
             echo "\`main\` is the live marketplace. Merging into it publishes to customers immediately, so changes are staged on a release branch and ship when that branch merges. A feature merged straight into \`main\` skips the release it belongs to."
             echo
@@ -131,6 +163,8 @@ jobs:
             echo
             echo "Reopening first would only close it again, because the base would still be \`main\`."
             echo
+            echo "${kit_note}"
+            echo
             echo "${closing}"
           } > "$RUNNER_TEMP/comment.md"
 
@@ -138,5 +172,5 @@ jobs:
           {
             echo "## Closed #${PR}"
             echo
-            echo "Head \`${safe_ref}\` is neither \`release/*\` nor \`hotfix/*\`."
+            echo "Head \`${safe_ref}\` is none of \`release/*\`, \`release-kit/*\`, or \`hotfix/*\`."
           } >> "$GITHUB_STEP_SUMMARY"

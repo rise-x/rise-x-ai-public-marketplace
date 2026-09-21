@@ -1,0 +1,16 @@
+/* style.css — the handful of rules the app needs on top of the design system
+   (rise-x-ui.css) and the shared component bases (kit.css). Everything the
+   mock already covers lives in kit.css; only page behaviour is here. */
+
+/* The design system's list-none utility hides the marker in Chrome and
+   Firefox; Safari needs its own pseudo-element. */
+summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The activity drawer is sticky, so its list scrolls instead of pushing the
+   page content out of view when several jobs have run. */
+.kit-jobs-panel {
+  max-height: 46vh;
+  overflow-y: auto;
+}
