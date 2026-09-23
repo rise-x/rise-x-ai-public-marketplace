@@ -144,7 +144,7 @@ If a token path does not resolve (wrong path, unset field), it collapses to an e
 
 | Property | Type | Description |
 |---|---|---|
-| `targetEcosystemId` | guid | **Required.** The target ecosystem (environment) id — get it from `list_ecosystems`. |
+| `targetEcosystemId` | guid | **Required.** The target ecosystem (environment) id. Resolve it **by name** with `resolve_ecosystem(ecosystem_name)`, which also reaches ecosystems you are not a member of — `list_ecosystems` only lists your own memberships and returns nothing for the rest. **Never take this id from a flow's or work item's `environmentId`**: that can be stale seed/template data, and it fails at run time as `ecosystem-not-found` (or `ecosystem-flow-mismatch`). |
 | `targetFlowOriginId` | guid | **Required.** The target flow's `flowOriginId` (stable across versions) — the latest published version is resolved at run time. |
 | `stepName` | string | Optional step in the target flow to start at. |
 | `publishData` | list[str] | JSON paths copied from the source work into the new work. Use **root keys** (`"$.fullName"`), matching the component `dataPath` — NOT `"$.data.fullName"`. Each path is read from the source and stored at the same key on the target. |
