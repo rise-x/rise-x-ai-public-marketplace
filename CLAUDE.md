@@ -119,12 +119,8 @@ Release-blocking dependencies:
   `gh pr create` command in their run summary. Refreshing an already-open PR
   is unaffected, since editing is not creating.
 
-  To automate the one manual step, mint a GitHub App token with Contents read
-  and Pull requests write the way `sync-internal-marketplace` does, and use it
-  in place of `github.token` in `release-pr`. The `rise-x-marketplace-sync`
-  App is installed on the private marketplace only, so that means installing
-  it on this repo too or registering a second App. A fine-grained PAT also
-  works, but it expires and has to be renewed by hand.
+  To automate the one manual step, use a GitHub App token with Contents read
+  and Pull requests write in place of `github.token` in `release-pr`.
 
   After opening the PR, run `release-pr` by hand on the release branch to fill
   in the body straight away rather than waiting for the next push. Re-running
@@ -157,16 +153,11 @@ via `scripts/sync-internal-versions.sh`. There is no scheduled retry: if a
 push-triggered run fails, the release does not propagate until someone
 re-runs it or triggers a manual dispatch.
 
-- The `rise-x-marketplace-sync` GitHub App is a release-blocking dependency.
-  It is org-owned and installed on `rise-x/rise-x-ai-marketplace` only, with
-  Contents and Pull requests read/write. Each run mints a one-hour token from
-  the `SYNC_APP_ID` repo variable and the `SYNC_APP_PRIVATE_KEY` repo secret,
-  so nothing expires between runs. If the key is deleted from the App or the
-  App is uninstalled, releases stop propagating until a new key is in the
-  secret or the App is reinstalled.
-- The sync PR still needs one approval in the private repo and resolved
-  review threads before auto-merge lands it. It is authored by
-  `rise-x-marketplace-sync[bot]`, so any approver there can give it.
+- The sync authenticates as an org-owned GitHub App, which is a
+  release-blocking dependency: if the App loses access, releases stop
+  propagating until it is restored.
+- The sync PR still needs approval in the private repo and resolved review
+  threads before auto-merge lands it.
 - A plugin with no `git-subdir` entry in the private marketplace is skipped
   with a warning, not an error — check the run log when adding plugins.
 
