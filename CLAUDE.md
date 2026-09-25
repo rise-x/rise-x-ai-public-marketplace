@@ -119,10 +119,8 @@ Release-blocking dependencies:
   `gh pr create` command in their run summary. Refreshing an already-open PR
   is unaffected, since editing is not creating.
 
-  To automate the one manual step, give the repo a fine-grained PAT or GitHub
-  App token with Contents read and Pull requests write, and use it in place of
-  `github.token` in `release-pr`. That trades the manual command for a second
-  expiring credential, on top of `PRIVATE_MARKETPLACE_TOKEN`.
+  To automate the one manual step, use a GitHub App token with Contents read
+  and Pull requests write in place of `github.token` in `release-pr`.
 
   After opening the PR, run `release-pr` by hand on the release branch to fill
   in the body straight away rather than waiting for the next push. Re-running
@@ -155,13 +153,11 @@ via `scripts/sync-internal-versions.sh`. There is no scheduled retry: if a
 push-triggered run fails, the release does not propagate until someone
 re-runs it or triggers a manual dispatch.
 
-- The `PRIVATE_MARKETPLACE_TOKEN` repo secret is a release-blocking
-  dependency: a fine-grained PAT (or GitHub App token) scoped to
-  `rise-x/rise-x-ai-marketplace` with Contents and Pull requests read/write.
-  If it expires, releases stop propagating until it is reprovisioned.
-- The sync PR still needs one approval in the private repo (from someone
-  other than the token owner) and resolved review threads before auto-merge
-  lands it.
+- The sync authenticates as an org-owned GitHub App, which is a
+  release-blocking dependency: if the App loses access, releases stop
+  propagating until it is restored.
+- The sync PR still needs approval in the private repo and resolved review
+  threads before auto-merge lands it.
 - A plugin with no `git-subdir` entry in the private marketplace is skipped
   with a warning, not an error — check the run log when adding plugins.
 
