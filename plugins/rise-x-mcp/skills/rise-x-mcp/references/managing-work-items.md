@@ -156,15 +156,6 @@ it before you retry. The tool never makes a second write attempt, so there is no
 state of its own making. An all-`set` batch is idempotent, so re-sending the identical call
 after a `transient` error is safe.
 
-> **Older API builds: `400: Object reference not set to an instance of an object` on a new
-> work item.** Before a backend fix, the batch endpoint could not create a work item's data
-> record, so the **first** bulk write to a work item nothing had been written to failed with
-> that bare 400 — every time, on every fresh item. Current builds create the record, and
-> `create_work` / `create_asset` → `update_work_data_bulk` → `submit_work` works on a
-> brand-new item. If you do hit that exact 400 on a fresh item, the environment predates the
-> fix: write **one** field with `update_work_data` (which does create the record), then
-> re-send the rest with `update_work_data_bulk`. Any other 400 is a real failure — read it.
-
 `set` is the only operation the batch endpoint offers. For `push` / `pull` / `rename`, use
 `update_work_data`. That is why both tools exist — this one is not a replacement.
 
