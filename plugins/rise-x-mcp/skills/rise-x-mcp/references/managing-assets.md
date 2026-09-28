@@ -66,7 +66,7 @@ Step 2: Set every field value in ONE call
   # If it is absent the read-back failed and nothing is known: call get_work.
   # A `dropped_value` warning means that path did not land — fix the path.
   # Note: storing a value is not proof the path is one the flow reads
-  # (pitfall #66), so get the paths from get_asset_type_properties first.
+  # (pitfall #67), so get the paths from get_asset_type_properties first.
   # For push / pull / rename, use update_work_data instead, one field per call.
   # Which writer to use when: § Writing Asset Data below.
 

@@ -105,9 +105,9 @@ For dynamic `data.*` paths in the filter, call `get_flow_data_schema(flow_origin
 Set **many** work-data fields in ONE request. Prefer this over repeated `update_work_data`
 calls whenever writing more than one field — it wraps the v4 batch endpoint
 (`PATCH /api/v4/work/{id}/data/batch`), where every entry of `fields` is its own `set` op and
-all of them are applied together. The request count is **constant, not always literally one**:
-the first write to a brand-new work item costs two (see below), every other call costs one.
-Either way it never costs N.
+all of them are applied together in **one** write request, whatever the field count —
+including the very first write to a brand-new work item. (The tool also issues two reads: one
+before the write to resolve ids, one after it to verify.)
 
 **Not every server has this release.** The tool arrives with the v4 batch endpoint, and
 environments upgrade independently of marketplace releases. If the server reports no such
@@ -150,21 +150,20 @@ back to per-field `update_work_data` calls, run sequentially.
 Other error codes it can return before writing anything: `origin_unresolved` (the work
 carries no `flowOriginId` — the usual cause is passing an **entity** id where a work id
 belongs, cf. pitfall #7) and `unexpected_response` (the pre-write read of the work came back
-as a non-object; retry). A failure at the write itself normally means **no** field was
-written — the error hint says so, and `get_work(id)` confirms it before you retry. An
-all-`set` batch is idempotent, so re-sending the identical call after a `transient` error is
-safe.
+as a non-object; retry). Because the batch is one request, a failure at the write itself
+normally means **no** field was written — the error hint says so, and `get_work(id)` confirms
+it before you retry. The tool never makes a second write attempt, so there is no partial
+state of its own making. An all-`set` batch is idempotent, so re-sending the identical call
+after a `transient` error is safe.
 
-**The one exception, on the very first write to a brand-new work item.** The batch endpoint
-cannot create a work item's data record — only write into one that exists — so on a work
-nothing has been written to yet, the tool seeds the record with the first field through the
-single-field endpoint and batches the remainder. That is **two** requests instead of one,
-and it happens once per work item; every later call is a single request. The call and the
-response are identical either way, so nothing about how you use the tool changes. The
-consequence worth knowing: on that first call alone, a failure can leave the seeded field
-written while the rest did not land — the error's hint says so, and it is the one case where
-`get_work(id)` can show partial data after a reported failure. Everywhere else the batch is
-all-or-nothing.
+> **Older API builds: `400: Object reference not set to an instance of an object` on a new
+> work item.** Before a backend fix, the batch endpoint could not create a work item's data
+> record, so the **first** bulk write to a work item nothing had been written to failed with
+> that bare 400 — every time, on every fresh item. Current builds create the record, and
+> `create_work` / `create_asset` → `update_work_data_bulk` → `submit_work` works on a
+> brand-new item. If you do hit that exact 400 on a fresh item, the environment predates the
+> fix: write **one** field with `update_work_data` (which does create the record), then
+> re-send the rest with `update_work_data_bulk`. Any other 400 is a real failure — read it.
 
 `set` is the only operation the batch endpoint offers. For `push` / `pull` / `rename`, use
 `update_work_data`. That is why both tools exist — this one is not a replacement.
@@ -177,7 +176,8 @@ way to know (see below):
 - `warnings[]` — `dropped_value` for each path the API accepted but did not store (check the
   flow's data schema with `get_flow_data_schema` for the real path);
   `unverified_writes` as a rollup whenever `persisted < requested`; `no_verification` when the
-  read-back itself failed. A path can also come back with the general echo-diff codes
+  read-back itself failed, **or per path for a value of `null`** (see below). A path can also
+  come back with the general echo-diff codes
   `value_differs`, `dropped_property` or `dropped_item` when the stored value only partly
   matches the request.
 - The envelope also carries `workId`, `sectionId` and `originId`.
@@ -202,7 +202,15 @@ failure":
 | `value_differs` | The write reached the field, but the stored value is not the one you sent | **Compare `requested` against `actual`.** Cosmetic difference (formatting, ordering that carries no meaning) → accept it. Semantic difference — a date read as a different day, a list that came back reordered or short — → the **value or its type** is wrong, so fix the value. Either way, do not re-send the same value: it will be transformed identically |
 | `dropped_value` | The value is not there; the old one still is | Fix the **path**, not the call. Retrying the same path is equally futile |
 | `unverified_writes` | Rollup: `persisted < requested` | Read the per-path warnings above it; it adds no information of its own |
-| `no_verification` | The read-back failed; nothing is known | Call `get_work(id)` |
+| `no_verification` (no `path`) | The read-back failed; nothing is known | Call `get_work(id)` |
+| `no_verification` (with a `path`) | You wrote `null` there. A stored null and an absent path read back identically, so the write can be neither confirmed nor refuted, and it is **never** counted in `changed` / `counts.persisted` | To clear a field, send `""` / `[]` / `{}` instead — those are verified. If it must be `null`, confirm with `get_work(id)` |
+
+**A work item with no `data` document confirms nothing.** If the read-back finds `data` absent
+or `null`, every path except a clear (`""` / `[]` / `{}`, whose target state *is* absent) is
+reported as `dropped_value` — the tool deliberately does not fall back
+to the work's top-level fields, which are a different namespace (top-level `displayName` is the
+**flow** name, while a write lands in `data.displayName`), so a coincidental match there would
+be a false confirmation.
 
 A `persisted` below `requested` is therefore not, on its own, grounds for reporting failure —
 but it is never grounds for reporting success either. Look at what each warning names first: the
