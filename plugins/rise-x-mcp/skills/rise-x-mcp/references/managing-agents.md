@@ -35,7 +35,7 @@ Fields are camelCase on the wire:
 | `name` | string | required, non-blank |
 | `description` | string \| null | free text |
 | `systemPrompt` | string \| null | free text; runtime caps it at 65,536 characters — see §Writing the System Prompt |
-| `model` | string | required, non-blank; **not** validated against the runtime's model allowlist at save time — see §Choosing a Model |
+| `model` | string | a model tier: `"fast"`, `"balanced"`, or `"advanced"`. `create_agent`/`update_agent` reject any other value client-side. See §Choosing a Model |
 | `mcpServers` | list of `McpServerConfig` | max 50 entries |
 | `defaultOpenAiTools` | list of `OpenAiToolConfig` | max 50 entries |
 | `lastModified` / `lastModifiedBy` | — | server-managed, read-only |
@@ -60,19 +60,23 @@ Fields are camelCase on the wire:
 
 ## Choosing a Model
 
-The platform supports exactly three models — any other model name is **rejected at validation**
-when the agent runs (see §Config API vs. Runtime Capability Matrix):
+An agent names a **model tier**, not an OpenAI model. The runtime maps each tier to a model and
+a reasoning effort on every run, so the platform can move a tier to a different model without
+anyone editing the stored agents.
 
-| model | tier | good for |
-|---|---|---|
-| `gpt-5.6-luna` | economical default | simple, high-volume agents |
-| `gpt-5.6-terra` | mid | everyday agents needing more capability |
-| `gpt-5.6-sol` | premium | demanding agents where quality matters most |
+| tier | good for |
+|---|---|
+| `fast` | simple, high-volume agents: summarizing documents, extracting fields, answering quick questions |
+| `balanced` | everyday agents that need more capability; pick this one when unsure |
+| `advanced` | demanding agents where quality matters most, such as multi-step reasoning over many tools |
 
-All three share the same 1,050,000-token context window and 128,000-token max output, so the
-choice is about cost and capability, not window size. All three also carry a pricing cliff: prompts
-above 272,000 input tokens are billed at 2x input / 1.5x output for the **entire** request, not
-just the tokens over the line — keep prompts under that threshold where practical.
+`create_agent` and `update_agent` accept only these three values. An OpenAI model name such as
+`gpt-6-sol` is rejected before any network call.
+
+Agents saved before tiers existed can still carry `gpt-5.6-luna`, `gpt-5.6-terra`, or
+`gpt-5.6-sol`. They keep running: `gpt-5.6-luna` runs as `fast`, and the other two run as
+`balanced`. `update_agent` doesn't accept those names, so to change such an agent's model, pass
+a tier.
 
 ## Writing the System Prompt
 
@@ -97,7 +101,7 @@ best practices when authoring one:
 # 1. Create
 create_agent(
   name: "Support Bot"
-  model: "gpt-5.6-terra"
+  model: "balanced"
   system_prompt: "You help customers track their shipments."
   mcp_servers:
     - {name: "kb", url: "https://mcp.example.com/kb", transport: "Http",
@@ -141,7 +145,8 @@ mutation tool in this skill (see main SKILL.md § Response Envelopes & Verificat
 | `""` on `description` / `system_prompt` | clears the stored value |
 | `[]` on `mcp_servers` / `default_open_ai_tools` | clears the whole list |
 | non-empty list on `mcp_servers` / `default_open_ai_tools` | **replaces the whole list** — no per-item merge or append; include every server/tool you want to keep |
-| non-blank `name` / `model` | overwrites; a blank value is rejected client-side |
+| non-blank `name` | overwrites; a blank value is rejected client-side |
+| `model` tier | overwrites; anything other than `"fast"`/`"balanced"`/`"advanced"` is rejected client-side |
 
 ## Secret Redaction & Round-Trips
 
@@ -168,7 +173,7 @@ cleanly and still fail when it's run.
 | `transport` | `"Http"` / `"Sse"` accepted; **`"Stdio"` rejected client-side** by the MCP tools (the runtime can't run Stdio servers yet) | same restriction |
 | `authType` | `"None"` / `"Bearer"` / `"ApiKey"` / `"CallerToken"` all accepted and saved | **only `"None"` and `"CallerToken"` are honored.** A saved `"Bearer"`/`"ApiKey"` MCP server fails the **entire run** — stored secrets are always redacted on read, so the runtime has no way to resolve them yet |
 | `CallerToken` reach | not checked | forwards the signed-in user's own token to the MCP server's host; the runtime only allows this to a server-configured allowlist of vetted hosts, and blocks private/loopback/link-local URLs outright |
-| `model` | any non-blank string accepted and saved | must be one of the three supported models — `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`. Any other model name (including older `gpt-5`/`gpt-5.1`/`gpt-4*` names) is rejected at validation and fails the run |
+| `model` | only `"fast"` / `"balanced"` / `"advanced"`; anything else is rejected client-side | the three tiers, plus the legacy `gpt-5.6-luna`/`gpt-5.6-terra`/`gpt-5.6-sol` on agents saved before tiers existed. Any other value, including a current OpenAI model name, is rejected at validation and fails the run |
 | `systemPrompt` length | any length accepted and saved | rejected at run time above 65,536 characters |
 | `defaultOpenAiTools[].name` | any non-blank string | must be one of `file_search`, `web_search`, `code_interpreter`, `image_generation` — anything else fails the run |
 | `file_search` config | `config` dict accepted as-is, no shape check | requires a non-empty `config.vector_store_ids` list (snake_case key, passed through verbatim); get real ids from `create_vector_store` (`references/managing-vector-stores.md`). Missing the list fails the run. Put ids here only for a corpus every user of this agent should search; a per-conversation or per-work-item corpus goes on `vector_store_ids` in the run call instead, not on the agent config |
@@ -201,9 +206,10 @@ not a partial or best-effort degradation of just the offending server or tool.
    (`references/managing-vector-stores.md`); every user of this agent searches the same store
    through this config, so reserve it for a genuinely shared corpus. A per-conversation or
    per-work-item corpus belongs on `vector_store_ids` in the run call, not here.
-6. **`model` isn't checked against the runtime allowlist at save time** — `create_agent`/
-   `update_agent` only reject a blank string. A typo'd or unsupported model name saves without
-   complaint and only surfaces as a run-time failure.
+6. **`model` takes a tier, not a model name.** `create_agent`/`update_agent` reject
+   `"gpt-6-sol"`-style names outright. Don't copy a `gpt-5.6-*` value from `get_agent` into
+   `update_agent`: those legacy names still run, but they can't be written back. Pass a tier
+   instead.
 7. **Always check `warnings[]`** — same rule as every other mutation tool in this skill. A
    `dropped_property`/`dropped_item` warning means part of your `mcpServers`/`defaultOpenAiTools`
    request did not persist.
