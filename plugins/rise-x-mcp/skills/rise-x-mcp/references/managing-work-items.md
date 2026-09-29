@@ -190,7 +190,7 @@ failure":
 
 | Warning | What it means | What to do |
 |---|---|---|
-| `value_differs` | The write reached the field, but the stored value is not the one you sent | **Compare `requested` against `actual`.** Cosmetic difference (formatting, ordering that carries no meaning) → accept it. Semantic difference — a date read as a different day, a list that came back reordered or short — → the **value or its type** is wrong, so fix the value. Either way, do not re-send the same value: it will be transformed identically |
+| `value_differs` | The write reached the field, but the stored value is not the one you sent | **Compare `requested` against `actual`.** Cosmetic difference (formatting only — e.g. the same date in another format) → accept it. Semantic difference — a date read as a different day, a list that came back reordered or short — → the **value or its type** is wrong, so fix the value. Either way, do not re-send the same value: it will be transformed identically |
 | `dropped_value` | The value is not there; the old one still is | Fix the **path**, not the call. Retrying the same path is equally futile |
 | `unverified_writes` | Rollup: `persisted < requested` | Read the per-path warnings above it; it adds no information of its own |
 | `no_verification` (no `path`) | The read-back failed; nothing is known | Call `get_work(id)` |
