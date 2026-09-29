@@ -62,7 +62,8 @@ Step 2: Set every field value in ONE call
                               # update_work_data needs get_flow_step.
   )
   # Read `changed` and `counts` on the response — they say which paths actually
-  # persisted, so no follow-up get_work is needed WHEN `changed` is present.
+  # persisted, so no follow-up get_work is needed WHEN `changed` is present
+  # (a path written as null is the exception: per-path no_verification).
   # If it is absent the read-back failed and nothing is known: call get_work.
   # A `dropped_value` warning means that path did not land — fix the path.
   # Note: storing a value is not proof the path is one the flow reads
@@ -234,7 +235,8 @@ update_work_data_bulk(
     section_name="UntitledTask/Generated-xxx",
 )
 # Response carries changed: [...all four paths...] and counts: {requested: 4,
-# persisted: 4}. Anything less, and the warnings name the paths that did not land.
+# persisted: 4}. Anything less, and the warnings name each path and why — not all
+# of them mean the value was lost (see managing-work-items.md § What to do with each).
 
 # 6. Fallback only — step 4's response normally carries the resolved stepName,
 #    eventName and invitation (Common Mistakes #7 and #8); use those. If it did not:

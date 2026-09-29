@@ -156,11 +156,21 @@ it before you retry. The tool never makes a second write attempt, so there is no
 state of its own making. An all-`set` batch is idempotent, so re-sending the identical call
 after a `transient` error is safe.
 
+> **Older API builds: `400: Object reference not set to an instance of an object` on a new
+> work item.** Before a backend fix, the batch endpoint could not create a work item's data
+> record, so the **first** bulk write to a work item nothing had been written to failed with
+> that bare 400 — every time, on every fresh item. Current builds create the record, and
+> `create_work` / `create_asset` → `update_work_data_bulk` → `submit_work` works on a
+> brand-new item. If you do hit that exact 400 on a fresh item, the environment predates the
+> fix: write **one** field with `update_work_data` (which does create the record), then
+> re-send the rest with `update_work_data_bulk`. Any other 400 is a real failure — read it.
+
 `set` is the only operation the batch endpoint offers. For `push` / `pull` / `rename`, use
 `update_work_data`. That is why both tools exist — this one is not a replacement.
 
 **It reads the values back**, which `update_work_data` does not. When `changed` is present no
-follow-up `get_work` is needed to find out what persisted — when it is absent, one is the only
+follow-up `get_work` is needed to find out what persisted (except for a path written as `null`,
+which comes back as a per-path `no_verification`) — when it is absent, one is the only
 way to know (see below):
 - `changed` — the paths confirmed stored with the requested value.
 - `counts` — `{requested, persisted}`.
@@ -192,16 +202,9 @@ failure":
 |---|---|---|
 | `value_differs` | The write reached the field, but the stored value is not the one you sent | **Compare `requested` against `actual`.** Cosmetic difference (formatting only — e.g. the same date in another format) → accept it. Semantic difference — a date read as a different day, a list that came back reordered or short — → the **value or its type** is wrong, so fix the value. Either way, do not re-send the same value: it will be transformed identically |
 | `dropped_value` | The value is not there; the old one still is | Fix the **path**, not the call. Retrying the same path is equally futile |
-| `unverified_writes` | Rollup: `persisted < requested` | Read the per-path warnings above it; it adds no information of its own |
+| `unverified_writes` | Rollup: `persisted < requested` | Read the per-path warnings above it; it adds no information of its own. Expected whenever the call includes a `null`, since a `null` is never counted as persisted |
 | `no_verification` (no `path`) | The read-back failed; nothing is known | Call `get_work(id)` |
 | `no_verification` (with a `path`) | You wrote `null` there. A stored null and an absent path read back identically, so the write can be neither confirmed nor refuted, and it is **never** counted in `changed` / `counts.persisted` | To clear a field, send `""` / `[]` / `{}` instead — those are verified. If it must be `null`, confirm with `get_work(id)` |
-
-**A work item with no `data` document confirms nothing.** If the read-back finds `data` absent
-or `null`, every path except a clear (`""` / `[]` / `{}`, whose target state *is* absent) is
-reported as `dropped_value` — the tool deliberately does not fall back
-to the work's top-level fields, which are a different namespace (top-level `displayName` is the
-**flow** name, while a write lands in `data.displayName`), so a coincidental match there would
-be a false confirmation.
 
 A `persisted` below `requested` is therefore not, on its own, grounds for reporting failure —
 but it is never grounds for reporting success either. Look at what each warning names first: the
@@ -210,8 +213,8 @@ it as a real divergence until you have compared the two values and seen otherwis
 
 **`changed` absent is not `changed: []`.** When the read-back fails, `changed` is **omitted**
 and `counts` carries `requested` only — verification did not run, so nothing is known about
-what landed. An empty `changed` is the opposite claim: verification ran and confirmed nothing
-persisted. Never read an absent `changed` as "nothing persisted".
+what landed. An empty `changed` with no per-path `no_verification` is the opposite claim: verification ran
+and confirmed nothing persisted. Never read an absent `changed` as "nothing persisted".
 
 Verification is `set`-strict: clearing a field with `""` / `[]` / `{}` is confirmed only if the
 stored value really is empty, and a list must read back with the requested number of entries.

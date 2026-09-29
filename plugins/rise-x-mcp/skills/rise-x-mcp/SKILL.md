@@ -69,7 +69,11 @@ error: {code, message, hint}      # failures (code like http_403, validation)
    `dropped_property` / `dropped_item` / `component_missing`. A warning means
    that part of your request did NOT land — do not report success to the user.
    Codes also include `unverified_writes` and `no_verification`, from
-   `update_work_data_bulk`'s read-back.
+   `update_work_data_bulk`'s read-back (it re-reads the work after writing).
+   One exception: a `no_verification` that names a `path` means you wrote
+   `null` there, which the read-back cannot confirm; `unverified_writes` then
+   fires as well. Neither is a failure — confirm with `get_work(id)`, or clear
+   with `""` / `[]` / `{}`, which are verified.
    Work **data** is the one place this rule does not hold uniformly: a write to
    an unmodeled `dataPath` may drop or may persist, depending on the
    deployment. `update_work_data_bulk` re-reads the work and reports `changed` /
