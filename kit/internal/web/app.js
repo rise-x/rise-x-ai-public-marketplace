@@ -15,6 +15,7 @@
  *       autoUpdate?: bool,   // absent = key not set in settings.json
  *       autoUpdateMarketplace?: string, // absent = rise-x-public
  *       headStale?: bool,   // absent = GitHub unreachable, skipped
+ *       skillsSource?: string, // set = no skill comes from rise-x-public
  *       settingsError?: bool, // true = settings.json is not valid JSON
  *       checkError?: string }, // set = the marketplace list could not be
  *                              // read, so registered says nothing
@@ -986,6 +987,9 @@ function catalogStatus(marketplace) {
     variant: "outline",
   });
 
+  if (marketplace.skillsSource) {
+    return `<span class="inline-flex items-center gap-1.5">${dot("bg-success", "Current")} Skills come from ${esc(marketplace.skillsSource)}</span>`;
+  }
   if (marketplace.checkError) {
     return `<span class="inline-flex items-center gap-1.5" title="${esc(marketplace.checkError)}">${dot("bg-fill-3", "Not checked")} Kit could not check the catalog just now</span>`;
   }

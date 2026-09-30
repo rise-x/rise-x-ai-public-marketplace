@@ -213,7 +213,8 @@ func (s *Server) gatherClaude(ctx context.Context, client *claudecli.Client, set
 		overview.Marketplace.InstallLocation = installLocation
 	}
 	s.gatherPlugins(ctx, installLocation, plResult, plErr, overview, facts)
-	if mp != nil {
+	overview.Marketplace.SkillsSource = doctor.SkillsSource(facts.Plugins)
+	if mp != nil && overview.Marketplace.SkillsSource == "" {
 		s.gatherHead(ctx, mp, overview, facts)
 	}
 

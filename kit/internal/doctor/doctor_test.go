@@ -513,6 +513,56 @@ func TestRun_AllSkillsFromOrganisation(t *testing.T) {
 	}
 }
 
+func TestSkillsSource(t *testing.T) {
+	org := PluginFact{Installed: true, InstallSource: SourceOrganisation}
+	mirror := PluginFact{Installed: true, InstallSource: SourceMarketplace, SourceName: "rise-x"}
+	other := PluginFact{Installed: true, InstallSource: SourceMarketplace, SourceName: "acme"}
+	desktop := PluginFact{Installed: true, InstallSource: SourceDesktop, SourceName: "rise-x"}
+	public := PluginFact{Installed: true, InstallSource: SourcePublic}
+	missing := PluginFact{}
+	cases := []struct {
+		name    string
+		plugins []PluginFact
+		want    string
+	}{
+		{"none", nil, ""},
+		{"organisation", []PluginFact{org, org}, "your organisation"},
+		{"one mirror", []PluginFact{mirror, mirror}, "rise-x"},
+		{"two mirrors", []PluginFact{mirror, other}, "another marketplace"},
+		{"mirror and desktop", []PluginFact{mirror, desktop}, "another marketplace"},
+		{"one from public", []PluginFact{mirror, public}, ""},
+		{"one not installed", []PluginFact{mirror, missing}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SkillsSource(tc.plugins); got != tc.want {
+				t.Fatalf("SkillsSource = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// With every skill from another marketplace, the public one serves nothing
+// here: its catalog is neither asked for nor offered an update.
+func TestRun_AllSkillsFromMirror(t *testing.T) {
+	f := baseFacts()
+	f.MarketplaceRegistered, f.HeadStale = false, true
+	for i := range f.Plugins {
+		f.Plugins[i].InstallSource, f.Plugins[i].SourceName = SourceMarketplace, "rise-x"
+	}
+	checks := Run(f)
+
+	if c := findCheck(t, checks, "marketplace.registered"); c.Status != StatusOK || c.Fix != "" ||
+		c.Message != "Skills come from rise-x." {
+		t.Fatalf("marketplace.registered = %+v", c)
+	}
+	f.MarketplaceRegistered = true
+	if c := findCheck(t, Run(f), "marketplace.head"); c.Status != StatusSkip || c.Fix != "" ||
+		c.Message != "Not used here: skills come from rise-x." {
+		t.Fatalf("marketplace.head = %+v", c)
+	}
+}
+
 // Skills from a mirror of the public marketplace are governed by that mirror's
 // own auto-update flag, so the fix has to name it.
 func TestRun_AutoUpdate_OtherMarketplace(t *testing.T) {
