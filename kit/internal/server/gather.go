@@ -213,8 +213,12 @@ func (s *Server) gatherClaude(ctx context.Context, client *claudecli.Client, set
 		overview.Marketplace.InstallLocation = installLocation
 	}
 	s.gatherPlugins(ctx, installLocation, plResult, plErr, overview, facts)
-	overview.Marketplace.SkillsSource = doctor.SkillsSource(facts.Plugins)
-	if mp != nil && overview.Marketplace.SkillsSource == "" {
+	src := doctor.SkillsSource(facts.Plugins)
+	if src != "" && mp != nil && s.remoteHasUnlisted(ctx, facts.Plugins) {
+		src, facts.CatalogUnlisted = "", true
+	}
+	overview.Marketplace.SkillsSource = src
+	if mp != nil && src == "" {
 		s.gatherHead(ctx, mp, overview, facts)
 	}
 
@@ -475,6 +479,23 @@ func readMcpConfig(installPath string) []mcp.ConfiguredServer {
 		return nil
 	}
 	return cfg
+}
+
+// remoteHasUnlisted reports whether GitHub's catalog names a plugin the rows
+// were not built from: a skill the stale local clone hides until refreshed.
+func (s *Server) remoteHasUnlisted(ctx context.Context, plugins []doctor.PluginFact) bool {
+	ctx, cancel := context.WithTimeout(ctx, remoteCatalogTimeout)
+	defer cancel()
+	names, err := s.catalog.CatalogNames(ctx)
+	if err != nil {
+		return false
+	}
+	for _, name := range names {
+		if !slices.ContainsFunc(plugins, func(p doctor.PluginFact) bool { return p.Name == name }) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) gatherHead(ctx context.Context, mp *claudecli.Marketplace, overview *OverviewResponse, facts *doctor.Facts) {

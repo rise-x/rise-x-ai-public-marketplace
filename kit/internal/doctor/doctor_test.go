@@ -518,6 +518,8 @@ func TestSkillsSource(t *testing.T) {
 	mirror := PluginFact{Installed: true, InstallSource: SourceMarketplace, SourceName: "rise-x"}
 	other := PluginFact{Installed: true, InstallSource: SourceMarketplace, SourceName: "acme"}
 	desktop := PluginFact{Installed: true, InstallSource: SourceDesktop, SourceName: "rise-x"}
+	desktopPublic := PluginFact{Installed: true, InstallSource: SourceDesktop, SourceName: "rise-x-public"}
+	desktopOther := PluginFact{Installed: true, InstallSource: SourceDesktop, SourceName: "acme"}
 	public := PluginFact{Installed: true, InstallSource: SourcePublic}
 	missing := PluginFact{}
 	cases := []struct {
@@ -529,7 +531,10 @@ func TestSkillsSource(t *testing.T) {
 		{"organisation", []PluginFact{org, org}, "your organisation"},
 		{"one mirror", []PluginFact{mirror, mirror}, "rise-x"},
 		{"two mirrors", []PluginFact{mirror, other}, "another marketplace"},
-		{"mirror and desktop", []PluginFact{mirror, desktop}, "another marketplace"},
+		{"mirror and desktop", []PluginFact{mirror, desktop}, "rise-x"},
+		{"mirror and organisation", []PluginFact{mirror, org}, "another marketplace"},
+		{"all desktop", []PluginFact{desktop, desktopOther}, "Claude Desktop"},
+		{"all desktop from public", []PluginFact{desktopPublic, desktopPublic}, "Claude Desktop"},
 		{"one from public", []PluginFact{mirror, public}, ""},
 		{"one not installed", []PluginFact{mirror, missing}, ""},
 	}
@@ -560,6 +565,14 @@ func TestRun_AllSkillsFromMirror(t *testing.T) {
 	if c := findCheck(t, Run(f), "marketplace.head"); c.Status != StatusSkip || c.Fix != "" ||
 		c.Message != "Not used here: skills come from rise-x." {
 		t.Fatalf("marketplace.head = %+v", c)
+	}
+	f.HeadStale, f.HeadLocalError = false, true
+	if c := findCheck(t, Run(f), "marketplace.head"); c.Status != StatusSkip || c.Fix != "" {
+		t.Fatalf("marketplace.head with an unreadable clone = %+v", c)
+	}
+	f.HeadLocalError, f.CatalogUnlisted = false, true
+	if c := findCheck(t, Run(f), "marketplace.head"); c.Status != StatusOK {
+		t.Fatalf("marketplace.head with an unlisted plugin = %+v", c)
 	}
 }
 

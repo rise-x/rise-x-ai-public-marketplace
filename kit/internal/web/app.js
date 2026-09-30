@@ -988,7 +988,7 @@ function catalogStatus(marketplace) {
   });
 
   if (marketplace.skillsSource) {
-    return `<span class="inline-flex items-center gap-1.5">${dot("bg-success", "Current")} Skills come from ${esc(marketplace.skillsSource)}</span>`;
+    return `<span class="inline-flex items-center gap-1.5">${dot("bg-fill-3", "Not used")} Skills come from ${esc(marketplace.skillsSource)}</span>`;
   }
   if (marketplace.checkError) {
     return `<span class="inline-flex items-center gap-1.5" title="${esc(marketplace.checkError)}">${dot("bg-fill-3", "Not checked")} Kit could not check the catalog just now</span>`;

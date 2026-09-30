@@ -118,6 +118,9 @@ type Facts struct {
 	SettingsError string
 
 	Plugins []PluginFact
+	// CatalogUnlisted is true when GitHub's catalog names a plugin missing
+	// from Plugins, so the public catalog matters however they were installed.
+	CatalogUnlisted bool
 
 	HeadStale      bool // local marketplace clone HEAD != GitHub main
 	HeadSkip       bool // GitHub was unreachable; don't report stale
@@ -224,7 +227,7 @@ func notChecked(id, title, cause string) Check {
 }
 
 func marketplaceRegisteredCheck(f Facts) Check {
-	if src := SkillsSource(f.Plugins); src != "" {
+	if src := f.skillsSource(); src != "" {
 		return Check{ID: "marketplace.registered", Status: StatusOK, Title: "Rise-X marketplace",
 			Message: "Skills come from " + src + "."}
 	}
@@ -300,19 +303,32 @@ func SkillsSource(plugins []PluginFact) string {
 	if allFromOrg(plugins) {
 		return "your organisation"
 	}
-	name := plugins[0].SourceName
+	name, allDesktop := plugins[0].SourceName, true
 	for _, p := range plugins {
 		if p.InstallSource == "" || p.InstallSource == SourcePublic {
 			return ""
 		}
-		if p.InstallSource != SourceMarketplace || p.SourceName != name {
+		if p.InstallSource == SourceOrganisation || p.SourceName != name {
 			name = ""
 		}
+		if p.InstallSource != SourceDesktop {
+			allDesktop = false
+		}
 	}
-	if name == "" {
-		return "another marketplace"
+	switch {
+	case name != "" && name != defaultMarketplace:
+		return name
+	case allDesktop:
+		return "Claude Desktop"
 	}
-	return name
+	return "another marketplace"
+}
+
+func (f Facts) skillsSource() string {
+	if f.CatalogUnlisted {
+		return ""
+	}
+	return SkillsSource(f.Plugins)
 }
 
 // pluginTitle is the same for every skill row; the check ID names the skill.
@@ -417,7 +433,7 @@ func mcpStaleCheck(f Facts) Check {
 
 func headCheck(f Facts) Check {
 	const id = "marketplace.head"
-	if src := SkillsSource(f.Plugins); src != "" {
+	if src := f.skillsSource(); src != "" {
 		return Check{ID: id, Status: StatusSkip, Title: "Skill catalog",
 			Message: "Not used here: skills come from " + src + "."}
 	}
