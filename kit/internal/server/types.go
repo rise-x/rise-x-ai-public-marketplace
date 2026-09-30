@@ -60,6 +60,9 @@ type MarketplaceInfo struct {
 	AutoUpdate *bool `json:"autoUpdate,omitempty"`
 	// HeadStale is nil when GitHub was unreachable (skip, not a false "stale").
 	HeadStale *bool `json:"headStale,omitempty"`
+	// SkillsSource names where the skills come from when none come from this
+	// marketplace, so its catalog status does not apply; see doctor.SkillsSource.
+	SkillsSource string `json:"skillsSource,omitempty"`
 	// AutoUpdateMarketplace names the marketplace AutoUpdate was read for, so
 	// the page's switch writes back to the same one.
 	AutoUpdateMarketplace string `json:"autoUpdateMarketplace,omitempty"`

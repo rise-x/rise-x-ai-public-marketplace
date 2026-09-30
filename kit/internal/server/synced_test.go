@@ -219,6 +219,53 @@ func mirrorServer(t *testing.T) (baseURL, token string, fake *runnertest.Fake) {
 	return baseURL, token, fake
 }
 
+// With every skill from a mirror, the public catalog serves nothing here, so
+// the page and the doctor stop offering to update it.
+func TestGather_OtherMarketplaceInstall_SkipsPublicCatalog(t *testing.T) {
+	baseURL, token, _ := mirrorServer(t)
+
+	var ov OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &ov)
+	if ov.Marketplace == nil || ov.Marketplace.SkillsSource != "rise-x" || ov.Marketplace.HeadStale != nil {
+		t.Fatalf("marketplace = %+v", ov.Marketplace)
+	}
+	if c := doctorCheck(t, baseURL, token, "marketplace.head"); c.Status != doctor.StatusSkip ||
+		c.Fix != "" || c.Message != "Not used here: skills come from rise-x." {
+		t.Fatalf("marketplace.head = %+v", c)
+	}
+}
+
+// A stale clone that lacks a plugin GitHub already lists would hide that skill
+// for good, so the catalog check comes back until the clone is refreshed.
+func TestGather_OtherMarketplaceInstall_StaleCloneKeepsCatalogCheck(t *testing.T) {
+	clone := t.TempDir()
+	for path, body := range map[string]string{
+		".claude-plugin/marketplace.json": `{"name":"rise-x-public","plugins":[{"name":"rise-x-mcp"}]}`,
+		".git/HEAD":                       "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(clone, path)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(clone, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake := newFakeCLI(mirrorPluginList)
+	fake.Set(fakeCLIPath, []string{"plugin", "marketplace", "list", "--json"},
+		runnertest.Result{Stdout: withInstallLocation(t, mirrorMarketplaceList, clone)})
+	baseURL, token := newServer(t, Config{Runner: fake, LocateEnv: locateAt(fakeCLIPath),
+		Catalog: catalogNamesServer(t, "rise-x-mcp", "rise-x-apps")})
+
+	var ov OverviewResponse
+	getJSON(t, baseURL+"/api/overview", token, &ov)
+	if ov.Marketplace == nil || ov.Marketplace.SkillsSource != "" || ov.Marketplace.HeadStale == nil {
+		t.Fatalf("marketplace = %+v", ov.Marketplace)
+	}
+	if c := doctorCheck(t, baseURL, token, "marketplace.head"); c.Status == doctor.StatusSkip {
+		t.Fatalf("marketplace.head = %+v, want the check to run", c)
+	}
+}
+
 // A skill installed from a mirror of the public marketplace is named as such,
 // and updates from that mirror.
 func TestGather_OtherMarketplaceInstall(t *testing.T) {
