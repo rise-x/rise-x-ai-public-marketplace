@@ -94,7 +94,7 @@ A filter node is exactly **one** of: a leaf condition (`field` + `operator` + `v
 
 There is no wildcard syntax. `equals` is an exact match, so a `*` in the value is a literal character: `{"operator": "equals", "values": ["*fire*"]}` returns an empty page, not a 400. For a prefix match use `startsWith`.
 
-`contains` and `endsWith` are **Flow- and Company-only**: accepted on `search_flows` and `search_companies` string fields, whose whitelist columns are indexed, and **rejected with 400** everywhere else — on `search_works` and `search_assets` (whitelist) strings, and on **all** `data.*` string paths (unanchored / trailing-anchored regex is non-indexable on dynamic fields). The portable string operators — valid on every resource and on `data.*` — are `equals` / `notEquals` / `in` / `notIn` / `startsWith`. So on Work, the only partial string match is a prefix (`startsWith`). There is no suffix or substring match on any Work field, `data.*` included: to find values that contain a word, project the field with `fields` + `enforce_fields=True`, page through, and match client-side.
+`contains` and `endsWith` are **Flow- and Company-only**: accepted on `search_flows` and `search_companies` string fields, whose whitelist columns are indexed, and **rejected with 400** everywhere else — on `search_works` and `search_assets` (whitelist) strings, and on **all** `data.*` string paths (unanchored / trailing-anchored regex is non-indexable on dynamic fields). The portable string operators — valid on every resource and on `data.*` — are `equals` / `notEquals` / `in` / `notIn` / `startsWith`. So in `search_works`, the only partial string match is a prefix (`startsWith`). `search_works` has no suffix or substring match on any field, `data.*` included: to find values that contain a word, project the field with `fields` + `enforce_fields=True`, page through, and match client-side.
 
 > ⚠️ **Empty `contains` / `startsWith` / `endsWith` values are rejected.** Passing `{"operator": "endsWith", "values": [""]}` or `[" "]` (whitespace) — likewise for `contains` / `startsWith` — returns 400 from the validator — previously this silently produced a match-everything regex that scanned every document. If the caller's intent is "any/no value", use `exists` / `notExists` instead.
 
@@ -193,7 +193,7 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 | `flowDisplayName` | string | free-form — the flow's human display name. |
 | `flowType` | string | free-form — flow-defined identifier (e.g. `"vessel-inspection"`). |
 | `flowId`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only |
-| `comments`, `initiatorPartyName` | string | Prefix match via `startsWith`; no suffix or substring match on Work |
+| `comments`, `initiatorPartyName` | string | Prefix match via `startsWith`; `search_works` has no suffix or substring match |
 | `assignedUsers.id` | guid | filter "works assigned to user X" — most common case |
 | `assignedUsers.displayName` | string | filter by assigned user's display name |
 | `assignedUsers.email` | string | filter by assigned user's email |
