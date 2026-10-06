@@ -311,12 +311,12 @@ visual language and interaction rules every Rise-X app is held to.
 Each plugin's version lives only in its own
 `plugins/<name>/.claude-plugin/plugin.json` — `marketplace.json`
 intentionally carries no version field, since plugin.json takes precedence
-and dual fields just mask edits. Any PR that changes files under
-`plugins/<name>/` must bump that plugin first, via
-`./scripts/bump.sh <name> patch|minor|major`; CI (`scripts/check-version.sh`)
-rejects PRs that touch a plugin without a strictly-greater version. Changes
-limited to a plugin's own `README.md` or its `tests/`/`test/` directory are
-exempt and don't require a bump.
+and dual fields just mask edits. A plugin is bumped once per release, via
+`./scripts/bump.sh <name> patch|minor|major`, not in each PR that collects
+on the release branch. CI (`scripts/check-version.sh`) rejects a release or
+hotfix PR into `main` that touches a plugin without a strictly-greater
+version. Changes limited to a plugin's own `README.md` or its `tests/`/`test/`
+directory are exempt and don't require a bump.
 
 ## Contributing
 

@@ -21,26 +21,25 @@ Each plugin's version lives **only** in its own
 just mask edits. This field is also Claude Code's update cache key: merging a
 change without bumping it means installed users receive nothing.
 
-Any PR touching `plugins/<name>/**` must bump that plugin **once**:
+Bump a plugin **once per release**, not once per PR. Feature PRs into a
+release branch don't bump: nothing reaches an installed user until the
+release merges, so per-PR bumps only inflate the number. Bump only where a
+change reaches `main`:
+
+- **A release.** Before marking the release PR ready, open one PR into
+  `release/<name>` that bumps every plugin the release changes. Size each bump
+  from the largest change that plugin carries in the release (a patch that
+  turns into a feature becomes a minor). The release PR body flags any plugin
+  still `(NOT BUMPED)`.
+- **A hotfix.** A `hotfix/*` PR into `main` is a release of its own, so it
+  bumps each plugin it changes.
 
 ```
 ./scripts/bump.sh <name> patch|minor|major
 ```
 
-**Once per PR, not once per commit.** The check compares the branch against the
-PR base, so a single bump covers the whole PR however many commits it takes, and
-nothing reaches an installed user until the PR merges. Bumping again for each
-later edit on an open branch just inflates the number: pick the size from the
-largest change the PR ends up carrying, and adjust that one number if the scope
-grows (a patch that turns into a feature becomes a minor). If the version is
-already above base, the branch is free to keep editing.
-
-This holds for a PR into a release branch too (see "Release process"): the
-check compares against that branch, so each PR bumps again. Several bumps
-within one release are expected and harmless: users receive the final value.
-
-Exempt: a PR whose changes under `plugins/<name>/` are limited to
-`plugins/<name>/README.md` and/or `plugins/<name>/tests/` or
+Exempt: a release or hotfix whose changes under `plugins/<name>/` are
+limited to `plugins/<name>/README.md` and/or `plugins/<name>/tests/` or
 `plugins/<name>/test/` does not require a bump.
 
 A PR that adds a brand-new plugin must also add it to the "Which plugin?"
@@ -52,12 +51,13 @@ never reach the org.
 
 CI enforces this — `scripts/check-version.sh`, run inside the `validate`
 job, does two independent things: (1) for each plugin with non-exempt
-changes, compares its `plugin.json` version against the PR base and requires
-it to be strictly greater; (2) separately verifies that `marketplace.json`
-entries and `plugins/<name>/` directories stay consistent with each other
-(every local-source entry has a matching directory and vice versa) — this
-check does not involve version numbers at all, since marketplace.json never
-carries one.
+changes, compares its `plugin.json` version against `main` and requires it
+to be strictly greater, on PRs into `main` only (`SKIP_VERSION_BUMP=1`
+skips it elsewhere); (2) on every PR, separately verifies that
+`marketplace.json` entries and `plugins/<name>/` directories stay consistent
+with each other (every local-source entry has a matching directory and vice
+versa) — this check does not involve version numbers at all, since
+marketplace.json never carries one.
 
 ## Release process
 
@@ -71,13 +71,14 @@ from it.
    a `name` such as `2026-09`. It pushes `release/<name>` from `main`. Only one
    release branch may exist at a time; the workflow refuses otherwise.
 2. **Collect.** Open feature PRs against `release/<name>`, not `main`; one
-   aimed at `main` is closed by `close-direct-prs` with instructions. Each
-   still bumps the version of every plugin it changes, as usual. Open the draft
+   aimed at `main` is closed by `close-direct-prs` with instructions. These
+   PRs don't bump versions (see "Versioning"). Open the draft
    PR `release/<name>` -> `main` yourself once the branch is ahead of `main`,
    using the command `create-release` printed; every push to the release branch
    then runs `release-pr`, which regenerates that PR's body.
 3. **Release.** Merge `main` into the release branch if `main` moved, so the
-   version check is judged against what it will actually merge into. Then mark
+   version check is judged against what it will actually merge into. Bump
+   every changed plugin once, in a PR into the release branch. Then mark
    the release PR ready for review (this starts `validate` on it), get the
    code-owner approval, and merge with a **merge commit** so the individual
    PRs stay in history. Delete the release branch afterwards.
@@ -104,10 +105,9 @@ retargeted rather than left.
 
 A fix that cannot wait for the release goes on a `hotfix/*` branch and PRs
 into `main` from there. That is the sanctioned way past the release branch,
-not an exception to the rule. Afterwards merge `main` into the open release
-branch and re-bump any plugin whose version now collides. Until you do, the
-release PR's version check compares against a `main` the branch has not
-caught up with.
+not an exception to the rule. It bumps each plugin it changes. Afterwards
+merge `main` into the open release branch, so the release bump starts from
+the hotfix's version.
 
 Release-blocking dependencies:
 

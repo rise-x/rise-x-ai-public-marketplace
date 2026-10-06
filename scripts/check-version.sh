@@ -9,6 +9,10 @@
 #
 # If <base-ref> is omitted, defaults to origin/main.
 #
+# SKIP_VERSION_BUMP=1 skips only the strictly-greater version comparison, for
+# PRs into release/* (only a release or hotfix into main bumps). Every other
+# check still runs.
+#
 # Exit codes:
 #   0 - pass
 #   1 - one or more violations
@@ -172,6 +176,8 @@ for name in "${plugin_names[@]:-}"; do
     continue
   fi
   validate_semver_or_violate "$name" "$head_version" " in ${plugin_file}" || continue
+
+  [[ "${SKIP_VERSION_BUMP:-0}" == "1" ]] && continue
 
   base_version="$(git -C "$repo_root" show "${base}:${plugin_file}" 2>/dev/null | jq -r .version 2>/dev/null || echo "")"
   rename_note=""
