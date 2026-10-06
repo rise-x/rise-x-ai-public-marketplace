@@ -122,7 +122,7 @@ Server-side knob: maps to `includeTotalCount` in the POST body (or the `_exactCo
 
 `search_works`, `search_assets`, and `search_flows` apply a default status filter as an AND-clause on top of the caller's filter, but **only when the caller's filter doesn't reference the status field on the AND-spine** (the root leaf or any leaf inside an `and` group). Referencing it there, with any operator, turns the default off. A reference that lives only inside an `or` branch does **not**.
 
-> ⚠️ **`search_works` hides more than deleted works.** Its default keeps only `Open` and `Closed` works, so **`Completed` and `Ok` works are hidden too**. Any count or listing that should include finished work needs an explicit `status` leaf, for example `status in ["Open", "Closed", "Completed"]`.
+> ⚠️ **`search_works` hides more than deleted works.** Its default keeps only `Open` and `Closed` works, so **`Completed` and `Ok` works are hidden too**. Any count or listing that should include finished work needs an explicit `status` leaf: `status in ["Open", "Closed", "Completed", "Ok"]` for every non-deleted work.
 
 | Resource | Default exclusion | Field that opts out of the default |
 |---|---|---|
@@ -140,7 +140,7 @@ await search_works(filter={"and": [{"field": "flowOriginId", "operator": "equals
 # Include finished and deleted works: a `status` leaf on the AND-spine opts out of the default:
 await search_works(filter={"and": [
     {"field": "flowOriginId", "operator": "equals", "values": ["..."]},
-    {"field": "status",       "operator": "in",     "values": ["Open", "Closed", "Completed", "Deleted"]},
+    {"field": "status",       "operator": "in",     "values": ["Open", "Closed", "Completed", "Ok", "Deleted"]},
 ]})
 
 # Only deleted flows:
@@ -149,7 +149,7 @@ await search_flows(filter={"field": "state", "operator": "equals", "values": ["D
 
 The simple-search query-string equivalent works the same way: `?status=Deleted` or `?state=Archived` opts out of the default exclusion.
 
-**Implementation detail (you don't need this to use the tools, but it explains some quirks).** Legacy MongoDB documents in this codebase store enum fields in two forms — sometimes as the BSON string (`"Deleted"`), sometimes as the underlying int (`2`). The Asset and Flow default filters match BOTH forms; the Work default (`Open`/`Closed`) matches only the string form, so int-stored works are hidden until you add a `status` leaf. Caller-side caller-side `equals`/`notEquals`/`in`/`notIn` on the five coerced enum fields (named in the ⚠️ enum note under the Work table), so `status = "Deleted"` isolates int-form records as reliably as string-form ones. `startsWith` skips the enum parse; range operators are number/date only, so on an enum field they are a 400 rather than an unparsed match.
+**Implementation detail (you don't need this to use the tools, but it explains some quirks).** Legacy MongoDB documents in this codebase store enum fields in two forms — sometimes as the BSON string (`"Deleted"`), sometimes as the underlying int (`2`). The Asset and Flow default filters match BOTH forms; the Work default (`Open`/`Closed`) matches only the string form, so int-stored works are hidden until you add a `status` leaf. Caller-side `equals`/`notEquals`/`in`/`notIn` on the five coerced enum fields (named in the ⚠️ enum note under the Work table) match both forms too, so `status = "Deleted"` isolates int-form records as reliably as string-form ones. `startsWith` skips the enum parse; range operators are number/date only, so on an enum field they are a 400 rather than an unparsed match.
 
 ## Work Search and `data.*` Fields
 
@@ -263,7 +263,7 @@ result = await search_works(
     filter={
         "and": [
             {"field": "flowOriginId", "operator": "equals", "values": ["aaaa-bbbb-..."]},
-            {"field": "data.custom.value[0].name", "operator": "equals", "values": ["Custom Name"]},  # [0] is ignored in a filter: matches ANY row
+            {"field": "data.custom.value.name", "operator": "equals", "values": ["Custom Name"]},  # matches if ANY row has it; an index like [0] is ignored in filters
         ]
     },
     fields=["id", "displayName", "status", "data.custom.value", "data.otherValue"],
@@ -320,7 +320,7 @@ Searchable without a `get_flow_data_schema` call — but still inside the mandat
 | `id` | guid | Asset (entity) GUID — direct lookup |
 | `displayName` | string | the asset's display name (the UI list/grid label) |
 | `normalisedName` | string | pre-uppercased copy for fast case-insensitive search |
-| `status` | string (enum, PascalCase) | `DianaEntityStatus`: `"Open"` (in edit), `"Closed"` (reserved — not currently used), `"Deleted"`. `"Deleted"` is **hidden by default** unless the filter references `status` — see [§ Default soft-delete exclusion](#default-status-exclusion). ⚠️ **Distinct enum from Work** — do NOT reuse Work's `DianaWorkState` values (`"Completed"`, `"Ok"`); assets only have Open/Closed/Deleted. Matching rules: ⚠️ enum note under the Work table. |
+| `status` | string (enum, PascalCase) | `DianaEntityStatus`: `"Open"` (in edit), `"Closed"` (reserved — not currently used), `"Deleted"`. `"Deleted"` is **hidden by default** unless the filter references `status` — see [§ Default status exclusion](#default-status-exclusion). ⚠️ **Distinct enum from Work** — do NOT reuse Work's `DianaWorkState` values (`"Completed"`, `"Ok"`); assets only have Open/Closed/Deleted. Matching rules: ⚠️ enum note under the Work table. |
 | `entityType` | string | the asset type's ThingType identifier (e.g. `"vessel"`, `"nmrk-one-car"`) |
 | `code` | string | asset code |
 | `flowId` | guid | the asset type's current published flow id |
@@ -358,10 +358,10 @@ The static whitelist for `search_flows`. Five string fields have closed value se
 |---|---|---|
 | `id`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy`, `flowId` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only. `flowId` is a domain alias for `id` (the source POCO declares `FlowId { get => Id; set { } }`) — the search layer exposes both as separate whitelist keys for symmetry with `IDianaFlowResource`-based filters, and both project to the same value. |
 | `name`, `normalisedName`, `displayName`, `description`, `uniqueName` | string | free-form. `normalisedName` is pre-uppercased for fast case-insensitive search. |
-| `state` | string (enum, PascalCase) | one of: `"Open"`, `"Active"`, `"Archived"`, `"Deleted"` (from `DianaFlowStatus`). Note: distinct from Work `status`. `"Deleted"` and `"Archived"` are **hidden by default** — see [§ Default soft-delete exclusion](#default-status-exclusion). Matching rules: ⚠️ enum note under the Work table. |
+| `state` | string (enum, PascalCase) | one of: `"Open"`, `"Active"`, `"Archived"`, `"Deleted"` (from `DianaFlowStatus`). Note: distinct from Work `status`. `"Deleted"` and `"Archived"` are **hidden by default** — see [§ Default status exclusion](#default-status-exclusion). Matching rules: ⚠️ enum note under the Work table. |
 | `flowResourceType` | string (closed set, PascalCase) | one of: `"Work"`, `"Entity"`, `"User"`, `"Company"`. `"Entity"` = asset type; `"Work"` = workflow. `"User"` / `"Company"` are rare system flows. |
 | `entityType` | string | free-form — tag value from the flow's `Tags["EntityType"]` dictionary; the asset type's ThingType (e.g. `"vessel"`), the same value the MCP surfaces as `thingType`. Set only on `"Entity"` flows. |
-| `publishStatus` | string (enum, PascalCase) | one of: `"Draft"`, `"Published"`, `"Revised"`, `"Deleted"` (from `DianaPublishStatus`). A fifth value `"Publishing"` exists but is a transient/internal state — callers see one of the four listed values once the publish completes. `search_flows` returns only the current, non-draft version of each flow, so `publishStatus = "Draft"` always returns an empty page. Matching rules: ⚠️ enum note under the Work table. |
+| `publishStatus` | string (enum, PascalCase) | one of: `"Draft"`, `"Published"`, `"Revised"`, `"Deleted"` (from `DianaPublishStatus`). A fifth value `"Publishing"` exists but is a transient/internal state — callers see one of the four listed values once the publish completes. `search_flows` returns only the current, non-draft version of each flow, so `publishStatus = "Draft"` and `publishStatus = "Revised"` always return an empty page. Matching rules: ⚠️ enum note under the Work table. |
 | `group` | string | free-form — tag value from the flow's `Tags["Group"]` dictionary. |
 | `lastModified`, `created` | date | range / comparison ops supported |
 | `copiedFromId` | guid | the source flow this one was duplicated from (lineage tracking). |
