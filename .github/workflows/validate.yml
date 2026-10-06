@@ -33,7 +33,10 @@ jobs:
             [[ -d "$d" ]] || continue
             claude plugin validate "$d" --strict
           done
+      # Only a release or hotfix into main bumps; PRs into release/* collect
+      # unbumped work, and the release PR runs this check against main.
       - name: Check version bump
+        if: github.base_ref == 'main'
         env:
           BASE_REF: ${{ github.base_ref }}
         run: bash scripts/check-version.sh "origin/$BASE_REF"
