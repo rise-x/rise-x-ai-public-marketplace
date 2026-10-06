@@ -33,12 +33,12 @@ jobs:
             [[ -d "$d" ]] || continue
             claude plugin validate "$d" --strict
           done
-      # Only a release or hotfix into main bumps; PRs into release/* collect
-      # unbumped work, and the release PR runs this check against main.
+      # Only a release or hotfix into main bumps, so PRs into release/* skip
+      # the version comparison but keep the marketplace consistency check.
       - name: Check version bump
-        if: github.base_ref == 'main'
         env:
           BASE_REF: ${{ github.base_ref }}
+          SKIP_VERSION_BUMP: ${{ github.base_ref != 'main' && '1' || '0' }}
         run: bash scripts/check-version.sh "origin/$BASE_REF"
       # kit-ci runs this too, but kit-ci is not a required check on main and
       # cannot become one: its path filter keeps it from ever reporting on a

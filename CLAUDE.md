@@ -50,9 +50,10 @@ and get a matching `git-subdir` entry added in the private marketplace
 never reach the org.
 
 CI enforces this — `scripts/check-version.sh`, run inside the `validate`
-job on PRs into `main` only, does two independent things: (1) for each plugin
-with non-exempt changes, compares its `plugin.json` version against `main`
-and requires it to be strictly greater; (2) separately verifies that
+job, does two independent things: (1) for each plugin with non-exempt
+changes, compares its `plugin.json` version against `main` and requires it
+to be strictly greater, on PRs into `main` only (`SKIP_VERSION_BUMP=1`
+skips it elsewhere); (2) on every PR, separately verifies that
 `marketplace.json` entries and `plugins/<name>/` directories stay consistent
 with each other (every local-source entry has a matching directory and vice
 versa) — this check does not involve version numbers at all, since
