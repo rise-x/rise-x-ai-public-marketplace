@@ -118,13 +118,15 @@ There is no wildcard syntax. `equals` is an exact match, so a `*` in the value i
 
 Server-side knob: maps to `includeTotalCount` in the POST body (or the `_exactCount=true` query-string parameter on the simple GET endpoint). Default is `false` for everything; opt into the slower count when you genuinely need the total (e.g. rendering "N of M results").
 
-## Default soft-delete exclusion
+## Default status exclusion
 
-`search_works`, `search_assets`, and `search_flows` hide tombstoned records from the response by default. The exclusion is applied as an AND-clause on top of the caller's filter, but **only when the caller's filter doesn't reference the deletion field**. Referencing the field — even with `notEquals`, `in`, or any other operator — signals "I'm managing this dimension consciously" and the server steps back.
+`search_works`, `search_assets`, and `search_flows` apply a default status filter as an AND-clause on top of the caller's filter, but **only when the caller's filter doesn't reference the status field on the AND-spine** (the root leaf or any leaf inside an `and` group). Referencing it there, with any operator, turns the default off. A reference that lives only inside an `or` branch does **not**.
+
+> ⚠️ **`search_works` hides more than deleted works.** Its default keeps only `Open` and `Closed` works, so **`Completed` and `Ok` works are hidden too**. Any count or listing that should include finished work needs an explicit `status` leaf, for example `status in ["Open", "Closed", "Completed"]`.
 
 | Resource | Default exclusion | Field that opts out of the default |
 |---|---|---|
-| `search_works` | `status != "Deleted"` | `status` |
+| `search_works` | `status in ["Open", "Closed"]` (string form only; hides `Completed`, `Ok`, `Deleted`) | `status` |
 | `search_assets` | `status != "Deleted"` | `status` |
 | `search_flows` | `state not in ["Deleted", "Archived"]` | `state` |
 | `search_companies` | (none — Company has no soft-delete) | n/a |
@@ -132,13 +134,13 @@ Server-side knob: maps to `includeTotalCount` in the POST body (or the `_exactCo
 **Workflow:**
 
 ```python
-# Default — deleted works are hidden:
+# Default: only Open and Closed works (Completed, Ok and Deleted are hidden):
 await search_works(filter={"and": [{"field": "flowOriginId", "operator": "equals", "values": ["..."]}]})
 
-# Include deleted works — any reference to `status` opts out of the default:
+# Include finished and deleted works: a `status` leaf on the AND-spine opts out of the default:
 await search_works(filter={"and": [
     {"field": "flowOriginId", "operator": "equals", "values": ["..."]},
-    {"field": "status",       "operator": "in",     "values": ["Open", "Closed", "Deleted"]},
+    {"field": "status",       "operator": "in",     "values": ["Open", "Closed", "Completed", "Deleted"]},
 ]})
 
 # Only deleted flows:
@@ -147,7 +149,7 @@ await search_flows(filter={"field": "state", "operator": "equals", "values": ["D
 
 The simple-search query-string equivalent works the same way: `?status=Deleted` or `?state=Archived` opts out of the default exclusion.
 
-**Implementation detail (you don't need this to use the tools, but it explains some quirks).** Legacy MongoDB documents in this codebase store enum fields in two forms — sometimes as the BSON string (`"Deleted"`), sometimes as the underlying int (`2`). The server's default-exclusion filter matches BOTH forms, and so do caller-side `equals`/`notEquals`/`in`/`notIn` on the five coerced enum fields (named in the ⚠️ enum note under the Work table), so `status = "Deleted"` isolates int-form records as reliably as string-form ones. `startsWith` skips the enum parse; range operators are number/date only, so on an enum field they are a 400 rather than an unparsed match.
+**Implementation detail (you don't need this to use the tools, but it explains some quirks).** Legacy MongoDB documents in this codebase store enum fields in two forms — sometimes as the BSON string (`"Deleted"`), sometimes as the underlying int (`2`). The Asset and Flow default filters match BOTH forms; the Work default (`Open`/`Closed`) matches only the string form, so int-stored works are hidden until you add a `status` leaf. Caller-side caller-side `equals`/`notEquals`/`in`/`notIn` on the five coerced enum fields (named in the ⚠️ enum note under the Work table), so `status = "Deleted"` isolates int-form records as reliably as string-form ones. `startsWith` skips the enum parse; range operators are number/date only, so on an enum field they are a 400 rather than an unparsed match.
 
 ## Work Search and `data.*` Fields
 
@@ -188,12 +190,12 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 | `id` | guid | Work item GUID — direct lookup |
 | `name`, `displayName`, `workCode` | string | |
 | `normalisedName` | string | Pre-uppercased copy of `name`; faster case-insensitive search |
-| `status` | string (enum, PascalCase) | one of: `"Open"`, `"Closed"`, `"Completed"`, `"Deleted"`, `"Ok"` (from `DianaWorkState`). `"Deleted"` is **hidden by default** — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). Matching rules: ⚠️ enum note below the table. |
+| `status` | string (enum, PascalCase) | one of: `"Open"`, `"Closed"`, `"Completed"`, `"Deleted"`, `"Ok"` (from `DianaWorkState`). Only `"Open"` and `"Closed"` are returned by default; `"Completed"`, `"Ok"` and `"Deleted"` are hidden — see [§ Default status exclusion](#default-status-exclusion). Matching rules: ⚠️ enum note below the table. |
 | `flowState` | string (enum, PascalCase) | one of: `"NotStarted"`, `"Created"`, `"New"`, `"InProgress"`, `"Rework"`, `"Complete"`, `"Skipped"`, `"Cancelled"`, `"Declined"`, `"Deleted"` (from `DianaStepState`). Matching rules: ⚠️ enum note below the table; a value that is not a member (e.g. `"InReview"`) matches nothing. |
 | `flowDisplayName` | string | free-form — the flow's human display name. |
 | `flowType` | string | free-form — flow-defined identifier (e.g. `"vessel-inspection"`). |
 | `flowId`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only |
-| `comments`, `initiatorPartyName` | string | Prefix match via `startsWith`; `search_works` has no suffix or substring match |
+| `comments`, `initiatorPartyNames` | string | Prefix match via `startsWith`; `search_works` has no suffix or substring match |
 | `assignedUsers.id` | guid | filter "works assigned to user X" — most common case |
 | `assignedUsers.displayName` | string | filter by assigned user's display name |
 | `assignedUsers.email` | string | filter by assigned user's email |
@@ -235,7 +237,7 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 
 - **Always-projected** (every response, regardless of `fields`): `id`, `status`.
 - **Fallback-projected** (response when `fields` is omitted or `[]`): `name`, `displayName`, `workCode`, `flowState`, `flowDisplayName`, `flowId`, `flowOriginId`, `environmentId`, `lastModified`, `created`, `createdBy`, `lastModifiedBy`, `assignedUsers` (whole array).
-- **Opt-in only** (project only when listed in `fields`): `normalisedName`, `flowType`, `comments`, `initiatorPartyName`, `entities`, every `assignedUsers.*` sub-path, every `statusDisplay.*` sub-path, `data.*`.
+- **Opt-in only** (project only when listed in `fields`): `normalisedName`, `flowType`, `comments`, `initiatorPartyNames`, `entities`, every `assignedUsers.*` sub-path, every `statusDisplay.*` sub-path, `data.*`.
 
 When `fields` is populated, the response contains **only** the listed fields plus the Always set. For Object-typed roots (`assignedUsers`, `statusDisplay`, `data`), listing the bare key OR any `<key>.<sub>` sub-path opts the whole sub-doc into the response. `data.foo` granular paths project just the listed sub-paths (NOT the whole tree).
 
@@ -261,7 +263,7 @@ result = await search_works(
     filter={
         "and": [
             {"field": "flowOriginId", "operator": "equals", "values": ["aaaa-bbbb-..."]},
-            {"field": "data.custom.value[0].name", "operator": "equals", "values": ["Custom Name"]},
+            {"field": "data.custom.value[0].name", "operator": "equals", "values": ["Custom Name"]},  # [0] is ignored in a filter: matches ANY row
         ]
     },
     fields=["id", "displayName", "status", "data.custom.value", "data.otherValue"],
@@ -318,7 +320,7 @@ Searchable without a `get_flow_data_schema` call — but still inside the mandat
 | `id` | guid | Asset (entity) GUID — direct lookup |
 | `displayName` | string | the asset's display name (the UI list/grid label) |
 | `normalisedName` | string | pre-uppercased copy for fast case-insensitive search |
-| `status` | string (enum, PascalCase) | `DianaEntityStatus`: `"Open"` (in edit), `"Closed"` (reserved — not currently used), `"Deleted"`. `"Deleted"` is **hidden by default** unless the filter references `status` — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). ⚠️ **Distinct enum from Work** — do NOT reuse Work's `DianaWorkState` values (`"Completed"`, `"Ok"`); assets only have Open/Closed/Deleted. Matching rules: ⚠️ enum note under the Work table. |
+| `status` | string (enum, PascalCase) | `DianaEntityStatus`: `"Open"` (in edit), `"Closed"` (reserved — not currently used), `"Deleted"`. `"Deleted"` is **hidden by default** unless the filter references `status` — see [§ Default soft-delete exclusion](#default-status-exclusion). ⚠️ **Distinct enum from Work** — do NOT reuse Work's `DianaWorkState` values (`"Completed"`, `"Ok"`); assets only have Open/Closed/Deleted. Matching rules: ⚠️ enum note under the Work table. |
 | `entityType` | string | the asset type's ThingType identifier (e.g. `"vessel"`, `"nmrk-one-car"`) |
 | `code` | string | asset code |
 | `flowId` | guid | the asset type's current published flow id |
@@ -356,10 +358,10 @@ The static whitelist for `search_flows`. Five string fields have closed value se
 |---|---|---|
 | `id`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy`, `flowId` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only. `flowId` is a domain alias for `id` (the source POCO declares `FlowId { get => Id; set { } }`) — the search layer exposes both as separate whitelist keys for symmetry with `IDianaFlowResource`-based filters, and both project to the same value. |
 | `name`, `normalisedName`, `displayName`, `description`, `uniqueName` | string | free-form. `normalisedName` is pre-uppercased for fast case-insensitive search. |
-| `state` | string (enum, PascalCase) | one of: `"Open"`, `"Active"`, `"Archived"`, `"Deleted"` (from `DianaFlowStatus`). Note: distinct from Work `status`. `"Deleted"` and `"Archived"` are **hidden by default** — see [§ Default soft-delete exclusion](#default-soft-delete-exclusion). Matching rules: ⚠️ enum note under the Work table. |
+| `state` | string (enum, PascalCase) | one of: `"Open"`, `"Active"`, `"Archived"`, `"Deleted"` (from `DianaFlowStatus`). Note: distinct from Work `status`. `"Deleted"` and `"Archived"` are **hidden by default** — see [§ Default soft-delete exclusion](#default-status-exclusion). Matching rules: ⚠️ enum note under the Work table. |
 | `flowResourceType` | string (closed set, PascalCase) | one of: `"Work"`, `"Entity"`, `"User"`, `"Company"`. `"Entity"` = asset type; `"Work"` = workflow. `"User"` / `"Company"` are rare system flows. |
 | `entityType` | string | free-form — tag value from the flow's `Tags["EntityType"]` dictionary; the asset type's ThingType (e.g. `"vessel"`), the same value the MCP surfaces as `thingType`. Set only on `"Entity"` flows. |
-| `publishStatus` | string (enum, PascalCase) | one of: `"Draft"`, `"Published"`, `"Revised"`, `"Deleted"` (from `DianaPublishStatus`). A fifth value `"Publishing"` exists but is a transient/internal state — callers see one of the four listed values once the publish completes. Matching rules: ⚠️ enum note under the Work table. |
+| `publishStatus` | string (enum, PascalCase) | one of: `"Draft"`, `"Published"`, `"Revised"`, `"Deleted"` (from `DianaPublishStatus`). A fifth value `"Publishing"` exists but is a transient/internal state — callers see one of the four listed values once the publish completes. `search_flows` returns only the current, non-draft version of each flow, so `publishStatus = "Draft"` always returns an empty page. Matching rules: ⚠️ enum note under the Work table. |
 | `group` | string | free-form — tag value from the flow's `Tags["Group"]` dictionary. |
 | `lastModified`, `created` | date | range / comparison ops supported |
 | `copiedFromId` | guid | the source flow this one was duplicated from (lineage tracking). |
@@ -414,7 +416,7 @@ Fallback projection per resource (returned when `fields` is omitted / empty):
 
 Opt-in keys (never in the fallback — must be listed explicitly in `fields`):
 
-- **Work**: `normalisedName`, `flowType`, `comments`, `initiatorPartyName`, `entities`, every `assignedUsers.*` sub-path (`assignedUsers.id`, `.displayName`, `.email`, `.companyId`), every `statusDisplay.*` sub-path, `data.*`.
+- **Work**: `normalisedName`, `flowType`, `comments`, `initiatorPartyNames`, `entities`, every `assignedUsers.*` sub-path (`assignedUsers.id`, `.displayName`, `.email`, `.companyId`), every `statusDisplay.*` sub-path, `data.*`.
 - **Flow**: `publishStatus`, `copiedFromId`, `environment`, `cardLayoutId`, `summaryCardLayoutId`, `template`, `hasRepeaterSection`, `blockChainEnabled`, `sequence`, `publishMode`, `resourceType`, `versionNumber`, `versionName`, `fromDate`, `toDate` (the 14 extended-whitelist fields beyond `publishStatus`; all become projectable when listed in `fields` with `enforce_fields=True`).
 - **Asset**: `normalisedName`, `flowType`, `sequence`, `statusDisplay` (+ any `statusDisplay.*`), `data` (+ any `data.*`). Granular `data.*` paths trim to those paths (same as Work); bare `data` = whole doc.
 - **Company**: (none today.)
@@ -547,7 +549,7 @@ await search_assets(
 
 ## Common Pitfalls
 
-1. **Forgetting `flowOriginId` on `data.*` Work search** → 400 referencing the discovery URL. Add a `flowOriginId equals` (or `in`) leaf to the filter, OR use the bare `"data"` projection key to skip schema validation.
+1. **Forgetting `flowOriginId` on Work or Asset search** → 400 referencing the discovery URL. Every `search_works` / `search_assets` request needs a `flowOriginId equals` (or `in`) leaf. The bare `"data"` projection key skips schema resolution, not this requirement.
 2. **Calling `search_works` before `get_flow_data_schema`** → likely 400 on an unknown `data.*` path. Discover first when in doubt.
 3. **Type conflict in multi-flow merge** → narrow the filter to one flow or use the whole-data key.
 4. **`contains` on a Guid field** → 400. Guid fields only accept `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists`.
