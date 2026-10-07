@@ -1,5 +1,7 @@
 # Integration Authoring Recipes
 
+For service-specific setup and validation status, see the [provider catalog](provider-integrations.md).
+
 Worked `RiseIntegrationPoco` examples for the most common shapes. Use these as starting points — never copy auth values verbatim; always re-collect from the user.
 
 The `id` fields in the examples below use `00000000-0000-0000-0000-000000000000` to indicate a new record; the MCP layer assigns a real UUID before sending, and the server assigns parameter-level GUIDs as needed.
