@@ -239,11 +239,12 @@ loudly on its own — there is no separate lookup step that could silently skip 
 - `reportProgress({ processed, total })` feeds the shell's single download progress bar. `total` is
   whatever unit your app is counting.
 - **Throwing fails the whole download.** Unlike `onInstall`/`onUpdate`/`onUninstall`, which the shell
-  runs behind a 10s timeout and whose errors it logs and swallows, this hook is user-initiated, can legitimately run minutes, and its failure is reported to the user as "not
-  available offline." Don't catch and swallow just to report success on partial data — a failed pull
-  should throw loudly (the way `downloadFlowWorks` itself does on a failed work, §5) rather than
-  silently reporting success on an empty or partial pull. The bundle stays cached regardless, so a retry
-  only redoes the data pull.
+  runs behind a 10s timeout, logging their errors and running a failed `onInstall` or `onUpdate`
+  again on the next open, this hook is user-initiated, can legitimately run minutes, and its failure
+  is reported to the user as "not available offline." Don't catch and swallow just to report
+  success on partial data — a failed pull should throw loudly (the way `downloadFlowWorks` itself
+  does on a failed work, §5) rather than silently reporting success on an empty or partial pull.
+  The bundle stays cached regardless, so a retry only redoes the data pull.
 - `ctx` is a **snapshot at invocation** — `{ manifest: { id, version, name }, user, environment }` —
   taken when the hook starts; a pull that runs minutes does not see a mid-flight user or environment
   switch through it.
