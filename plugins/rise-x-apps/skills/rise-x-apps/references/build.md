@@ -727,16 +727,18 @@ bar is yours to build.
 
 Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently — except `onOfflineDownload` (SDK >= 0.12), which is user-initiated, may run minutes, and where throwing **fails the download** (see `references/offline.md`). They run inside the shell page, so all the SDK accessors work from inside them.
 
+The shell runs `onInstall` the first time the user opens the app on a device, and `onUpdate` on the first open after a version bump, both before the app's first render. Opening an ecosystem runs neither, so an app the user never opens on a device gets neither hook there. If `onInstall` or `onUpdate` fails, the next open runs it again.
+
 ```ts
 import type { InstallHook, UpdateHook, UninstallHook, OfflineDownloadHook } from '@rise-x/apps-sdk';
 import localforage from 'localforage';   // or whatever you persist with
 
 export const onInstall: InstallHook = async ({ manifest, user, environment }) => {
-  // First time this device sees the app — seed defaults, pre-warm caches.
+  // First time the user opens the app on this device — seed defaults, pre-warm caches.
 };
 
 export const onUpdate: UpdateHook = async (ctx, { from, to }) => {
-  // Version bumped in registry — migrate persisted data here.
+  // First open after a version bump — migrate persisted data here.
 };
 
 export const onUninstall: UninstallHook = async ({ manifest }) => {

@@ -238,9 +238,8 @@ loudly on its own — there is no separate lookup step that could silently skip 
   `tools.offline` as narrower-guaranteed than the connector, not a drop-in swap for it.
 - `reportProgress({ processed, total })` feeds the shell's single download progress bar. `total` is
   whatever unit your app is counting.
-- **Throwing fails the whole download.** Unlike `onInstall`/`onUpdate`/`onUninstall` — fire-and-forget
-  reconciliation the shell runs behind a short timeout and swallows errors from — this hook is
-  user-initiated, can legitimately run minutes, and its failure is reported to the user as "not
+- **Throwing fails the whole download.** Unlike `onInstall`/`onUpdate`/`onUninstall`, which the shell
+  runs behind a 10s timeout and whose errors it logs and swallows, this hook is user-initiated, can legitimately run minutes, and its failure is reported to the user as "not
   available offline." Don't catch and swallow just to report success on partial data — a failed pull
   should throw loudly (the way `downloadFlowWorks` itself does on a failed work, §5) rather than
   silently reporting success on an empty or partial pull. The bundle stays cached regardless, so a retry
