@@ -26,7 +26,7 @@ Five MCP tools wrap the v4 advanced-search endpoints: `search_flows`, `search_co
 | `search_assets(filter, sort, fields, page, page_size, enforce_fields, include_total_count)` | POST `/api/v4/asset/search` | Filter **assets** (`DianaCompanyEntity` records), INCLUDING by dynamic `data.*` fields defined on the asset type's flow. Prefer over `list_assets` (single asset type, no filtering) for any condition/sort/projection. |
 | `get_flow_data_schema(flow_origin_id)` | GET `/api/v4/config/flow/{flowOriginId}/data-schema` | Discover the `data.*` paths a flow / asset type defines — call BEFORE composing a `search_works` **or** `search_assets` payload that uses `data.*` |
 
-All search tools return paged JSON with `items[]`, `page`, `pageSize`, `hasMore` (always populated), `totalCount` (only when `include_total_count=True`, otherwise `null`). See [§Counts & pagination](#counts--pagination).
+All search tools return a YAML page with `items[]`, `page`, `pageSize`, `hasMore` (always populated), `totalCount` (only when `include_total_count=True`, otherwise `null`), and `warnings[]` when the server has something to say about the request. See [§Counts & pagination](#counts--pagination) and [§Response Shape](#response-shape).
 
 ## Filter Tree Grammar
 
@@ -49,7 +49,7 @@ Groups can nest up to depth 5. Combine groups freely: `{"and": [<leaf>, {"or": [
 
 ### Leaf-XOR-group — one shape per node
 
-A filter node is exactly **one** of: a leaf condition (`field` + `operator` + `values`), an `and` group, or an `or` group. Mixing shapes on the same node is rejected with 400 — the boolean structure has to be unambiguous, so the server (and the local builder, defence-in-depth) refuses combined shapes:
+A filter node is exactly **one** of: a leaf condition (`field` + `operator` + `values`), an `and` group, or an `or` group. Mixing shapes on the same node is rejected with 400 — the boolean structure has to be unambiguous, so the server refuses combined shapes (the MCP server passes the filter through unchanged, so nothing catches it earlier):
 
 ```python
 # ❌ Leaf + And children on the same node — 400
@@ -103,7 +103,9 @@ There is no wildcard syntax. `equals` is an exact match, so a `*` in the value i
 `fields` is **opt-in**. By default the server ignores it and runs the resource's default projection (Always + Fallback entries). Set `enforce_fields=True` on the request to validate `fields` against the whitelist AND apply it as the Mongo projection.
 
 - `enforce_fields=False` (default) → `fields` is ignored entirely. Response carries the fallback projection (every resource's "default columns"). Safe default — Rise resources are dynamic and a hard-coded whitelist may not match the runtime schema.
-- `enforce_fields=True` → server validates each `fields` entry against the resource whitelist (400 on unknown keys) and projects only those + the Always-projected keys. Required to surface any **opt-in** field (Work `data.*`, `statusDisplay.*`, `comments`, Flow `publishStatus`, etc.) — without it those keys stay null in the response regardless of what's in `fields`.
+- `enforce_fields=True` → server checks each `fields` entry against the resource whitelist (and, for `data.*`, the pinned flow's schema) and projects the listed keys + the Always-projected keys. Required to surface any **opt-in** field (Work `data.*`, `statusDisplay.*`, `comments`, Flow `publishStatus`, etc.) — without it those keys stay null in the response regardless of what's in `fields`.
+
+An unknown projection path is **not** a 400. The server keeps it and reports it in the response's `warnings[]` (a list of plain strings): a whitelist key it does not know is omitted from the results (`Projection field 'noSuchField' is not a searchable field for this resource; it will be omitted from the results.`), and an unknown `data.*` path is projected as sent and may come back empty (`Projection field 'data.x' is not defined in the schema for flow <id>; it will be projected as requested and may come back empty.`). A `data.*` path that matches the schema only by case gets a casing warning naming the declared spelling, because the Mongo projection is case-sensitive. Only a null entry, or a segment Mongo itself rejects (empty or `$`-prefixed), is still a 400. Filter and sort paths stay strict: an unknown path there is a 400. Read `warnings[]` on every search that sets `enforce_fields=True` — a projected field that comes back `null` with a warning against it was never going to be populated.
 
 ## Counts & pagination
 
@@ -117,6 +119,8 @@ There is no wildcard syntax. `equals` is an exact match, so a `*` in the value i
 | `True` | Full `$facet + $count` aggregation. | populated (exact) | populated |
 
 Server-side knob: maps to `includeTotalCount` in the POST body (or the `_exactCount=true` query-string parameter on the simple GET endpoint). Default is `false` for everything; opt into the slower count when you genuinely need the total (e.g. rendering "N of M results").
+
+`page_size` is clamped to 1–100 and `page` to 1–1,000,000 server-side. A `page_size` outside its range is a 200 with the clamped `pageSize` echoed in the response and a `warnings[]` entry (`pageSize 500 exceeds the maximum of 100 and was reduced to 100.` or `pageSize 0 is below the minimum of 1 and was raised to 1.`); an out-of-range `page` is clamped silently. The MCP tools default to 25 and pass the value through, so asking for 500 rows returns 100 — page on `hasMore` instead.
 
 ## Default status exclusion
 
@@ -153,7 +157,7 @@ The simple-search query-string equivalent works the same way: `?status=Deleted` 
 
 ## Work Search and `data.*` Fields
 
-> ⚠️ **EVERY `search_works` request MUST carry a `flowOriginId` leaf — `equals` for one flow, `in` for multiple — on the AND-spine of the filter.** This is not a `data.*` rule: the server checks the pin *before* it resolves any schema, so an unpinned search returns 400 referencing the discovery URL no matter which fields it names. Only `equals`/`in` count toward it, and a pin nested solely inside an `or` does not (an OR branch does not guarantee every returned row was filtered by it). A `data.*` path needs the pin for the additional reason that the server resolves the flow's schema from it. Workflow: (1) call `get_flow_data_schema(flow_origin_id)` to discover the valid paths, (2) compose `search_works` with the `flowOriginId` leaf AND your `data.*` condition under the same `and` group.
+> ⚠️ **EVERY `search_works` request MUST carry a `flowOriginId` leaf — `equals` for one flow, `in` for multiple — on the AND-spine of the filter.** This is not a `data.*` rule: the server checks the pin *before* it resolves any schema, so an unpinned search returns 400 referencing the discovery URL no matter which fields it names. Only `equals`/`in` count toward it, and a pin nested solely inside an `or` does not (an OR branch does not guarantee every returned row was filtered by it). Every pin value must parse as a GUID: `"not-a-guid"` is a 400 (`Filter value 'not-a-guid' for field 'flowOriginId' is not a valid GUID.`), so pass the `flowOriginId` itself, never a flow name. A `data.*` path needs the pin for the additional reason that the server resolves the flow's schema from it. Workflow: (1) call `get_flow_data_schema(flow_origin_id)` to discover the valid paths, (2) compose `search_works` with the `flowOriginId` leaf AND your `data.*` condition under the same `and` group.
 
 **Wrong** — `data.*` filter with no `flowOriginId` leaf:
 
@@ -194,17 +198,19 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 | `flowState` | string (enum, PascalCase) | one of: `"NotStarted"`, `"Created"`, `"New"`, `"InProgress"`, `"Rework"`, `"Complete"`, `"Skipped"`, `"Cancelled"`, `"Declined"`, `"Deleted"` (from `DianaStepState`). Matching rules: ⚠️ enum note below the table; a value that is not a member (e.g. `"InReview"`) matches nothing. |
 | `flowDisplayName` | string | free-form — the flow's human display name. |
 | `flowType` | string | free-form — flow-defined identifier (e.g. `"vessel-inspection"`). |
-| `flowId`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only |
-| `comments`, `initiatorPartyNames` | string | Prefix match via `startsWith`; `search_works` has no suffix or substring match |
+| `flowId`, `flowOriginId`, `environmentId`, `companyId`, `createdBy`, `lastModifiedBy` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only. `companyId` is opt-in for projection. |
+| `environments` | guid (array-valued) | the environment ids the work belongs to; `in [...]` matches any element. Opt-in for projection. |
+| `comments`, `initiatorPartyNames`, `assignedRoles` | string | Prefix match via `startsWith`; `search_works` has no suffix or substring match. `assignedRoles` is array-valued (`in [...]` matches any element) and opt-in for projection. |
 | `assignedUsers.id` | guid | filter "works assigned to user X" — most common case |
 | `assignedUsers.displayName` | string | filter by assigned user's display name |
 | `assignedUsers.email` | string | filter by assigned user's email |
 | `assignedUsers.companyId` | guid | filter "works assigned to anyone from company X" |
-| `assignedUsers` | object — projection-only | whole-array escape hatch; rejects filter / sort with 400. Listing the bare key or any `assignedUsers.*` sub-path projects every RiseSimpleUser field (id, displayName, email, companyId). |
+| `assignedUsers` | object — projection-only | whole-array escape hatch; rejects filter / sort with 400. Part of the fallback projection. In `fields`, the bare key projects every RiseSimpleUser field (id, displayName, email, companyId); an `assignedUsers.<sub>` sub-path projects **only that member** of each user, the others come back empty (`null`, or the all-zero GUID for `id` / `companyId`). |
 | `entities` | guid (mongo path `entities`) | matches works linked to a specific asset id; `in [...]` for any of several assets; array-of-Guids semantics |
 | `lastModified`, `created` | date | range/comparison ops supported |
 | `statusDisplay.displayName`, `statusDisplay.color`, `statusDisplay.bgColor`, `statusDisplay.workType`, `statusDisplay.icon`, `statusDisplay.stateName`, `statusDisplay.roleName`, `statusDisplay.value` | string | UI-rendered status snapshot — same fields `list_work` surfaces as `statusLabel` / `roleName` / `color`. |
-| `statusDisplay` | object — projection-only | whole-sub-doc escape hatch; rejects filter / sort with 400 |
+| `statusDisplay` | object — projection-only | whole-sub-doc escape hatch; rejects filter / sort with 400. The bare key or any `statusDisplay.*` sub-path projects the whole sub-doc. |
+| `acl`, `stepEvents`, `attachments`, `relationships`, `integrationReceipts` | object — projection-only | opt-in whole-sub-doc roots; rejects filter / sort with 400. List the bare key in `fields` (with `enforce_fields=True`) to get the sub-doc; `acl` comes back trimmed to `principals`, `userRoles`, `rolePermissions`. |
 
 > ⚠️ **Enum values must be members of the enum.** Stored values are PascalCase (`"Open"`, `"Active"`, `"InProgress"`, `"Entity"`); use that spelling. The Type column says how a field compares: `(enum)` is coerced, `(closed set)` compares the exact string. The five coerced enum fields — Work `status` and `flowState`, asset `status`, Flow `state` and `publishStatus`: on them `equals`/`notEquals`/`in`/`notIn` parse the value case-insensitively and match both stored forms (name and int), so `"open"` finds `"Open"`; every other operator on those fields skips the enum parse. The closed sets (`flowResourceType`, `publishMode`, `resourceType`) have no enum parse: `equals`/`notEquals`/`in`/`notIn` compare the exact string, so on them a wrong-cased value (`"entity"` for `flowResourceType`) is a non-member. A non-member value on either kind (`"entity"` on `flowResourceType`, `"InReview"` on `flowState`, `"Suspended"` on Work `status`) matches nothing: `equals`/`in` return an **empty** page and `notEquals`/`notIn` return **everything**, never a 400. `startsWith`/`endsWith`/`contains` are case-insensitive wherever the operator is allowed (see the operator table). Also `"Open"` appears in BOTH Work `status` AND Flow `state` with different semantics — independent enums, don't assume cross-resource equivalence.
 
@@ -218,7 +224,7 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 > filter = {"field": "assignedUsers.id", "operator": "equals", "values": ["<userid>"]}
 > ```
 
-> ⚠️ **Mirror rule for projection: use the bare root key, not sub-paths.** When listing an Object root in `fields`, the bare key projects the entire sub-doc: `["statusDisplay"]` returns every `statusDisplay.*` field, `["assignedUsers"]` returns the whole assigned-users array. Sub-paths in `fields` are deduped server-side back to the root, so enumerating them adds noise without trimming the response payload — the projection always pulls the whole sub-doc.
+> ⚠️ **Projection of Object roots: `statusDisplay` expands to the whole sub-doc, `assignedUsers` does not.** Listing `statusDisplay` or any `statusDisplay.*` sub-path in `fields` projects the entire `statusDisplay` sub-doc; sub-paths are deduped server-side back to the root, so enumerating them adds noise without trimming the payload. The same holds for the other opt-in Object roots (`acl`, `stepEvents`, `attachments`, `relationships`, `integrationReceipts`). `assignedUsers` is the exception: the bare key returns the whole array with every member, but an `assignedUsers.<sub>` sub-path projects **only that member** of each user and leaves the others empty.
 >
 > ```python
 > # ❌ Over-specified — same payload, 8x the noise
@@ -229,6 +235,10 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 >
 > # ✅ Bare root — same response, 1 entry
 > fields = ["statusDisplay"]
+>
+> # assignedUsers: pick the key by the shape you want
+> fields = ["assignedUsers"]        # every user with id, displayName, email, companyId
+> fields = ["assignedUsers.email"]  # every user with email only; id / companyId come back as the all-zero GUID
 > ```
 >
 > Exception: `data.*` granular paths DO trim the response (DataList projection is path-aware). List specific `data.foo.bar` paths when you know what you need; reach for bare `"data"` only for schema-free exploration.
@@ -237,9 +247,9 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 
 - **Always-projected** (every response, regardless of `fields`): `id`, `status`.
 - **Fallback-projected** (response when `fields` is omitted or `[]`): `name`, `displayName`, `workCode`, `flowState`, `flowDisplayName`, `flowId`, `flowOriginId`, `environmentId`, `lastModified`, `created`, `createdBy`, `lastModifiedBy`, `assignedUsers` (whole array).
-- **Opt-in only** (project only when listed in `fields`): `normalisedName`, `flowType`, `comments`, `initiatorPartyNames`, `entities`, every `assignedUsers.*` sub-path, every `statusDisplay.*` sub-path, `data.*`.
+- **Opt-in only** (project only when listed in `fields`): `normalisedName`, `flowType`, `comments`, `initiatorPartyNames`, `entities`, `companyId`, `environments`, `assignedRoles`, every `assignedUsers.*` sub-path, `statusDisplay` and every `statusDisplay.*` sub-path, `acl`, `stepEvents`, `attachments`, `relationships`, `integrationReceipts`, `data.*`.
 
-When `fields` is populated, the response contains **only** the listed fields plus the Always set. For Object-typed roots (`assignedUsers`, `statusDisplay`, `data`), listing the bare key OR any `<key>.<sub>` sub-path opts the whole sub-doc into the response. `data.foo` granular paths project just the listed sub-paths (NOT the whole tree).
+When `fields` is populated, the response contains **only** the listed fields plus the Always set. For `statusDisplay` (and the other opt-in Object roots), listing the bare key OR any `<key>.<sub>` sub-path opts the whole sub-doc into the response. For `assignedUsers`, the bare key projects the whole array and a sub-path projects only that member of each user. `data.foo` granular paths project just the listed sub-paths (NOT the whole tree).
 
 Dynamic fields live under the `data.*` namespace. They're discovered per-flow via the `get_flow_data_schema` tool.
 
@@ -247,16 +257,19 @@ Dynamic fields live under the `data.*` namespace. They're discovered per-flow vi
 
 1. **Discover** — call `get_flow_data_schema(flow_origin_id)` to get the flat list of valid paths. Skip this only if you already know the exact path from a prior call in the same session.
 2. **Filter — flowOriginId is mandatory** — every `search_works` payload MUST include a `flowOriginId` leaf on the AND-spine: `equals` for one flow, `in [...]` for multiple. A payload naming any `data.*` path (in `filter`, `sort`, OR `fields`) must put it under the same `and` group as that path, since the server also resolves the schema from it. Missing → 400 with the discovery URL.
-3. **Compose** — reference `data.*` paths exactly as returned by step 1.
+3. **Compose** — reference `data.*` paths exactly as returned by step 1. Under a container (`isArray: true`), write the path without an index in `filter` and `sort` (an index is stripped and the leaf matches if any row matches); in `fields`, the un-indexed path projects every row's value and `data.grid[0].col` selects one row.
 
 End-to-end example showing both leaves under one `and`:
 
 ```python
 # Step 1: discover
 schema = await get_flow_data_schema(flow_origin_id="aaaa-bbbb-...")
-# schema is a JSON array; example entries:
-#   {"path": "data.custom.value", "type": "array", "isArray": true}
-#   {"path": "data.otherValue", "type": "string"}
+# schema is a YAML list; example entries:
+#   {"path": "data.custom.value", "type": "object", "isArray": true}        # a data-grid / repeater container
+#   {"path": "data.custom.value.name", "type": "string", "isArray": true}   # one of its columns
+#   {"path": "data.otherValue", "type": "string", "isArray": false}
+# `type` is one of string / number / date / guid / boolean / object. A container is `object`
+# with isArray: true — the schema never reports `array`.
 
 # Step 2+3: filter + project
 result = await search_works(
@@ -275,8 +288,8 @@ result = await search_works(
 
 `flowOriginId in [flowA, flowB, flowC]` is supported — the server resolves each flow's schema in parallel and merges the available paths into a union. Two rules:
 
-- **Missing flow** → 400 listing the missing ids.
-- **Type conflict** → 400 listing every conflict (e.g. `'data.foo': String in flow A vs Number in flow B`). If you hit this, narrow the filter to one flow, or use the whole-data escape hatch below.
+- **Missing flow** → 400 listing the missing ids (`Flow with origin id <id> not found.`), but only when the request names a specific `data.*` path (in `filter`, `sort`, or in `fields` with `enforce_fields=True`) — that is what triggers the schema lookup. A pinned search with no `data.*` path and an unknown `flowOriginId` returns an empty page, not an error.
+- **Type conflict** → reported lazily, per path: the merge itself never fails, and a 400 (`Field 'data.foo' resolves to a different shape in each of the selected flows: 'data.foo': String in flow A vs Number in flow B`) comes back only when a filter or sort uses a path whose type (or array-ness) differs between the selected flows. Paths you do not touch never cost you a conflict. If you hit one, narrow the filter to one flow, or use the whole-data escape hatch below.
 
 ### Whole-data escape hatch (`"data"` key, no dot)
 
@@ -336,11 +349,13 @@ Searchable without a `get_flow_data_schema` call — but still inside the mandat
 
 Operators, enum matching, the Object-root-can't-be-a-filter/sort-leaf rule, and the empty-`startsWith` guard are all **identical to Work**. `contains` / `endsWith` are **Flow- and Company-only** — `search_assets` rejects them with 400 (use `startsWith`). Mixed-type tolerance and the date/number quirks are identical too (see the Work [§ Date and number quirks](#date-and-number-quirks-on-data)).
 
-### Asset `data.*` projection trims like Work — with one shape caveat
+### Asset `data.*` projection trims like Work — with two shape caveats
 
-Granular projection matches Work: listing `data.foo.bar` in `fields` (with `enforce_fields=True`) returns **only** those folded paths — `fields:["data.price"]` returns `{data:{price:…}}`, not the whole doc. Bare `data` returns the whole folded sub-doc (see below). For **present** fields the response is byte-identical to Work.
+Granular projection matches Work: listing `data.foo.bar` in `fields` (with `enforce_fields=True`) returns **only** those folded paths — `fields:["data.price"]` returns `{data:{price:…}}`, not the whole doc. Bare `data` returns the whole folded sub-doc (see below). For **present scalar** fields the response is byte-identical to Work.
 
-**One asset-specific caveat — absent fields:** for a requested granular path the asset **doesn't have**, asset **omits** it (the folded `data` object simply lacks that key; an all-absent projection yields `data:{}`, or a null `data` when the asset has no data at all), whereas Work **materializes** it as `{foo:null}`. Present values are identical on both; only the absent-field shape differs. Don't rely on a requested-but-absent `data.*` key coming back as `null` on asset — it won't be there.
+**Container paths (data-grid / section-repeater) differ.** Projecting a column path such as `data.equipments.serialNumber` returns, on `search_works`, that column's values across all rows as a flat array under the column key; on `search_assets` it returns the stored rows verbatim (the container array, each row carrying its own column keys). To get whole rows on either resource, project the container path itself (`data.equipments`).
+
+**Second caveat — absent fields:** for a requested granular path the asset **doesn't have**, asset **omits** it (the folded `data` object simply lacks that key; an all-absent projection yields `data:{}`, or a null `data` when the asset has no data at all), whereas Work **materializes** it as `{foo:null}`. Present scalar values are identical on both; only the absent-field shape and the container shape above differ. Don't rely on a requested-but-absent `data.*` key coming back as `null` on asset — it won't be there.
 
 ### Bare `data` whole-data hatch (no dot)
 
@@ -348,7 +363,7 @@ Identical to Work: add the bare `"data"` key to `fields` (with `enforce_fields=T
 
 ### Multi-flow (multi-asset-type) merge
 
-`flowOriginId in [typeA, typeB, …]` merges each asset type's `data.*` schema into a union — same rules as Work (missing id → 400; type conflict → 400; fall back to the bare `data` hatch to sidestep a conflict).
+`flowOriginId in [typeA, typeB, …]` merges each asset type's `data.*` schema into a union — same rules as Work (a missing id is a 400 only when a specific `data.*` path is named; a type conflict is a 400 only for the path a filter or sort actually uses; fall back to the bare `data` hatch to sidestep a conflict).
 
 ## Flow Search filterable fields
 
@@ -356,7 +371,7 @@ The static whitelist for `search_flows`. Five string fields have closed value se
 
 | Field key | Type | Notes |
 |---|---|---|
-| `id`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy`, `flowId` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only. `flowId` is a domain alias for `id` (the source POCO declares `FlowId { get => Id; set { } }`) — the search layer exposes both as separate whitelist keys for symmetry with `IDianaFlowResource`-based filters, and both project to the same value. |
+| `id`, `flowOriginId`, `environmentId`, `createdBy`, `lastModifiedBy`, `flowId` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only. `flowId` is a domain alias for `id` (the source POCO declares `FlowId { get => Id; set { } }`) — the search layer exposes both as separate whitelist keys for symmetry with `IDianaFlowResource`-based filters, and both project the same value. Filter on `id`; `flowId` adds nothing. |
 | `name`, `normalisedName`, `displayName`, `description`, `uniqueName` | string | free-form. `normalisedName` is pre-uppercased for fast case-insensitive search. |
 | `state` | string (enum, PascalCase) | one of: `"Open"`, `"Active"`, `"Archived"`, `"Deleted"` (from `DianaFlowStatus`). Note: distinct from Work `status`. `"Deleted"` and `"Archived"` are **hidden by default** — see [§ Default status exclusion](#default-status-exclusion). Matching rules: ⚠️ enum note under the Work table. |
 | `flowResourceType` | string (closed set, PascalCase) | one of: `"Work"`, `"Entity"`, `"User"`, `"Company"`. `"Entity"` = asset type; `"Work"` = workflow. `"User"` / `"Company"` are rare system flows. |
@@ -371,8 +386,8 @@ The static whitelist for `search_flows`. Five string fields have closed value se
 | `hasRepeaterSection` | boolean | `true` for flows whose layout contains a repeater section (relevant for data-grid rendering). |
 | `blockChainEnabled` | boolean | `true` for flows that publish to a chain. |
 | `sequence` | number | flow-defined ordering within an ecosystem (lower number = earlier). |
-| `publishMode` | string (closed set, PascalCase) | one of: `"Default"`, `"UpdateOpenItems"`, `"DoNotUpdateOpenItems"`. Controls how a new version propagates to open work items / assets when a flow is published. |
-| `resourceType` | string (closed set, PascalCase) | typically `"Workflow"` or `"Flow"` on flow records. Distinct from `flowResourceType` above (the narrower work / entity / user / company set). |
+| `publishMode` | string (closed set, PascalCase) | one of: `"Default"`, `"UpdateOpenItems"`, `"DoNotUpdateOpenItems"`. Controls how a new version propagates to open work items / assets when a flow is published. Stored and matched as the name string: `equals` / `in` with the PascalCase name returns rows; a lower-cased value (`"default"`) or the underlying number matches nothing. |
+| `resourceType` | string (closed set, PascalCase) | the `DianaDataType` name (`"Work"`, `"Workflow"`, `"Flow"`, …), matched as the exact name string. Workflows and asset types alike can carry `"Work"`, so do not use it to tell the two apart — filter on `flowResourceType` for that. |
 | `versionNumber` | number | numeric version (1, 2, 3, …) extracted from the current `dianaVersion`. |
 | `versionName` | string | display label for the current version (`"v2.3"`, `"Q1 release"`, etc.). |
 | `fromDate`, `toDate` | date | nested from `dianaVersion.fromDate` / `dianaVersion.toDate` — the active window of the current version. |
@@ -385,7 +400,7 @@ The static whitelist for `search_companies`. No enum fields — all strings are 
 |---|---|---|
 | `id` | guid | direct lookup |
 | `name`, `displayName`, `shortCode`, `companyNumber` | string | free-form, user-supplied. `contains` / `startsWith` / `endsWith` all supported — Company shares Flow's indexed-column allowance, unlike Work and Asset. |
-| `domains` | string array | user-supplied domain names; `in` matches any element |
+| `domains` | array | user-supplied domain names; `equals` / `notEquals` / `in` / `notIn` only (`in` matches any element). Typed `array`, not string, so `startsWith` / `contains` / `endsWith` on it are a 400. |
 | `lastModified`, `created` | date | range / comparison ops supported |
 
 ## Projection — `fields` request property
@@ -416,16 +431,16 @@ Fallback projection per resource (returned when `fields` is omitted / empty):
 
 Opt-in keys (never in the fallback — must be listed explicitly in `fields`):
 
-- **Work**: `normalisedName`, `flowType`, `comments`, `initiatorPartyNames`, `entities`, every `assignedUsers.*` sub-path (`assignedUsers.id`, `.displayName`, `.email`, `.companyId`), every `statusDisplay.*` sub-path, `data.*`.
+- **Work**: `normalisedName`, `flowType`, `comments`, `initiatorPartyNames`, `entities`, `companyId`, `environments`, `assignedRoles`, every `assignedUsers.*` sub-path (`assignedUsers.id`, `.displayName`, `.email`, `.companyId`), `statusDisplay` and every `statusDisplay.*` sub-path, `acl`, `stepEvents`, `attachments`, `relationships`, `integrationReceipts`, `data.*`.
 - **Flow**: `publishStatus`, `copiedFromId`, `environment`, `cardLayoutId`, `summaryCardLayoutId`, `template`, `hasRepeaterSection`, `blockChainEnabled`, `sequence`, `publishMode`, `resourceType`, `versionNumber`, `versionName`, `fromDate`, `toDate` (the 14 extended-whitelist fields beyond `publishStatus`; all become projectable when listed in `fields` with `enforce_fields=True`).
 - **Asset**: `normalisedName`, `flowType`, `sequence`, `statusDisplay` (+ any `statusDisplay.*`), `data` (+ any `data.*`). Granular `data.*` paths trim to those paths (same as Work); bare `data` = whole doc.
 - **Company**: (none today.)
 
-**Object-typed roots** — Work: `assignedUsers`, `statusDisplay`, `data`; Asset: `statusDisplay`, `data` (`assignedUsers` is Work-only). The bare key returns 400 if used as a filter / sort leaf ("resolves to an object"). The projection rules below apply to both resources. For projection:
-- Bare `assignedUsers` (**prefer this**) or any `assignedUsers.*` sub-path → whole `assignedUsers` array projected (every `RiseSimpleUser` field). Sub-paths in `fields` are deduped to the root server-side; they add no projection benefit. Use them only for filtering.
-- Bare `statusDisplay` (**prefer this**) or any `statusDisplay.*` sub-path → whole `statusDisplay` sub-doc projected. Sub-paths in `fields` are deduped to the root server-side; they add no projection benefit. Use them only for filtering.
+**Object-typed roots** — Work: `assignedUsers`, `statusDisplay`, `acl`, `stepEvents`, `attachments`, `relationships`, `integrationReceipts`, `data`; Asset: `statusDisplay`, `data` (the rest are Work-only). The bare key returns 400 if used as a filter / sort leaf ("resolves to an object"). The projection rules below apply to both resources. For projection:
+- Bare `assignedUsers` → whole `assignedUsers` array projected (every `RiseSimpleUser` field). An `assignedUsers.*` sub-path → every user with **only that member** populated (`id` / `companyId` come back as the all-zero GUID and `displayName` / `email` as `null` when not listed). List the bare key unless you want the slimmer per-user shape.
+- Bare `statusDisplay` (**prefer this**) or any `statusDisplay.*` sub-path → whole `statusDisplay` sub-doc projected. Sub-paths in `fields` are deduped to the root server-side; they add no projection benefit. Use them only for filtering. `acl`, `stepEvents`, `attachments`, `relationships`, `integrationReceipts` behave the same (bare key; they have no filterable sub-paths).
 - Bare `data` → whole data sub-tree projected. **Work:** the `DataList` merged across every section start-to-end (later sections override earlier ones on shared paths). **Asset:** the folded entity `data` object (not a DataList). Large payload — escape hatch.
-- `data.foo` sub-paths → granular projection (only the listed sub-paths come back). **Preferred for `data` when payload matters** — `data.*` is the one exception where sub-paths actually trim the response. **(`search_assets` trims the same way; see [§ Asset Search](#asset-search-and-data-fields) for its one absent-field shape caveat.)**
+- `data.foo` sub-paths → granular projection (only the listed sub-paths come back). **Preferred for `data` when payload matters** — `data.*` is the one exception where sub-paths actually trim the response. **(`search_assets` trims the same way; see [§ Asset Search](#asset-search-and-data-fields) for its absent-field and container shape caveats.)**
 
 ## Response Shape
 
@@ -446,12 +461,19 @@ Opt-in keys (never in the fallback — must be listed explicitly in `fields`):
   "totalCount": 42,                      // populated when include_total_count=True; null on the default fast path
   "page": 1,
   "pageSize": 25,
-  "hasMore": true
+  "hasMore": true,
+  "warnings": [                          // absent when there is nothing to report; plain strings, not {code, path, message}
+    "pageSize 500 exceeds the maximum of 100 and was reduced to 100."
+  ]
 }
 ```
 
+The MCP tools render this page as YAML; the shape is shown as JSON here for readability.
+
 Notes on the shape:
 
+- `warnings` carries two kinds of notice: a `page_size` that was clamped (see [§Counts & pagination](#counts--pagination)) and, with `enforce_fields=True`, a projection path the server does not know or that differs in casing from the schema (see [§`enforce_fields` Behaviour](#enforce_fields-behaviour)). It is a list of strings, unlike the mutation envelope's `warnings[]` objects. Nothing else is reported here: a bad filter or sort is a 400, not a warning.
+- Under a container (data-grid / repeater) a projected column path comes back as a flat array of that column's values on `search_works`, and as the stored rows on `search_assets` — see [§ Asset Search and data.* Fields](#asset-search-and-data-fields).
 - `data` is a **nested JObject** mirroring the source data tree — `data.step2.toggle1` surfaces as `{"data": {"step2": {"toggle1": true}}}`, NOT a flat dotted-key dict. The outer JSON property is already named `data`, so the inner keys drop the `data.` prefix.
 - Date fields under `data.*` round-trip as `{date, ticks, offset}` JSON sub-objects (not flat ISO strings).
 - Bool / number / string types are preserved end-to-end.
@@ -510,7 +532,7 @@ await search_works(
 
 ```python
 schema = await get_flow_data_schema(flow_origin_id="aaaa-bbbb-...")
-# schema is a JSON array — iterate it and use each entry["path"] to compose the payload
+# schema is a YAML list — iterate it and use each entry["path"] to compose the payload
 
 await search_works(
     filter={
@@ -549,15 +571,16 @@ await search_assets(
 
 ## Common Pitfalls
 
-1. **Forgetting `flowOriginId` on Work or Asset search** → 400 referencing the discovery URL. Every `search_works` / `search_assets` request needs a `flowOriginId equals` (or `in`) leaf. The bare `"data"` projection key skips schema resolution, not this requirement.
-2. **Calling `search_works` before `get_flow_data_schema`** → likely 400 on an unknown `data.*` path. Discover first when in doubt.
-3. **Type conflict in multi-flow merge** → narrow the filter to one flow or use the whole-data key.
+1. **Forgetting `flowOriginId` on Work or Asset search** → 400 referencing the discovery URL. Every `search_works` / `search_assets` request needs a `flowOriginId equals` (or `in`) leaf. The bare `"data"` projection key skips schema resolution, not this requirement. A pin value that is not a GUID is also a 400.
+2. **Calling `search_works` before `get_flow_data_schema`** → a 400 on an unknown `data.*` path in `filter` or `sort`; in `fields` the path is projected as sent and only a `warnings[]` entry tells you it is unknown. Discover first when in doubt.
+3. **Type conflict in multi-flow merge** → a 400 only for the conflicting path you filter or sort on; narrow the filter to one flow or use the whole-data key.
 4. **`contains` on a Guid field** → 400. Guid fields only accept `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists`.
 5. **Range op (`between`/`greaterThan`/`lessThan`) on a mixed-type `data.*` number field** → silently misses string-stored values. Range ops require typed storage; equality dual-coerces.
 6. **Setting `fields` without `enforce_fields=True`** → the server ignores `fields` by default and returns the fallback projection. Opt-in fields (`data.*`, `statusDisplay.*`, `comments`, `publishStatus`, etc.) stay null. Set `enforce_fields=True` when you actually want the projection applied.
 7. **Filtering on `data` (no dot)** → 400. The whole-data key is projection-only.
 8. **Mixed-shape filter node** (leaf + `and`/`or` children, or both `and` + `or` on the same node) → 400. A node is exactly one of leaf, And-group, Or-group. Wrap the leaf in an explicit `and` instead.
-9. **Assuming `search_assets` treats `data.*` projection differently from Work** → it doesn't: granular `data.*` paths trim on both, and present values are identical. The only asset difference is shape-only — a requested-but-**absent** `data.*` path is **omitted** on asset, whereas Work materializes it as `null`.
+9. **Assuming `search_assets` treats `data.*` projection like Work in every case** → scalar paths behave the same: granular `data.*` paths trim on both, and present values are identical. Two shape differences: a requested-but-**absent** `data.*` path is **omitted** on asset, whereas Work materializes it as `null`; and a data-grid / repeater column path returns a flat array of values on Work but the stored rows on Asset (project the container path for whole rows on either).
 10. **Using `list_assets` to filter or sort** → `list_assets` lists a single asset type via the data grid with no filter engine. Use `search_assets` for any condition, sort, or projection.
 11. **Reusing Work `status` values on `search_assets`** → asset `status` is `DianaEntityStatus` (`"Open"` / `"Closed"` / `"Deleted"` only). Work's `"Completed"` / `"Ok"` are not asset states; see #12 for what a non-member value does.
 12. **A coerced-enum value that is not a member** (`"InReview"` on `flowState`, `"Suspended"` on Work `status`) → matches nothing: `equals`/`in` return an **empty** page, `notEquals`/`notIn` return **everything**, never a 400. Check the value against the enum lists in the field tables before trusting the result.
+13. **Ignoring `warnings[]` on a search** → an unknown projection path or a clamped `page_size` is a 200 with a warning, not an error. A field that comes back `null` with a warning against it was never projected; a page of 100 rows after asking for 500 is the clamp, not the whole result.
