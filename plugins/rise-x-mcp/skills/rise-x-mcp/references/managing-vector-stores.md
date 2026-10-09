@@ -35,7 +35,7 @@ saved (see § Renewing, renaming, rebuilding, and file retention).
 | `get_vector_store(vector_store_id, include_files=False)` | Status, file counts, usage, and expiry; per-file status and `lastError` with `include_files=True` |
 | `manage_vector_store(vector_store_id, action, expires_after_days?, name?)` | `action` is required, one of `"renew"` \| `"rebuild"` \| `"rename"` \| `"delete"` — see § Renewing, renaming, rebuilding, and file retention for each one's arguments |
 | `request_vector_store_upload()` | Step 1 of adding files: a one-time `uploadUrl` and `uploadId` |
-| `add_vector_store_files(vector_store_id, upload_id, filename?)` | Step 3: attaches the uploaded file(s) to the store |
+| `add_vector_store_files(vector_store_id, upload_id, filename)` | Step 3: attaches the uploaded file(s) to the store |
 
 ## Saving the id
 
@@ -49,6 +49,11 @@ itself carries no access control of its own. This is pitfall #66 in
 `purpose`, `resource_type`, and `resource_id` are optional free-text metadata on
 `create_vector_store` (§ Creating a store). They help support staff diagnose an issue and help a
 later session find the owning record, but they don't replace saving the id on that record.
+
+An app that lets several users create a store for the same owning record concurrently needs a
+single-flight guard around the create call — two near-simultaneous creates both succeed and return
+different ids, and whichever one loses the race to be saved on the record is orphaned: no
+`list_vector_stores` will ever surface it again, and it keeps billing until it expires on its own.
 
 ## Creating a store
 
@@ -74,6 +79,10 @@ owning work item or asset before doing anything else.
 
 ## Uploading files
 
+**Not the same upload as an app bundle.** `request_vector_store_upload` stages a document for this
+ingestion flow; `request_bundle_upload` (`references/managing-apps.md`) stages a federated app's
+bundle zip for `deploy_app`. Same staged-upload shape, different consumer — don't cross them.
+
 Files travel to the store through a three-step stage-then-attach flow, the same shape as the
 app-bundle deploy in `references/managing-apps.md`:
 
@@ -89,13 +98,30 @@ app-bundle deploy in `references/managing-apps.md`:
 
 3. add_vector_store_files(vector_store_id, upload_id, filename="report.pdf")
      → each file listed as accepted | converted | rejected | failed, with `indexedAs` naming the
-       accepted/converted file's stored name, a reason for a rejection, and `lastError` for a failure
+       accepted/converted file's stored NAME (not an id — see § File identity below), a reason for
+       a rejection, and `lastError` for a failure
 ```
 
-**Pass `filename` when the upload is a single non-zip file.** Without it, the server has nothing to
-recognize the file type from and stores it as `upload.bin`, which is rejected outright. A zip needs
-no `filename`: it's detected from its own bytes, and the server expands it keeping each member's own
-name. An upload holds up to 500 files and 100 MB total.
+**`filename` is always required, zip included.** It's what makes the multipart part a file at all;
+omit it and the server has nothing to hang the upload on. For a single non-zip file it also has to
+be the real name, or the server can't recognize the file type and stores it as `upload.bin`, which
+is rejected outright. A zip is different only in that its *contents* are recognized from its own
+bytes, not from the name's extension — the value you pass for a zip's `filename` is otherwise
+unconstrained, and the server expands the archive keeping each member's own name. Either way, pass
+`filename`. An upload holds up to 500 files and 100 MB total.
+
+### File identity: `indexedAs` is a name, not an id
+
+`indexedAs` in an `add_vector_store_files` result is the filename the OpenAI Files API stored the
+file under: the name you gave it, a zip member's own name, or — for a converted file — the
+converted output's name (e.g. `notes.eml` → `notes.eml.md`). It is never a `file-…` id. Don't keep
+it as a delete or reconciliation handle.
+
+The real file id only comes from `get_vector_store(vector_store_id, include_files=True)`, where each
+file entry carries `fileId`, or from the SDK's `vectorStores.listFiles`. To delete or reconcile
+files, resolve ids from that listing at the time you act, matching on `indexedAs` — and refuse the
+match if it's ambiguous (two files landed under the same name), rather than guessing which one the
+caller meant.
 
 ### Formats
 
@@ -126,9 +152,13 @@ becomes the only way back.
 ## Using a store in a run
 
 For a corpus scoped to one conversation or one work item, pass `vector_store_ids` (up to 5) on
-`POST /api/v1/agent/run`; the apps-sdk exposes the same parameter as `vectorStoreIds`. Don't put an
-id like this on the agent's own configuration: every user of that agent would end up searching the
-same store, whether or not the corpus is theirs.
+`POST /api/v1/agent/run`; the apps-sdk exposes the same parameter as `vectorStoreIds` **from
+`@rise-x/apps-sdk` 0.14.0** — that release is also where the SDK's own `vectorStores` connector
+(create/get/addFiles/listFiles/renew/rename/rebuild/deleteFile/delete) landed. 0.12.0 has neither;
+check the resolved version (`node -p "require('./node_modules/@rise-x/apps-sdk/package.json').version"`)
+before telling an app author the parameter or the connector exists. Don't put an id like this on
+the agent's own configuration: every user of that agent would end up searching the same store,
+whether or not the corpus is theirs.
 
 Agent-config `file_search` (`references/managing-agents.md`) remains the right place for a store
 that's genuinely meant to be shared: the same corpus for every user of that agent.
@@ -136,13 +166,35 @@ that's genuinely meant to be shared: the same corpus for every user of that agen
 A run against an expired or missing store fails with **422**, naming the store and pointing at the
 rebuild step below.
 
+**No citation metadata comes back.** Neither an MCP-driven agent run nor the SDK's `AgentReplyState`
+/ `AgentRunEvent` / `AgentToolCall` types carry a file id, page, or span from `file_search` — the
+tool call surfaces only `tool_name`, a plain-string `result`, and `status`. An app or agent can tell
+the user a document was searched, and open it, but can't deep-link a citation to a source location
+or render an evidence snippet. Don't design a feature that assumes otherwise.
+
+**MCP vs. SDK surface.** The MCP server exposes five vector-store tools (this reference); the
+`vectorStores` connector above exposes nine, including per-file `listFiles`/`deleteFile` that MCP
+has no equivalent for. See `references/tool-inventory.md` § MCP surface vs SDK surface for the full
+comparison before assuming a capability is missing from the platform rather than just from MCP.
+
 ## Renewing, renaming, rebuilding, and file retention
+
+`rebuild` carries three constraints that matter more than what it does:
+
+1. **Post-expiry only.** Calling it on a store that hasn't expired yet is rejected with **409**
+   (`still active; renew it instead of rebuilding`) — it is never a cleanup fallback for a live
+   store, only the recovery path once one has already lapsed.
+2. **No file filter.** It reattaches every surviving file in the whole lineage; there's no argument
+   to drop or select files. **410** if none survive. You cannot use `rebuild` to selectively remove
+   files from a corpus — that isn't what it's for.
+3. **Returns a NEW store id.** The old id is superseded, not reused. Every saved reference to the
+   old id — the owning work item, the asset, the agent config — must be updated to the new one.
 
 | `action` | When | Arguments | Effect |
 |---|---|---|---|
 | `renew` | Before expiry only | `expires_after_days` **required**, at least 1 | Extends `expiresAt` by that many days. **409** once the store already expired; rebuild instead |
 | `rename` | Any time | `name` **required**, 1-128 characters; `expires_after_days` rejected | Changes the display name only. The id, files, and expiry are untouched, so this is the way to relabel a store — never rebuild for a new name |
-| `rebuild` | After expiry | `expires_after_days` optional | Builds a **new** store from the same lineage's surviving files and returns a **new id**. Update every record that held the old one. **409** if the store hasn't expired yet — renew it instead; **410** once no original file of that lineage remains |
+| `rebuild` | After expiry only — **409** otherwise | `expires_after_days` optional | Builds a **new** store, with a **new id**, from every surviving file in the same lineage (no per-file selection). **410** once no original file of that lineage remains. Update every saved reference to the old id |
 | `delete` | Any time | none; `expires_after_days` and `name` both rejected | Removes the store, and its files with it — unless a rebuilt sibling still shares that lineage, in which case the files stay behind for the sibling and only the store goes |
 
 Each rule is enforced: `name` on anything but `rename`, or `expires_after_days` on `rename`/
@@ -172,20 +224,29 @@ accruing that cost on its own, without anyone having to remember to delete it.
    `config.vector_store_ids` on an agent is shared by every user of that agent. Use
    `vector_store_ids` on the run call (`vectorStoreIds` in the apps-sdk) for anything scoped
    narrower than "every user of this agent."
-4. **Uploading a single non-zip file without `filename`.** Without it, the server can't tell the
-   file's type from bytes alone and stores it as `upload.bin`, which is rejected outright. A zip
-   needs no `filename`: it's detected from its own bytes, and each member keeps its own name.
-5. **Expecting an image to be searchable.** Images are rejected outright, along with msg, rtf, and
+4. **Omitting `filename`, zip included.** `filename` is required on every `add_vector_store_files`
+   call — it's what makes the multipart part a file. For a single non-zip file it also has to be
+   the real name, or the server can't tell the file's type and stores it as `upload.bin`, which is
+   rejected outright. A zip's contents are recognized from its own bytes rather than the filename's
+   extension, but a `filename` must still be given, and each member keeps its own name once expanded.
+5. **Treating `indexedAs` as a file id.** It's the filename the OpenAI Files API stored the file
+   under, never a `file-…` id. Get the real id from `get_vector_store(include_files=True)`
+   (`fileId`) or the SDK's `vectorStores.listFiles`, and resolve it at delete/reconciliation time —
+   refuse an ambiguous filename match rather than guessing.
+6. **Expecting an image to be searchable.** Images are rejected outright, along with msg, rtf, and
    odt: there's no conversion path for them the way there is for spreadsheets and email.
-6. **Not confirming the expiry days before creating.** The store expires `expires_after_days` days
+7. **Not confirming the expiry days before creating.** The store expires `expires_after_days` days
    after its last use, sliding forward on every agent run that searches it — not on a `file_search`
    call by itself, and not at all for a store nobody runs against. Tell the user this rule and
    confirm the number before the first `create_vector_store` call (§ Before you create a store).
-7. **Renewing after expiry.** `manage_vector_store(action="renew")` only works before the store
+8. **Renewing after expiry.** `manage_vector_store(action="renew")` only works before the store
    expires. Once it has, the store needs `action="rebuild"` instead, which returns a new id.
-8. **Rebuilding or recreating a store just to relabel it.** `action="rename"` changes the display
+9. **Rebuilding or recreating a store just to relabel it.** `action="rename"` changes the display
    name in place and keeps the id, so nothing saved on the owning record has to change. A rebuild
    on a live store fails with 409 anyway, and creating a replacement orphans the corpus.
-9. **Expecting `delete` on a rebuilt store's predecessor to free the storage.** A rebuild leaves
-   both stores sharing one set of files. Deleting the superseded store keeps those files for the
-   live sibling, so usage doesn't drop until the last store of that lineage is deleted.
+10. **Expecting `delete` on a rebuilt store's predecessor to free the storage.** A rebuild leaves
+    both stores sharing one set of files. Deleting the superseded store keeps those files for the
+    live sibling, so usage doesn't drop until the last store of that lineage is deleted.
+11. **Rebuilding to selectively drop files.** `rebuild` reattaches every surviving file in the
+    lineage — there's no argument to exclude one. It is not a way to remove a bad file from a
+    corpus; the only lever there is `delete` (§ Renewing, renaming, rebuilding, and file retention).

@@ -99,6 +99,8 @@ Create an editable draft of an **existing published** flow. Returns a new draft 
 
 To create a brand-new flow, use `create_flow(...)` instead (see above). Passing a fresh/unknown UUID to `create_flow_draft` returns a 404 — the underlying flow must already exist.
 
+**Stale ids.** `create_flow_draft` refuses an origin id that other tools still answer: a stale id returned 403 `Deleted` / 404 here while `search_assets` and `get_flow_data_schema` kept serving it, so a successful read does not show the id is draftable. Resolve the live flow with `search_flows` on `flowOriginId` and draft the id that comes back. Layout ids drift the same way (a remembered id was the current layout's `clonedFromId`), so locate a component by its `dataPath`, not a layout id from an earlier session. Separately, editing an asset record may republish that asset type's flow and invalidate an open layout draft (unconfirmed, observed three times). If drafts keep going stale, check whether someone is editing records of the same type.
+
 ### `publish_flow(id: str)`
 Publish draft and all associated layouts. Must use the **draft flow ID**, not the original.
 

@@ -37,7 +37,8 @@ This is **Step 1** of the work creation pattern:
 1. `create_work(flow_id)` → get `workId`, `stepName`, `eventName`
 2. `update_work_data_bulk(workId, fields, section_name)` → set every field value in ONE call
    (use `update_work_data` for a single field, or for `push` / `pull` / `rename`)
-3. `submit_work(workId, eventName, stepName)` → advance to the next step
+3. `submit_work(workId, eventName, stepName)` → advance to the next step (`stepName` is the
+   **action set** name from `get_work` `actions[].stepName`; see `submit_work` below)
 
 ### `get_work(id: str, format: str = "summary")`
 Get a work item by its GUID.
@@ -48,7 +49,13 @@ Get a work item by its GUID.
 Key fields in the summary response:
 - `id` — work item GUID
 - `activeStepName` — current step the work is on
-- `actions` — available actions, with `events[].eventName` for `submit_work`
+- `actions` — available actions, with `events[].eventName` for `submit_work`, and each entry's
+  `stepName` (the **action set** name, the value `submit_work` wants). The list does **not**
+  reflect action `condition`s: both sides of a mutually exclusive conditioned pair appear. Choose
+  between exclusive events by evaluating the condition against the work data yourself, then
+  check the event you chose is offered. Gating a single action on whether it is offered is still
+  correct.
+- `workCode` is not a unique key (duplicates are possible). Address a work item by its GUID.
 - `data` — form field values
 - `status` — `Open`, `Closed`, `Completed`, `Deleted`, or `Ok` (`DianaWorkState`; `Ok` is a sync-process flag, not a state a user drives)
 
@@ -100,6 +107,7 @@ await search_works(
 ```
 
 For dynamic `data.*` paths in the filter, call `get_flow_data_schema(flow_origin_id)` first to discover the valid paths for that flow.
+
 
 ### `update_work_data_bulk(id, fields, section_name, response_format="summary")`
 Set **many** work-data fields in ONE request. Prefer this over repeated `update_work_data`
@@ -247,8 +255,19 @@ invitation stops the server deriving recipients from the flow config.
 **Parameters:**
 - `id` — work item GUID
 - `event_name` — the action event triggering the transition (e.g. `"Submit"`, `"Approve"`, `"Reject"`). Get from the work item's `actions` array.
-- `step_name` — the current step name (from `activeStepName`)
+- `step_name` — the **action set** name: `get_work(id)` → `actions[].stepName`. Not the task name,
+  and not `activeStepName` (that is the step).
 - `invitation` — optional dict with routing destinations for the next step
+
+A wrong `step_name` does not fail. A task name returns `ok: true`, moves nothing and leaves
+`statusLabel` unchanged, with no warning, so `ok: true` is not evidence of a transition. Read the
+name off the item's own offered action instead of constructing it (action set names do not follow
+one convention: hierarchical forms such as `step1/task1/Actionset` and bare forms both occur), and
+confirm `status` / `statusLabel` changed, re-reading with `get_work(id)` if the response is
+ambiguous. The `stepName` echoed by `create_work` / `create_asset` / `submit_work` is the
+`activeStepName`; where it differs from `actions[].stepName`, the latter is the one that
+transitions. Hierarchical names are matched by suffix, so `step1/task2/submit` can collide with a
+`/submit` belonging to another step.
 
 ## Creating a New Work Item
 
@@ -257,10 +276,12 @@ invitation stops the server deriving recipients from the flow config.
 2. update_work_data_bulk(workId,             # fill in every field in ONE request
      {"$.task.field": "value",
       "$.task.other": 42}, section_name)
-3. submit_work(workId, eventName, stepName)  # advance to next step
+3. submit_work(workId, eventName, stepName)  # advance; stepName = actions[].stepName from get_work
 ```
 
 The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the flow creation step. Both writers require a `section_name`, but they differ in what they accept: `update_work_data_bulk` resolves either the internal name or the display label (so `taskDisplayName` from `get_flow_steps` is enough), while `update_work_data` needs the internal `taskName` (slash form like `UntitledTask/Generated-<guid>` on v3-style flows, or bare like `Task_1` on v4 native flows). `get_flow_steps` projects `taskName` **out** of its response — fetch it via `get_flow_step(flow_id, step_id)` (pass the `id` field from `get_flow_steps` as `step_id`) and read `taskName` from the full step.
+
+The action set name is **not** a reliable source for `section_name`. For a hierarchical name such as `step1/task1/Actionset` the middle segment (`task1`) is the task name. For a non-hierarchical name (for example `ActionSet_1`) the task name cannot be derived from it: read it from `get_flow_config` or the layout. A wrong value on `update_work_data` returns a bare `http_500` (`500: None`) that names nothing, so a 500 here means check `section_name` first.
 
 ## Progressing an Existing Work Item
 
@@ -281,6 +302,17 @@ The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the
   (`"$.displayName"`), so the two-segment pattern is the common case, not the rule
 - `event_name` and `step_name` must match exactly what the flow expects — get them from `get_work` response
 - Submitting with wrong event/step names will fail
+
+## Probe work items
+
+There is no `delete_work` tool. The SDK's `work.delete(workId)` exists on the platform, but MCP has
+no equivalent — a work item created from an MCP session cannot be removed from here once created.
+Probing a flow (creating a throwaway work item to check a step, a submit event, or a data shape)
+therefore leaves permanent residue.
+
+Do this only in a scratch ecosystem, keep a running list of every `workId` a probe creates, and
+report those ids to the user at the end of the session so they can clean them up manually (or via
+the SDK, if the ecosystem is one they control through an app).
 
 ## list_work pagination & filters (server ≥ Trust & Signal)
 

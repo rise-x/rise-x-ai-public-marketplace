@@ -23,6 +23,10 @@ release an app end-to-end from a Claude session, no manual zip upload through th
 
 ## Deploying a bundle (the three-step flow)
 
+**Not the same upload as document ingestion.** `request_bundle_upload` stages a federated app's
+bundle zip for `deploy_app`; `request_vector_store_upload` (`references/managing-vector-stores.md`)
+stages a document for a vector store. Same staged-upload shape, different consumer.
+
 A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is staged:
 
 ```

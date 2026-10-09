@@ -3,7 +3,7 @@
 Every tool the Rise-X MCP server exposes, grouped by category, with signatures
 and per-tool caveats.
 
-97 tools, counting `update_work_data_bulk` — a server without the v4 batch release serves 96
+102 tools, counting `update_work_data_bulk` — a server without the v4 batch release serves 101
 and simply does not list it. Mutations accept `response_format="summary"|"full"` (summary is the
 default and carries verification warnings).
 
@@ -25,4 +25,26 @@ default and carries verification warnings).
 | **Dashboard** (13) | `list_dashboards`, `get_dashboard(id, format="full"\|"summary")`, `create_dashboard`, `duplicate_dashboard`, `update_dashboard_metadata`, `delete_dashboard`, `get_dashboard_draft_layout` (components projected to one line each), `add_dashboard_components`, `update_dashboard_component`, `replace_dashboard_section_components`, `delete_dashboard_components` (continues past failures), `reset_dashboard_draft_layout`, `publish_dashboard_draft_layout` |
 | **Integration** (11, v4) | `list_integrations(name?)` (projected — secret values never appear), `get_integration(integration_id?, name?, format="full"\|"summary")`, `update_integration` (response is a secret-free summary with endpoint verification), `import_integrations(content, format="postman-v2.1"\|"rise-native")`, `update_integration_endpoint(integration_name, endpoint)`, `validate_integration(integration)` (read-only), `validate_integration_endpoint(endpoint, integration_parameters?)` (read-only), `test_integration_endpoint(endpoint_id, data)`, `test_integration_endpoint_in_flow(endpoint_id, flow_id, work_id, ...)`, `delete_integration(integration_id)` (physical delete — irreversible), `delete_integration_endpoint(integration_id, endpoint_id)`. The v3 `get_integration_sample` and `get_integration_decrypted` tools were retired with no v4 replacement. Load `references/integration-authoring.md` before any mutating call for the required authoring protocol. |
 | **Agent** (5) | `list_agents(page=1, page_size=20, search?)` (paginated; `search` filters by name), `get_agent(agent_id)`, `create_agent(name, model, description?, system_prompt?, mcp_servers?, default_open_ai_tools?)` (returns the new `id` — also the `agent_id` for `POST /api/v1/agent/run`), `update_agent(agent_id, name?, description?, system_prompt?, model?, mcp_servers?, default_open_ai_tools?)` (PATCH — a non-empty list REPLACES, not merges), `delete_agent(agent_id)` (soft-delete). See `references/managing-agents.md`. |
-| **Vector Store** (5) | `create_vector_store(name, expires_after_days=90, purpose?, resource_type?, resource_id?)` (creates an OpenAI-backed file-search corpus; returns the new store's `id` — the only handle, no list tool, save it on the owning work item or asset), `get_vector_store(vector_store_id, include_files=False)` (status, file counts, and expiry; per-file status with `include_files=True`), `manage_vector_store(vector_store_id, action required, expires_after_days?, name?)` (`action` one of `"renew"` \| `"rebuild"` \| `"rename"` \| `"delete"`; `renew` requires `expires_after_days`, `rebuild` accepts it optionally, `rename` requires `name`; `rebuild` returns a NEW store id, superseding the old one), `request_vector_store_upload()` (mints a one-time upload URL for staging a file before `add_vector_store_files`), `add_vector_store_files(vector_store_id, upload_id, filename?)` (attaches the staged file(s); indexing is asynchronous). On a server without the file-search release, all five are absent and a call returns tool-not-found — read that as not supported here, not as a permissions or id problem. See `references/managing-vector-stores.md`. |
+| **Vector Store** (5) | `create_vector_store(name, expires_after_days=90, purpose?, resource_type?, resource_id?)` (creates an OpenAI-backed file-search corpus; returns the new store's `id` — the only handle, no list tool, save it on the owning work item or asset), `get_vector_store(vector_store_id, include_files=False)` (status, file counts, and expiry; per-file status, incl. the real `fileId`, with `include_files=True`), `manage_vector_store(vector_store_id, action required, expires_after_days?, name?)` (`action` one of `"renew"` \| `"rebuild"` \| `"rename"` \| `"delete"`; `renew` requires `expires_after_days`, `rebuild` accepts it optionally and is post-expiry only (409 on a live store), `rename` requires `name`; `rebuild` reattaches every surviving file in the lineage — no per-file selection — and returns a NEW store id, superseding the old one everywhere it was saved), `request_vector_store_upload()` (mints a one-time upload URL for staging a file before `add_vector_store_files`; not the same upload as `request_bundle_upload` — see Apps row), `add_vector_store_files(vector_store_id, upload_id, filename)` (`filename` is required even for a zip; attaches the staged file(s) and returns each one's `indexedAs` — a stored NAME, not a file id; indexing is asynchronous). On a server without the file-search release, all five are absent and a call returns tool-not-found — read that as not supported here, not as a permissions or id problem. See `references/managing-vector-stores.md` and § MCP surface vs SDK surface below. |
+| **Attachment** (5) | `request_attachment_upload(target, target_id, folder, filename, content_type?)` (step 1: single-use upload URL + `uploadId`), `upload_attachment(upload_id)` (step 3: forward the PUT bytes; needs EDIT access), `list_attachments(resource_id, resource_type, folder)` (one folder; an unmatched type returns an empty list, not an error), `update_attachment(attachment_id, title?, expiry?)`, `delete_attachment(attachment_id)` — see `references/attachments.md`. Same filename in a folder replaces the file. |
+
+## MCP surface vs SDK surface
+
+The MCP server and the `@rise-x/apps-sdk` (0.14.0+) `vectorStores` connector cover overlapping but
+not identical ground, and MCP is missing whole operations the platform otherwise supports. Read an
+absence from MCP as *not exposed here*, never as *not supported by the platform*.
+
+**Vector stores.** MCP has five tools: `create_vector_store`, `get_vector_store`,
+`manage_vector_store` (renew/rebuild/rename/delete), `request_vector_store_upload`,
+`add_vector_store_files`. The SDK connector has nine: `create`, `get`, `addFiles`, `listFiles`,
+`renew`, `rename`, `rebuild`, `deleteFile`, `delete`. The gap that matters most: MCP has **no
+per-file delete** — an agent driven purely through MCP cannot remove one bad file from a store,
+only rebuild the whole lineage (§ `references/managing-vector-stores.md`) or delete the whole
+store. The gateway does expose `DELETE /agent/vector-stores/{id}/files/{fileId}` directly, so a
+federated app (or anything else calling the gateway) can do it — an MCP-only agent cannot. Neither
+surface can list existing stores; `create_vector_store`'s/`.create()`'s returned id is the only
+handle either way.
+
+**Work items.** The SDK connector has `work.delete(workId)`; MCP has no `delete_work`. See
+`references/managing-work-items.md` § Probe work items for the practical consequence (residue in a
+scratch ecosystem with no cleanup tool).
