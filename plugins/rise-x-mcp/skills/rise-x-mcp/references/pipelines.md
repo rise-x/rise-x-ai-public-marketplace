@@ -120,3 +120,5 @@ there's no need for the larger `"full"` document.
 5. **`watchPaths` matter** — an operation only re-runs when a watched path changes.
    Watch the path your condition reads.
 6. **Publish to test** — rules don't run on a draft. Publish, then drive a work item.
+   A pipeline-derived branch can be absent on a completed work item even though it was present earlier (unconfirmed), so a later gate reading it can fail for an item that passed before. Re-derive it, or persist it to a path the flow writes itself.
+   What `:default=` does when a path is present but empty, as against absent, is untested. Use an explicit emptiness check for a safety gate.

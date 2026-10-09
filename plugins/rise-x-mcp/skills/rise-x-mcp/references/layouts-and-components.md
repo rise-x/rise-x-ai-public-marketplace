@@ -606,7 +606,7 @@ All `isHiddenDataPath` and `readOnlyWhen` expressions are evaluated by the `dyna
 | `input-select` | `col-6` | Single dropdown selection |
 | `check-box` | `col-6` | Boolean yes/no |
 | `product-toggle-switch` | `col-6` | On/off toggles. **Preferred.** `switch` and `toggle` schemas also exist on the server but may behave differently — use `product-toggle-switch` when creating components. |
-| `attachments` | `col-12` | File uploads |
+| `attachments` | `col-12` | File uploads. **Needs `properties.folder`**, or it renders no upload control: `add_components` accepts it but warns. See `references/attachments.md`. |
 | `comments-box` | `col-12` | Comment threads |
 | `data-grid` | `col-12` | Tabular data entry |
 | `search-things` | `col-6` | Entity lookup / reference to assets |
@@ -623,6 +623,10 @@ All `isHiddenDataPath` and `readOnlyWhen` expressions are evaluated by the `dyna
 | `image-readonly` | `col-12` | Read-only image display |
 | `link-list` | `col-12` | List of links |
 | `step-slider-v1` | `col-12` | Step progress indicator |
+
+**Storage gotchas:**
+- `richtext-input` stores HTML, not text: a one-word answer reads back as `<p>word</p>`. Strip the markup when reading, and write HTML (a bare string persists but loses paragraph breaks and a typed `<` reads as a tag).
+- `required: true` on a component may not enforce at submit (unconfirmed): one empty required field advanced the item. Treat it as a UI affordance and put anything that must hold behind a validation rule (`references/validation.md`).
 
 **Component Name Gotchas:**
 - `input-select` NOT `select` — the server rejects `select` with the canonical suggestion

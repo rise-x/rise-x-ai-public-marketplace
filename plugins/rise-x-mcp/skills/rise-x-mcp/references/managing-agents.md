@@ -205,7 +205,9 @@ not a partial or best-effort degradation of just the offending server or tool.
    camelCased like the rest of the wire format. Get real ids from `create_vector_store`
    (`references/managing-vector-stores.md`); every user of this agent searches the same store
    through this config, so reserve it for a genuinely shared corpus. A per-conversation or
-   per-work-item corpus belongs on `vector_store_ids` in the run call, not here.
+   per-work-item corpus belongs on `vector_store_ids` in the run call, not here. No run — MCP or
+   SDK — returns citation metadata for a `file_search` hit (`references/managing-vector-stores.md`
+   § Using a store in a run): don't build a feature that expects a deep link to a source location.
 6. **`model` takes a tier, not a model name.** `create_agent`/`update_agent` reject
    `"gpt-6-sol"`-style names outright. Don't copy a `gpt-5.6-*` value from `get_agent` into
    `update_agent`: those legacy names still run, but they can't be written back. Pass a tier
@@ -219,3 +221,5 @@ not a partial or best-effort degradation of just the offending server or tool.
 9. **`agent_id` must be a real UUID** — `get_agent`/`update_agent`/`delete_agent` validate the
    format client-side and fail fast (`validation` error, no network call) on anything else, so a
    copy-paste mistake is caught immediately instead of surfacing as a confusing 404.
+10. **An agent record has no structured-output or response-format field.** Put a JSON contract in
+    `system_prompt`, and have the caller validate the reply rather than trust it.
