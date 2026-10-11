@@ -1,5 +1,7 @@
 # Rise-X MCP Integration Authoring Skill
 
+For service-specific setup and validation status, see the [provider catalog](provider-integrations.md).
+
 This reference is the **elicitation + safety harness** for the Rise-X integration tools exposed by the Rise-X MCP server (the `integration_tools.py` module, maintained in the `rise-x-ai` repo — not in this marketplace repo). The domain reference (RiseIntegrationPoco shape, lifecycle, decryption, deletion semantics) lives alongside this file at `integrations.md` — read that for *what* the fields mean. This file is about *how* to gather them from the user without guessing.
 
 ## Core principle

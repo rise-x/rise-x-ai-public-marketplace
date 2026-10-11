@@ -1,0 +1,70 @@
+{
+  "name": "OutlookBusinessCalendar",
+  "description": "Shared business calendar through Microsoft Graph",
+  "baseUri": "https://graph.microsoft.com/v1.0",
+  "headers": { "Accept": "application/json" },
+  "parameters": [
+    {
+      "name": "graphClientSecret",
+      "value": "<client-secret-value>",
+      "description": "Microsoft application credential; supply through the authorized secret input",
+      "isSecret": true
+    }
+  ],
+  "authentication": {
+    "type": "ClientCredentials",
+    "tokenUrl": "https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token",
+    "clientId": "<application-client-id>",
+    "secret": "{$.graphClientSecret}",
+    "grantType": "client_credentials",
+    "scope": "https://graph.microsoft.com/.default",
+    "scheme": "Bearer",
+    "target": "",
+    "parameters": {}
+  },
+  "endpoints": [
+    {
+      "name": "QueryCalendar",
+      "endpointUri": "/users/bookings@example.com/calendarView?startDateTime={$.from}&endDateTime={$.to}",
+      "method": "GET",
+      "request": null,
+      "responseValuePath": "$.value",
+      "response": null,
+      "authentication": null,
+      "parameters": [],
+      "enableForAssetSearch": false
+    },
+    {
+      "name": "CreateEvent",
+      "endpointUri": "/users/bookings@example.com/calendar/events",
+      "method": "POST",
+      "request": {
+        "subject": "{$.subject}",
+        "body": { "contentType": "Text", "content": "{$.description}" },
+        "start": { "dateTime": "{$.start}", "timeZone": "UTC" },
+        "end": { "dateTime": "{$.end}", "timeZone": "UTC" },
+        "transactionId": "{$.transactionId}"
+      },
+      "responseValuePath": "$",
+      "response": null,
+      "authentication": null,
+      "parameters": [],
+      "enableForAssetSearch": false
+    },
+    {
+      "name": "UpdateEvent",
+      "endpointUri": "/users/bookings@example.com/calendar/events/{$.eventId}",
+      "method": "PATCH",
+      "request": {
+        "subject": "{$.subject}",
+        "start": { "dateTime": "{$.start}", "timeZone": "UTC" },
+        "end": { "dateTime": "{$.end}", "timeZone": "UTC" }
+      },
+      "responseValuePath": "$",
+      "response": null,
+      "authentication": null,
+      "parameters": [],
+      "enableForAssetSearch": false
+    }
+  ]
+}

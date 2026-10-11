@@ -32,6 +32,7 @@ Existing-app work skips straight to the matching phase:
 | Intent | Read |
 | --- | --- |
 | "Add a feature to app <x>" — anything that adds or changes UI | `references/design.md` first (mock → approval), then `references/build.md` |
+| Connect an external service or shared Outlook calendar | Load the installed `rise-x-mcp:integrate-microsoft-outlook-calendar` skill for Outlook, or the `rise-x-mcp` skill’s `references/provider-integrations.md` for another provider; then `references/build.md`. Distinguish a real calendar connection from calendar-only UI or personal delegated sign-in. |
 | Shell hooks / connectors / query layer / lifecycle hooks — no UI change | `references/build.md` |
 | "Redesign screen X" / "what should this look like" / migrate to the design system | `references/design.md` (mock → approval), then `references/build.md` |
 | The app is OLD — a `webpack.config.js` at its root, hand-rolled UI, no `APP.md` | `references/upgrade.md` — ask about migrating before changing it; a design-system migration goes mock-first, a build-only swap does not |

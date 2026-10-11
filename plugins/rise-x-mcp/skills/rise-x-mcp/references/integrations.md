@@ -1,5 +1,7 @@
 # Managing Integrations
 
+For service-specific setup and validation status, see the [provider catalog](provider-integrations.md).
+
 > **Authoring an integration?** This reference covers field shape, lifecycle, and pitfalls. For the *protocol* of how to gather missing fields from the user (introspect-first, batched questions, secrets handling, dry-run before commit), load `integration-authoring.md` (sibling reference in this same directory) BEFORE any mutating call (`update_integration`, `update_integration_endpoint`, `import_integrations`, `delete_integration*`, `test_integration_endpoint*`).
 
 > **Backend code references.** File/line pointers in this doc (e.g. `TokenExtensions.cs`, `DataSourceConfigurationHelper.cs`, `IntegrationConfigGrain`, `JsonApiHelper`, `RiseIntegrationBuilder`) refer to the Rise-X backend in the **`rise-x-ai`** repository — **not** this marketplace repo. They are provenance notes for backend maintainers; you don't need them to author integrations.

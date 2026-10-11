@@ -127,6 +127,21 @@ and check the other old-app signals too (`references/upgrade.md`): ask the
 user about migrating to the current SDK + design system before piling new
 work on old foundations.
 
+### External service integrations
+
+Declare known integration endpoints as environment-bound dependencies and invoke
+`deps.<alias>.integration.invoke({ data })`. Each alias needs both integrationId
+and endpointId. Invocation is network-only; check the external success envelope
+as well as transport errors. Credentials stay in Rise-X.
+
+Load the installed `rise-x-mcp:integrate-microsoft-outlook-calendar` skill for
+shared Outlook calendars and its `references/apps.md` for the draft app recipe.
+For other providers, read `references/provider-integrations.md` relative to the
+installed `rise-x-mcp` skill. Resolve these through the installed plugin, since
+separate plugin versions need not be sibling directories. If absent, identify the
+missing plugin and provide a manual configuration handoff; do not invent a local
+path. A calendar UI alone does not require a provider integration.
+
 ### App dependencies (`rise-x-app.json`) — no GUID literals in source
 
 **Needs `@rise-x/apps-sdk` >= 0.12.0.** This section is the normative statement
