@@ -100,12 +100,12 @@ There is no wildcard syntax. `equals` is an exact match, so a `*` in the value i
 
 ## `enforce_fields` Behaviour
 
-`fields` is **opt-in**. By default the server ignores it and runs the resource's default projection (Always + Fallback entries). Set `enforce_fields=True` on the request to validate `fields` against the whitelist AND apply it as the Mongo projection.
+`fields` is **opt-in**. By default the server ignores it and runs the resource's default projection (Always + Fallback entries). Set `enforce_fields=True` on the request to check `fields` against the whitelist AND apply it as the Mongo projection.
 
 - `enforce_fields=False` (default) → `fields` is ignored entirely. Response carries the fallback projection (every resource's "default columns"). Safe default — Rise resources are dynamic and a hard-coded whitelist may not match the runtime schema.
 - `enforce_fields=True` → server checks each `fields` entry against the resource whitelist (and, for `data.*`, the pinned flow's schema) and projects the listed keys + the Always-projected keys. Required to surface any **opt-in** field (Work `data.*`, `statusDisplay.*`, `comments`, Flow `publishStatus`, etc.) — without it those keys stay null in the response regardless of what's in `fields`.
 
-An unknown projection path is **not** a 400. The server keeps it and reports it in the response's `warnings[]` (a list of plain strings): a whitelist key it does not know is omitted from the results (`Projection field 'noSuchField' is not a searchable field for this resource; it will be omitted from the results.`), and an unknown `data.*` path is projected as sent and may come back empty (`Projection field 'data.x' is not defined in the schema for flow <id>; it will be projected as requested and may come back empty.`). A `data.*` path that matches the schema only by case gets a casing warning naming the declared spelling, because the Mongo projection is case-sensitive. Only a null entry, or a segment Mongo itself rejects (empty or `$`-prefixed), is still a 400. Filter and sort paths stay strict: an unknown path there is a 400. Read `warnings[]` on every search that sets `enforce_fields=True` — a projected field that comes back `null` with a warning against it was never going to be populated.
+An unknown projection path is **not** a 400. The server keeps it and reports it in the response's `warnings[]` (a list of plain strings): a whitelist key it does not know is omitted from the results (`Projection field 'noSuchField' is not a searchable field for this resource; it will be omitted from the results.`), and an unknown `data.*` path is projected as sent and may come back empty (`Projection field 'data.x' is not defined in the schema for flow <id>; it will be projected as requested and may come back empty.`). A `data.*` path that matches the schema only by case gets a casing warning naming the declared spelling, because the Mongo projection is case-sensitive. Only a null entry, or a segment Mongo itself rejects (empty or `$`-prefixed), is still a 400. Filter and sort paths stay strict: an unknown path there is a 400. Read `warnings[]` on every search that sets `enforce_fields=True`: a field that comes back `null` with a warning against it is a path the server doesn't know, and for a casing warning, re-run with the spelling it names.
 
 ## Counts & pagination
 
@@ -238,7 +238,7 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 >
 > # assignedUsers: pick the key by the shape you want
 > fields = ["assignedUsers"]        # every user with id, displayName, email, companyId
-> fields = ["assignedUsers.email"]  # every user with email only; id / companyId come back as the all-zero GUID
+> fields = ["assignedUsers.email"]  # every user with email only; id / companyId come back as the all-zero GUID, not a real id, and displayName as null
 > ```
 >
 > Exception: `data.*` granular paths DO trim the response (DataList projection is path-aware). List specific `data.foo.bar` paths when you know what you need; reach for bare `"data"` only for schema-free exploration.
@@ -257,7 +257,7 @@ Dynamic fields live under the `data.*` namespace. They're discovered per-flow vi
 
 1. **Discover** — call `get_flow_data_schema(flow_origin_id)` to get the flat list of valid paths. Skip this only if you already know the exact path from a prior call in the same session.
 2. **Filter — flowOriginId is mandatory** — every `search_works` payload MUST include a `flowOriginId` leaf on the AND-spine: `equals` for one flow, `in [...]` for multiple. A payload naming any `data.*` path (in `filter`, `sort`, OR `fields`) must put it under the same `and` group as that path, since the server also resolves the schema from it. Missing → 400 with the discovery URL.
-3. **Compose** — reference `data.*` paths exactly as returned by step 1. Under a container (`isArray: true`), write the path without an index in `filter` and `sort` (an index is stripped and the leaf matches if any row matches); in `fields`, the un-indexed path projects every row's value and `data.grid[0].col` selects one row.
+3. **Compose** — reference `data.*` paths exactly as returned by step 1. Under a container (`isArray: true`), write the path without an index in `filter` and `sort` (an index is stripped and the leaf matches if any row matches); in `fields`, the un-indexed path projects every row's value and `data.grid[0].col` selects one row (the schema check strips the index, so an indexed path raises no warning).
 
 End-to-end example showing both leaves under one `and`:
 
@@ -394,7 +394,7 @@ The static whitelist for `search_flows`. Five string fields have closed value se
 
 ## Company Search filterable fields
 
-The static whitelist for `search_companies`. No enum fields — all strings are user-supplied free-form values.
+The static whitelist for `search_companies`. No enum fields; the string columns are user-supplied free-form values, and `domains` is an array.
 
 | Field key | Type | Notes |
 |---|---|---|
@@ -583,4 +583,4 @@ await search_assets(
 10. **Using `list_assets` to filter or sort** → `list_assets` lists a single asset type via the data grid with no filter engine. Use `search_assets` for any condition, sort, or projection.
 11. **Reusing Work `status` values on `search_assets`** → asset `status` is `DianaEntityStatus` (`"Open"` / `"Closed"` / `"Deleted"` only). Work's `"Completed"` / `"Ok"` are not asset states; see #12 for what a non-member value does.
 12. **A coerced-enum value that is not a member** (`"InReview"` on `flowState`, `"Suspended"` on Work `status`) → matches nothing: `equals`/`in` return an **empty** page, `notEquals`/`notIn` return **everything**, never a 400. Check the value against the enum lists in the field tables before trusting the result.
-13. **Ignoring `warnings[]` on a search** → an unknown projection path or a clamped `page_size` is a 200 with a warning, not an error. A field that comes back `null` with a warning against it was never projected; a page of 100 rows after asking for 500 is the clamp, not the whole result.
+13. **Ignoring `warnings[]` on a search** → an unknown projection path or a clamped `page_size` is a 200 with a warning, not an error. A field that comes back `null` with a warning against it is a path the server doesn't know; for a casing warning, re-run with the spelling it names. A page of 100 rows after asking for 500 is the clamp, not the whole result.
