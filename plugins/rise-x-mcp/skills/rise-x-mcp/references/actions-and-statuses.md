@@ -48,6 +48,7 @@ Use `get_flow_step(flow_id, step_id)` to see the full step details including its
 | `displayName` | string | Button label shown to users (e.g. `"Approve"`, `"Send Back"`) |
 | `eventName` | string | **Unique identifier** used for routing. Must be unique across the ENTIRE FLOW — the engine keys event idempotency per work item by eventName, so a duplicate anywhere in the flow causes runtime 403s on work items. `manage_action` validates this before writing. |
 | `actionTypeName` | string | `"Submit"` (advances work) or `"Stop"` (terminates/stops) |
+| `condition` | string | Optional. Expression deciding whether the button is **offered**. Same token-replaced syntax as an activity `condition` (below). Availability only, never enforcement: see § Action conditions. |
 | `color` | string | Button color: `"primary"` (default), `"error"` (red), `"warning"` (orange), `"secondary"` |
 | `skipValidation` | bool | If true, skip form validation when this action is clicked |
 | `next` | list | Routing destinations (see below) |
@@ -118,6 +119,10 @@ Removes the activity from the action.
 
 **Note:** a step's default `Submit` action created by `AddAll` may already carry default (empty) `SendEmail` activities. If you want only your activity to run, `delete` those first.
 
+### Action conditions (`condition` on an action)
+
+An action `condition` filters what is **offered**. It does not gate the submit: a client that sends the event anyway drives the transition even when the condition is false. It is not a security boundary, so anything that must hold also needs an activity `condition` or a validation rule. The work item's offered-actions list does not reflect it either (`references/managing-work-items.md`, `get_work`), so decide the branch yourself before choosing an event.
+
 ### Conditional activities (`condition`)
 
 Any activity can be gated by an optional `condition` — pass it to `manage_activity` (`add` or `update`) as the top-level `condition` argument (it is **not** a member of `properties`). When set, the engine runs the activity only if the expression is true; empty/omitted means it always runs. Pass `""` to clear a previously set condition.
@@ -135,6 +140,11 @@ condition = "'{$.orderRequest.selectDeliveryTerminal.displayName}' == 'ESEASA'"
 If a token path does not resolve (wrong path, unset field), it collapses to an empty string and the expression is false — so a mistyped path silently **skips** the activity rather than erroring. Verify the path against `get_flow_data_schema` (drop the leading `data.`).
 
 **Ordering caveat (fail-hard gate):** activity execution order within an action is config-only — it follows the `executeWhen` phase, then array position; there is no priority field. If a `continueOnError: false` activity must gate the others (so nothing non-reversible, e.g. a `SendEmail`, runs when it fails), author it **first** in the action's activity list.
+
+### Activities that ignore their own properties
+
+- `AddDataIntegrityHashActivity` writes the hash to the wrong place: the configured nested `hashDataPath` is flattened onto the data root with its casing changed, and the configured parent is left null. Anything reading the configured path sees nothing. Read the flattened path, or do not depend on the hash.
+- `UpdateAssetValueActivity` never dereferences `entityTypeComponentId` (the schema says it is not used). Setting it changes nothing.
 
 ### Start Cross Ecosystem Work
 
