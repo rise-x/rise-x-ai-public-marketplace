@@ -552,7 +552,14 @@ for await (const row of work.iterate({ flow, maxItems: 100 })) { /* … */ }
 // filtered/sorted slice — belongs on work.search (SDK >= 0.7.0), not on
 // list/iterate. The v4 index returns those ON the row, so you never fetch each
 // item to derive them (the N+1 that makes dashboards slow), and the filter tree
-// replaces client-side narrowing.
+// replaces client-side narrowing. The same goes for the document: project
+// `data` (or `data.<path>`) and it arrives with the row — a `work.getData` per
+// id after a search is the same N+1. The connector sends `enforceFields: true`
+// for you; the server IGNORES `fields` without it, so a hand-rolled
+// `post('/api/v4/work/search')` body must send it too, or every row comes back
+// as the default projection with no `data` at all. One app read that as "search
+// unreadable", fell back to one GET per work item, and ran the fallback on
+// every read for twenty releases.
 // EVERY v4 search (work AND asset) MUST pin flowOriginId with equals/in, at
 // the top level or under `and` groups — an or-nested pin doesn't narrow and
 // is rejected too. Environment-wide search is not supported: the server 400s
@@ -683,6 +690,43 @@ Rules:
 - Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
 - Keys are environment-scoped (`['rise-apps-sdk', envId, …]`) — ecosystem switches refetch automatically; `queryKeys` is exported for targeted invalidation. Advanced react-query features (select/suspense/prefetch) go through the factories: `useQuery(flowQueries.list(args))`.
 - SSE streams (`agents.run`, chat `send`) and the async iterators stay on the connectors — don't wrap them in queries.
+
+### Keeping data fresh — subscribe, never poll (SDK >= 0.17.0)
+
+The shell holds one SignalR connection to the platform's event hub, and the
+platform fans every write to a work item out to that item's ACL as an event
+(`WorkUpdated`, `DataPatch` / `DataObjectPatch`, `WorkDeleted`). `realtime` on
+`@rise-x/apps-sdk/connectors` hands an app that channel, read-only. An app that
+shows other people's work subscribes to it; it does not re-read on a timer.
+
+```ts
+import { realtime, work } from '@rise-x/apps-sdk/connectors';
+
+if (realtime.isAvailable()) {
+  // One stream for every change this user is told about. A patch carries
+  // flowOriginId, userId, path and — when the hub reached this user directly —
+  // the value; a group delivery (`DataObjectPatch`) carries the same without it.
+  const off = realtime.onWorkChange((change) => queue(change.workId, change.kind));
+  // Events sent while the socket was down are not replayed.
+  const offStatus = realtime.subscribeStatus((s) => s === 'connected' && rereadWhatIsShown());
+}
+```
+
+Rules, each one paid for once:
+
+- **No timer that reads.** A `setInterval` (or react-query `refetchInterval`) that re-reads a list is a review finding. On a host without the channel (`realtime.isAvailable()` is false: a shell before bridge v5, standalone dev) keep ONE slow fallback, 60s or slower, and say so in `AGENTS.md`. The 10s whole-board poll it replaces ran from every open tab for months, and the fan-out behind it multiplied every cycle by the task count.
+- **Coalesce before you react.** One edit on a screen is several patches; a routine writes a hundred. Debounce a few hundred milliseconds after the last event with a maximum wait of a couple of seconds, dedupe by work id, keep retries as a union, back off on failure. A listener that reads per event rebuilds the request flood by another route.
+- **Re-read the DOCUMENT by id, never the search.** `work.getData(id)` is the record a write just reached; the search index lags it. Re-running the list after an event — or after your own write — is slower and wrong for a few seconds, and it is the lag the hold-and-settle machinery in older apps exists to paper over.
+- **A deletion is not a re-read.** A v4 delete is soft: the document still answers 200. Carry `kind === 'deleted'` through and evict without reading, or a deleted item comes back as a ghost.
+- **A return to `connected` re-reads what is on screen.** That is the one whole read the channel asks of you.
+- **No read on window focus, and nothing before the first load has landed.** A focus event fires as the app opens; a focus re-read doubled every cold start. If you keep one at all, gate it on "first load complete" and "channel not connected".
+- **Our own writes echo back.** Design the re-read so that is one GET that changes nothing (a generation or version guard around the cache), not a second optimistic update.
+- **A fallback must not be a silent downgrade.** When a primary read fails for a reason you did not expect, log once at warning level and do not latch the fallback for the session on a parse failure; a parse failure is a bug in the parser, and latching turns it into the permanent request pattern with no signal.
+
+Where a budget helps the review: on a cold load the Network panel should show one
+search per list, one document read per record the screen holds whole, and then
+nothing until something changes. Anything per row, or anything after idle, is a
+finding.
 
 ### UI components (`@rise-x/apps-sdk/ui`)
 
@@ -926,6 +970,9 @@ manifest with the live `remoteUrl` and `module` (defaults to `./App`).
 - **Don't** put navigation in a top bar. The host already renders top-bar nav above the app; app navigation belongs in a left sidebar/rail.
 - **Don't** assume the user or environment is non-null inside lifecycle hooks — accept the typed `ctx` and check.
 - **Don't** modify `src/index.tsx`'s `import('./bootstrap')` line. That async dynamic import is the Module Federation boundary; the shell-side `eager: true` shares depend on it.
+- **Don't poll for work changes.** Subscribe through `realtime.onWorkChange` (SDK >= 0.17.0) and re-read the one record an event names by id; a timer that reads is a review finding, and the only poll allowed is a slow fallback where `realtime.isAvailable()` is false (§Keeping data fresh).
+- **Don't fetch per row after a list.** A `work.search` with `data` projected returns the document on the row; a `work.getData` per id afterwards is an N+1, and an enumeration (`workIds/{flow}` then a GET each) is the same thing with an extra request in front.
+- **Don't hand-roll a search body.** Use the connector. If you must POST `/api/v4/work/search` yourself, copy the connector's body: `enforceFields: true` or your `fields` are ignored and no row carries `data`.
 
 ## Wrap-up — do this before reporting done
 
