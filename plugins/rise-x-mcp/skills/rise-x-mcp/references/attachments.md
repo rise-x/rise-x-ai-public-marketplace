@@ -1,93 +1,64 @@
 # Work Attachments
 
-Files held against a work item, separate from its form data. The `attachments`
-layout component renders the picker; the upload itself goes to a dedicated
-route that none of the layout or work tools cover.
+Files held against a work item or asset, separate from its form data. The
+`attachments` layout component renders the picker; from MCP, the dedicated
+attachment tools do the upload — never build the platform's multipart route by
+hand.
 
-> **Verification status.** The route, the multipart shape, the
-> replace-on-same-filename behaviour, and the `properties.folder` requirement
-> were exercised live against a test deployment. The absence of a size cap and
-> of a malware scan is **read from source, not exercised** (the attribute and
-> the missing Kestrel cap are visible in the handler; no oversized upload was
-> actually pushed through). Which codebase implements the deployed
-> `upload_attachment` / `request_attachment_upload` MCP tools is **not
-> established** — see § MCP tools at the end. The wire contract below holds
-> regardless of which server serves it.
+> **Verification status.** The replace-on-same-filename behaviour and the
+> `properties.folder` requirement were exercised live against a test
+> deployment.
 
-## The upload route
+## Tool inventory
 
-```
-POST /api/v4/attachments/work/{workId}/{folder}
+| Tool | Purpose |
+|---|---|
+| `request_attachment_upload(target, target_id, folder, filename, content_type?)` | Step 1 — mint a one-time upload URL + `uploadId` for one file, bound to the work item or asset and folder |
+| *(client)* `PUT <uploadUrl>` | Step 2 — send the file bytes to the URL from step 1 (the envelope's `hint` carries a ready `curl`) |
+| `upload_attachment(upload_id)` | Step 3 — forward the staged file to its resource; needs EDIT access on that resource |
+| `list_attachments(resource_id, resource_type, folder)` | The attachments a work item or asset holds in one folder — use it to verify an upload landed |
+| `update_attachment(attachment_id, title?, expiry?)` | Change title and/or expiry; omitted fields are left alone |
+| `delete_attachment(attachment_id)` | Flag deleted and unlink from every work item the caller can edit |
 
-Content-Type: multipart/form-data
-Form field:   files          # repeated once per file, same field name
-```
-
-- `{workId}` is the work item's GUID, the same id `get_work` takes.
-- `{folder}` is the folder name the file lands in. It must match the
-  `properties.folder` of the `attachments` component that is meant to display
-  it (see § 3. The layout component needs `properties.folder`), or the file
-  uploads and nothing shows it.
-- The field name is `files` for every file. Two files means the field appears
-  twice, not `files[0]` / `files[1]`.
+## Uploading a file
 
 ```
-# CRITICAL: never set the multipart Content-Type header by hand. The boundary
-#   token is generated with the body — a hand-written header carries the wrong
-#   boundary and the server parses zero parts. Hand a FormData to fetch and let
-#   the browser write the header.
-form = new FormData()
-form.append("files", file)             # repeat per file
-fetch(url, {method: "POST", body: form})   # no Content-Type header
+1. request_attachment_upload(target="work", target_id=workId,
+                             folder="evidence", filename="report.pdf")
+     → uploadUrl, uploadId         # one file per uploadId — mint again for the next
+2. PUT the bytes to uploadUrl      # single use, short-lived
+3. upload_attachment(uploadId)     # → attachment id, target, folder, counts
+4. list_attachments(workId, "work", "evidence")   # CRITICAL: confirm it appears
 ```
 
-### From inside a federated app
-
-An app reaches the same route through the SDK's API accessor rather than
-building the URL itself:
-
-```
-1. api = getApiV4("attachment")          # the attachment-scoped v4 client
-2. api.post(`work/${workId}/${folder}`, form)
-```
-
-Authoring a federated app is otherwise out of scope here — see the
-`rise-x-apps` skill in this marketplace for the SDK, the shell accessors, and
-the app lifecycle.
+- `folder` must be one an `attachments` layout component names in its
+  `properties.folder` (see § The layout component needs `properties.folder`),
+  or one that belongs to a data-grid column. A file in a folder nothing names
+  is stored and invisible.
+- A data-grid column's folder needs one more step: the returned attachment id
+  has to be written to the grid's row path with `update_work_data`, or the
+  file is in the folder but in no cell.
+- Call `upload_attachment` once per `uploadId` at a time. Two calls racing on
+  the same id can both send, and the resource ends up with two copies.
 
 ## What to design around
-
-Three behaviours shape how an app should name and bound its uploads.
 
 ### 1. Same filename + same folder REPLACES the earlier file
 
 A second upload of `report.pdf` into the same folder versions over the first
-one. It does not add a second attachment. This is worth using deliberately:
-name a file after the work item and a retake supersedes the first attempt
-instead of leaving two files for a reader to choose between. It also means an
-app that uploads under a fixed name cannot accumulate a history.
+one. It does not add a second attachment, and nothing in the response says a
+file was superseded.
 
 ```
 # NOTE: to keep every upload, make the filename unique yourself — the server
 #   will not disambiguate for you.
-upload(workId, "evidence", file named `${workCode}-${timestamp}.pdf`)
+request_attachment_upload("work", workId, "evidence", filename=`${workCode}-${timestamp}.pdf`)
 
 # NOTE: to make a retake supersede the previous one, do the opposite.
-upload(workId, "evidence", file named `${workCode}.pdf`)
+request_attachment_upload("work", workId, "evidence", filename=`${workCode}.pdf`)
 ```
 
-### 2. No size limit and no malware scan
-
-The endpoint carries `[DisableRequestSizeLimit]` and there is no Kestrel cap in
-front of it, so the server enforces **no** upload size. Nor does it run a
-malware scan. Validation is **filename-extension only**.
-
-> ⚠️ **The caller's own UI is the only bound that exists.** An app that wants a
-> size ceiling, a content-type check, or a scan must implement it before the
-> POST — nothing downstream will. Treat a stored attachment as untrusted
-> content, the same as any other user-supplied file.
-
-### 3. The layout component needs `properties.folder`
+### 2. The layout component needs `properties.folder`
 
 An `attachments` component with no `folder` in its `properties` displays **no
 upload control at all**. The field renders and does nothing.
@@ -103,8 +74,8 @@ add_components(layoutId, [{
 }], parent_section_id=sectionId)
 ```
 
-The folder is also the coupling between the component and the route: a file
-posted to `/evidence` appears in the component whose `folder` is `evidence`,
+The folder is also the coupling between the component and the upload: a file
+uploaded to `evidence` appears in the component whose `folder` is `evidence`,
 and nowhere else. Two components may not share a folder unless you intend both
 to show the same files.
 
@@ -119,20 +90,9 @@ Relationship sync can copy attachments between related items with
 `attachmentOperations` (`sourceFolder` → `destinationFolder`) and the
 `includeAttachments` flag — see `references/relationships.md`.
 
-## An agent cannot read a work attachment
+## Letting an agent read an attachment
 
-A platform AI agent has **no** path to a file stored on a work item. This is an
-architectural boundary, not a missing parameter: an app that wants an agent to
-read a document holds the file once and sends it twice. The mechanics, and the
-two ways a file does reach an agent, are in
-`references/managing-agents.md` § Feeding a file to an agent.
-
-## MCP tools
-
-Some deployments expose `upload_attachment`, `request_attachment_upload`,
-`list_attachments`, `update_attachment`, and `delete_attachment` as MCP tools.
-Their signatures and behaviour are **not documented here** because they were
-not exercised, and which codebase implements them is still being established —
-do not assume they mirror the route above. If they are absent on the server you
-are talking to, read that as not supported there, not as a permissions
-problem. The route in § The upload route is the contract that was verified.
+A platform AI agent reads a work item's attachments through the Rise-X MCP
+server: add the server to the agent's `mcp_servers`, mention it in the system
+prompt, and pass the work id as context on the run. See
+`references/managing-agents.md`.

@@ -267,12 +267,9 @@ Properties are split between **top-level** (on the component dict) and **nested*
 | `readOnly` | `boolean` | Make field read-only |
 | `defaultValue` | `string` | Default value — supports expressions (see below) |
 
-> ⚠️ **`required: true` is not reliably enforced at submit.** One field was
-> `required: true`, left empty, and the submit advanced anyway. Enforcement
-> appears to need a **validation rule** (`references/validation.md`) rather
-> than the flag alone. Whether the flag ever enforces on its own was not
-> established — so when a field genuinely must be filled, author a validation
-> rule and treat `required` as a UI hint.
+> ⚠️ **`required: true` is a UI hint, not submit enforcement.** A field that
+> must be filled needs a **validation rule** (`references/validation.md`); an
+> empty `required` field can still be submitted.
 
 #### copyData / cloneData (inert flags — NOT duplicate control)
 
@@ -673,9 +670,9 @@ update_work_data(workId, "$.notes.summary", "set", "<p>First.</p><p>Second.</p>"
 
 An `attachments` component with no `folder` in its `properties` renders and
 shows **no upload control at all**. The folder also couples the component to
-the upload route — a file posted to `/{folder}` appears only in the component
-whose `folder` matches. Full contract, including that the route enforces no
-size limit and runs no malware scan, in `references/attachments.md`.
+the upload — a file uploaded to `{folder}` appears only in the component
+whose `folder` matches. Upload tools and full contract in
+`references/attachments.md`.
 
 ```
 {"component": "attachments", "label": "Evidence",

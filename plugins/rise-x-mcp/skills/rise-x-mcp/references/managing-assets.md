@@ -108,12 +108,15 @@ Step 3: Finalize
   get_asset(entityId)   # → status / currentState must have MOVED
 ```
 
-> ⚠️ **The name in `stepName` / `sourceStepName` is an ACTION SET name.** It is
-> not the task name, and not the `ByStepName` camelCase step name that action
-> routing takes. That is why it must be copied verbatim from the
-> `create_asset` / `edit_asset` response rather than constructed — the shapes
-> vary within a single ecosystem (`…/Actionset`, `…_set`, `ActionSet_1`, bare).
-> See `references/managing-work-items.md` § `step_name` is the ACTION SET name.
+> ⚠️ **The response's `stepName` is the name `submit_work` takes — copy it
+> verbatim.** It is an ACTION SET name: not the task name, and not the
+> `ByStepName` camelCase step name that action routing takes. On a v3-style
+> asset flow it is the `SubmitUntitledStep/Generated-<guid>` form above, and
+> the event name is the same string; on other flows the shapes vary
+> (`<step>/<task>/Actionset`, `<name>_set`, `ActionSet_1`), so never construct
+> one. `sourceStepName` is an `invitation.destinations[]` routing field, not a
+> response key. See `references/managing-work-items.md` § `step_name` is the
+> ACTION SET name.
 
 ### Editing an Existing Asset
 

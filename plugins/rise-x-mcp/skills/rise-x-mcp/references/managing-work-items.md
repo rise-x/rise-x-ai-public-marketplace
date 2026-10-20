@@ -46,7 +46,7 @@ Get a work item by its GUID.
 
 Key fields in the summary response:
 - `id` — work item GUID
-- `activeStepName` — current step the work is on
+- `activeStepName` — current step the work is on (a STEP name — not what `submit_work` takes; see § `step_name` is the ACTION SET name)
 - `actions` — available actions, with `events[].eventName` for `submit_work`
 - `data` — form field values
 - `status` — `Open`, `Closed`, `Completed`, `Deleted`, or `Ok` (`DianaWorkState`; `Ok` is a sync-process flag, not a state a user drives)
@@ -112,27 +112,24 @@ Update a field value on a work item.
   - `"pull"` — remove the field
   - `"rename"` — rename the field (value = new name)
 - `value` — the value to set/push, or new name for rename
-- `section_name` — **required** — the task name scoping the data location (e.g. `"UntitledTask/Generated-..."` or the camelCase task name from `get_flow_steps`). Omitting it causes 500 errors.
+- `section_name` — **required** — the task's `taskName`, scoping the data location. Omitting it causes 500 errors. Two ways to find it, in order of preference — see below.
 
-#### `section_name` is the action set name's MIDDLE segment
+#### `section_name` is the task's `taskName`
 
-The most reliable way to find it is to take the task's **action set name** and
-read the middle out of it, rather than guessing a task name:
-
-| Action set name | `section_name` |
-|---|---|
-| `purchaseOrderDetails/task1/Actionset` | `task1` |
-| `bloodProducts/details/Actionset` | `details` |
-| `ActionSet_1` (bare, no segments) | `Task_1` |
-
-The bare `ActionSet_1` case has no middle segment to read — an asset type whose
-action set is bare took `Task_1`. Verified on one supplier asset type; whether
-`Task_N` always pairs with `ActionSet_N` was **not** established.
+1. **Fetch the step:** `get_flow_step(flow_id, step_id)` → `taskName`
+   (`get_flow_steps` projects it out; pass its `id` as `step_id`). Slash form
+   like `UntitledTask/Generated-<guid>` on v3-style flows, bare like `Task_1`
+   on v4-native flows. Deterministic — prefer this when you can fetch the step.
+2. **Read it off the action set name** when you only hold the work item: a
+   hierarchical action set name embeds the `taskName` as its **middle
+   segment** — `<step>/<task>/Actionset` → `<task>` (from `get_work` →
+   `actions[].stepName`). A bare `ActionSet_N` has no middle segment; one such
+   asset type took `Task_N`, but whether `Task_N` always pairs with
+   `ActionSet_N` was **not** established — fall back to route 1.
 
 > ⚠️ **Passing the STEP name returns HTTP 500 with no useful message** —
 > `{code: http_500, message: '500: None'}`. The server does not say what it
-> wanted. Finding the right value is trial and error unless you read it off the
-> action set, so read it off the action set.
+> wanted, so do not guess: use one of the two routes above.
 
 #### Writing a date
 
@@ -160,24 +157,22 @@ invitation stops the server deriving recipients from the flow config.
 **Parameters:**
 - `id` — work item GUID
 - `event_name` — the action event triggering the transition (e.g. `"Submit"`, `"Approve"`, `"Reject"`). Get from the work item's `actions` array.
-- `step_name` — **the ACTION SET name, not the task name and not `activeStepName`'s display form.** Take it verbatim from the item's own offered action — see below.
+- `step_name` — the ACTION SET name (`get_work` → `actions[].stepName`), not the task name and not `activeStepName`. A task name is a silent no-op — see below.
 - `invitation` — optional dict with routing destinations for the next step
 
 #### `step_name` is the ACTION SET name
 
-> ⚠️ **A task name returns `ok: true`, moves nothing, saves nothing, and leaves
-> `statusLabel` unchanged** (e.g. still `Draft`). There is no error, no warning,
-> and no `changed` diff to catch it. This cost hours twice in one session.
+A task name returns `ok: true`, moves nothing, saves nothing, and leaves
+`statusLabel` unchanged (e.g. still `Draft`) — no error, no warning, no
+`changed` diff. Several name shapes coexist in a **single** ecosystem, so there
+is no convention to construct a name from:
 
-Four action set name shapes were observed coexisting in a **single** ecosystem,
-so there is no convention to construct a name from:
-
-| Observed name | Shape |
+| Shape | Example |
 |---|---|
-| `reviewRouteApprove_set` | flat, `_set` suffix |
-| `purchaseOrderDetails/task1/Actionset` | hierarchical, slash form |
-| `bloodProducts/details/Actionset` | hierarchical, slash form |
-| `ActionSet_1` | bare |
+| flat, `_set` suffix | `<name>_set` |
+| hierarchical, slash form | `<step>/<task>/Actionset` |
+| bare | `ActionSet_1` |
+| v3-style asset flow | `SubmitUntitledStep/Generated-<guid>` — the event name is the same string (`references/managing-assets.md`) |
 
 **So take the name from the item, never build it:**
 
@@ -186,7 +181,7 @@ so there is no convention to construct a name from:
      → actions[].stepName          # THIS is the value for step_name
      → actions[].events[].eventName  # and this for event_name
    # or, in the asset create/edit path:
-   #   create_asset / edit_asset response → sourceStepName
+   #   create_asset / edit_asset response → stepName
    # NOTE: `create_asset`'s `eventName: "Submit"` is a DISPLAY label — see
    #   `references/managing-assets.md` Common Mistakes #7.
 
@@ -207,8 +202,8 @@ called a "step name" in the wire format; they are not interchangeable.
 
 `search_works` cannot tell you the value. Its Work whitelist carries no
 `activeStepId`, `activeStepName`, `currentState`, or `statusLabel` key at all —
-per-task position only ever comes from `actions[].stepName` on `get_work`, so a
-row fetched by search alone cannot say which task an item is on. See
+the action set name only ever comes from `actions[].stepName` on `get_work`, so
+a row fetched by search alone cannot say which task an item is on. See
 `references/advanced-search.md` § Work Search and `data.*` Fields.
 
 ## Creating a New Work Item
@@ -218,9 +213,12 @@ row fetched by search alone cannot say which task an item is on. See
 2. update_work_data(workId, "$.task.field",  # fill in fields (repeat as needed, sequentially)
      "set", "value", section_name)
 3. submit_work(workId, eventName, stepName)  # advance to next step
-   # CRITICAL: `stepName` here is the ACTION SET name from the create_work
-   #   response, not a task name. Then re-read the work and confirm the status
-   #   moved — see § `step_name` is the ACTION SET name.
+   # CRITICAL: the `stepName` a create_work / create_asset / update_work_data
+   #   envelope echoes is the work's `activeStepName` — a STEP name. Where it
+   #   differs from get_work → actions[].stepName (the ACTION SET name), the
+   #   latter is the one that transitions. When in doubt, get_work first.
+   #   Then re-read the work and confirm the status moved — see
+   #   § `step_name` is the ACTION SET name.
 ```
 
 The `flow_id` is the workflow's ID — find it via `get_flow_config` or from the flow creation step. The `section_name` for `update_work_data` is the task's `taskName` (slash form like `UntitledTask/Generated-<guid>` on v3-style flows, or bare like `Task_1` on v4 native flows). `get_flow_steps` projects `taskName` **out** of its response — fetch it via `get_flow_step(flow_id, step_id)` (pass the `id` field from `get_flow_steps` as `step_id`) and read `taskName` from the full step.
