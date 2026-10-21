@@ -727,16 +727,22 @@ bar is yours to build.
 
 Export any subset. The shell invokes them best-effort: errors are logged, **10s timeout per hook**, missing hooks skip silently — except `onOfflineDownload` (SDK >= 0.12), which is user-initiated, may run minutes, and where throwing **fails the download** (see `references/offline.md`). They run inside the shell page, so all the SDK accessors work from inside them.
 
+The shell runs `onInstall` the first time the user opens the app on a device, and `onUpdate` on the first open after a version bump, both before the app's first render. Opening an ecosystem runs neither, so an app the user never opens on a device gets neither hook there. Write both hooks for that timing:
+
+- **Keep them fast and local.** The app stays on its loading screen until the hook finishes, for up to 10s. Do slow or network work after the app mounts, for example with a query prefetch.
+- **Make them safe to run again.** A hook that throws or passes the 10s timeout counts as failed, and the next open runs it again, possibly over half-done work.
+- **`onInstall` sets up the current version.** A device's first open runs only `onInstall`, even when the app is several versions past its first release. `onUpdate` gets `from` = the last version whose hook succeeded on this device, so skipped versions arrive as one call (`{ from: '1.0.0', to: '4.0.0' }`), and a failing `onUpdate` is retried with the same `from`.
+
 ```ts
 import type { InstallHook, UpdateHook, UninstallHook, OfflineDownloadHook } from '@rise-x/apps-sdk';
 import localforage from 'localforage';   // or whatever you persist with
 
 export const onInstall: InstallHook = async ({ manifest, user, environment }) => {
-  // First time this device sees the app — seed defaults, pre-warm caches.
+  // First open on this device: seed local defaults for the current version. Keep it fast.
 };
 
 export const onUpdate: UpdateHook = async (ctx, { from, to }) => {
-  // Version bumped in registry — migrate persisted data here.
+  // First open after a version bump: migrate persisted data. Safe to re-run.
 };
 
 export const onUninstall: UninstallHook = async ({ manifest }) => {
