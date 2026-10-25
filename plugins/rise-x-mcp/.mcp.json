@@ -6,7 +6,7 @@
     },
     "rise-x-test": {
       "type": "http",
-      "url": "https://mcp-test.rise-x.io/mcp"
+      "url": "https://mcp.test.rise-x.io/mcp"
     }
   }
 }

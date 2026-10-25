@@ -120,7 +120,7 @@ drives in-session: after installing, you can just tell Claude "set up rise-x".
   **Customize** configuration instead (installed there yourself, or
   distributed by your organization).
 - **Network access.** Corporate environments should allowlist:
-  - `mcp.rise-x.io` and `mcp-test.rise-x.io` — the MCP servers; their OAuth
+  - `mcp.rise-x.io` and `mcp.test.rise-x.io` — the MCP servers; their OAuth
     authorization and token endpoints live on these same hosts
   - the Rise-X sign-in page your browser is redirected to during OAuth — if
     your IT team needs the exact hostname, ask your Rise-X contact
@@ -146,8 +146,23 @@ The plugin bundles two HTTP MCP servers:
 
 | Server | URL | Environment |
 | --- | --- | --- |
-| `rise-x-test` | `https://mcp-test.rise-x.io/mcp` | Test/sandbox — use for anything exploratory |
+| `rise-x-test` | `https://mcp.test.rise-x.io/mcp` | Test/sandbox — use for anything exploratory |
 | `rise-x` | `https://mcp.rise-x.io/mcp` | Production — real ecosystem data |
+
+> **Connected to test before?** The test server moved from
+> `https://mcp-test.rise-x.io/mcp` to `https://mcp.test.rise-x.io/mcp`. The
+> old address no longer answers and does not redirect, and sign-ins from it
+> are not accepted.
+>
+> - **Desktop app and Cowork:** remove the old `rise-x-test` custom connector,
+>   add it again with the new URL, and sign in again. Updating the plugin does
+>   not change a custom connector.
+> - **Claude Code CLI with the plugin:** update the plugin (see
+>   [Keeping plugins up to date](#keeping-plugins-up-to-date)), then sign in
+>   to `rise-x-test` again with `/mcp`.
+> - **A server you added yourself with `claude mcp add`:** run
+>   `claude mcp remove rise-x-test`, add it again with the new URL, and sign
+>   in again.
 
 **Always connect `rise-x-test` first**, and only move to production once test
 verifies cleanly. Note that test and production are **separate identity
@@ -170,7 +185,7 @@ command, and the plugin's bundled servers don't currently surface an in-app
 sign-in prompt. Add each server as a **custom connector** instead:
 
 > Settings → Connectors → **Add custom connector** → name `rise-x-test`, URL
-> `https://mcp-test.rise-x.io/mcp`, no headers — then complete sign-in in
+> `https://mcp.test.rise-x.io/mcp`, no headers — then complete sign-in in
 > your browser when prompted.
 
 Run `claude mcp …` / `claude plugin …` commands **in your own terminal, never
