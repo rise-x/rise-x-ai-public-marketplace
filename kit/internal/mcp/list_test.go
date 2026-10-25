@@ -80,7 +80,7 @@ func TestReadConfig(t *testing.T) {
 	body := `{
   "mcpServers": {
     "rise-x": {"type": "http", "url": "https://mcp.rise-x.io/mcp"},
-    "rise-x-test": {"type": "http", "url": "https://mcp-test.rise-x.io/mcp"}
+    "rise-x-test": {"type": "http", "url": "https://mcp.test.rise-x.io/mcp"}
   }
 }`
 	if err := os.WriteFile(filepath.Join(dir, ".mcp.json"), []byte(body), 0o644); err != nil {

@@ -168,7 +168,7 @@ func TestGather_SyncedPlugin_ConnectionFromPluginDir(t *testing.T) {
 	for _, cs := range got.Mcp.Configured {
 		urls[cs.Name] = cs.URL
 	}
-	if urls["rise-x"] != "https://mcp.rise-x.io/mcp" || urls["rise-x-test"] != "https://mcp-test.rise-x.io/mcp" {
+	if urls["rise-x"] != "https://mcp.rise-x.io/mcp" || urls["rise-x-test"] != "https://mcp.test.rise-x.io/mcp" {
 		t.Fatalf("configured = %+v", got.Mcp.Configured)
 	}
 }
@@ -544,7 +544,7 @@ func TestHandler_PluginUninstall_MirrorCopy_400(t *testing.T) {
 
 const needsAuthList = "Checking MCP server health…\n\n" +
 	"plugin:rise-x-mcp:rise-x: https://mcp.rise-x.io/mcp (HTTP) - ! Needs authentication\n" +
-	"plugin:rise-x-mcp:rise-x-test: https://mcp-test.rise-x.io/mcp (HTTP) - ! Needs authentication\n"
+	"plugin:rise-x-mcp:rise-x-test: https://mcp.test.rise-x.io/mcp (HTTP) - ! Needs authentication\n"
 
 // writeDesktopSession writes the Desktop app's session file for the
 // signed-in account, naming the connectors in body.

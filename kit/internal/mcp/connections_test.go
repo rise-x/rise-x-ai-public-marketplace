@@ -20,7 +20,7 @@ const connectionsClaudeJSON = `{
   "projects": {
     "/work/app": {
       "mcpServers": {
-        "rise-x-test": {"type": "http", "url": "https://mcp-test.rise-x.io/mcp"}
+        "rise-x-test": {"type": "http", "url": "https://mcp.test.rise-x.io/mcp"}
       }
     }
   }
@@ -47,7 +47,7 @@ func TestConnections_RiseXOnlyAcrossScopes(t *testing.T) {
 	want := []Connection{
 		{Name: "rise-x", Scope: ScopeUser, URL: "https://mcp.rise-x.io/mcp", Removable: true},
 		{Name: "rise-x-keyed", Scope: ScopeUser, URL: "https://mcp.rise-x.io/mcp", HasHeaders: true},
-		{Name: "rise-x-test", Scope: ScopeLocal, ProjectPath: "/work/app", URL: "https://mcp-test.rise-x.io/mcp", Removable: true},
+		{Name: "rise-x-test", Scope: ScopeLocal, ProjectPath: "/work/app", URL: "https://mcp.test.rise-x.io/mcp", Removable: true},
 		{Name: "Rise-X", Scope: ScopeDesktop, URL: "https://mcp.rise-x.io/mcp"},
 	}
 	if len(got) != len(want) {

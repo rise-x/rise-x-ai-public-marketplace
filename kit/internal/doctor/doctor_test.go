@@ -607,7 +607,7 @@ func TestRun_McpStale(t *testing.T) {
 		{Name: "rise-x", Scope: mcp.ScopeUser, URL: "https://old.example.com/mcp",
 			SuggestedURL: "https://mcp.rise-x.io/mcp"},
 		{Name: "rise-x-test", Scope: mcp.ScopeLocal, ProjectPath: "/Users/p/one",
-			URL: "https://old-test.example.com/mcp", SuggestedURL: "https://mcp-test.rise-x.io/mcp"},
+			URL: "https://old-test.example.com/mcp", SuggestedURL: "https://mcp.test.rise-x.io/mcp"},
 	}
 	c := findCheck(t, Run(f), "mcp.stale")
 	if c.Status != StatusWarn || c.Fix != "mcp.fix" {
@@ -617,7 +617,7 @@ func TestRun_McpStale(t *testing.T) {
 		t.Fatalf("message = %q", c.Message)
 	}
 	wantDetail := "rise-x (user): https://old.example.com/mcp → https://mcp.rise-x.io/mcp\n" +
-		"rise-x-test (local): https://old-test.example.com/mcp → https://mcp-test.rise-x.io/mcp"
+		"rise-x-test (local): https://old-test.example.com/mcp → https://mcp.test.rise-x.io/mcp"
 	if c.Detail != wantDetail {
 		t.Fatalf("detail = %q", c.Detail)
 	}

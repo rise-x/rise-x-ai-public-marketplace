@@ -45,7 +45,7 @@ func staleServer(t *testing.T) (baseURL, token, projectPath string, fake *runner
 		{"mcp", "remove", "rise-x", "-s", "user"},
 		{"mcp", "add", "--transport", "http", "rise-x", "https://mcp.rise-x.io/mcp", "-s", "user"},
 		{"mcp", "remove", "rise-x-test", "-s", "local"},
-		{"mcp", "add", "--transport", "http", "rise-x-test", "https://mcp-test.rise-x.io/mcp", "-s", "local"},
+		{"mcp", "add", "--transport", "http", "rise-x-test", "https://mcp.test.rise-x.io/mcp", "-s", "local"},
 	} {
 		fake.Set(fakeCLIPath, args, runnertest.Result{Stdout: "ok\n"})
 	}
@@ -68,7 +68,7 @@ func TestGather_StaleMcp_ReportedOnOverviewAndDoctor(t *testing.T) {
 		t.Errorf("user entry = %+v", user)
 	}
 	if local.Name != "rise-x-test" || local.Scope != mcp.ScopeLocal ||
-		local.ProjectPath != projectPath || local.SuggestedURL != "https://mcp-test.rise-x.io/mcp" {
+		local.ProjectPath != projectPath || local.SuggestedURL != "https://mcp.test.rise-x.io/mcp" {
 		t.Errorf("local entry = %+v", local)
 	}
 
@@ -95,7 +95,7 @@ func TestHandler_McpFix_OneLocalEntry(t *testing.T) {
 
 	remove := findCall(t, fake, []string{"mcp", "remove", "rise-x-test", "-s", "local"})
 	add := findCall(t, fake, []string{"mcp", "add", "--transport", "http", "rise-x-test",
-		"https://mcp-test.rise-x.io/mcp", "-s", "local"})
+		"https://mcp.test.rise-x.io/mcp", "-s", "local"})
 	if remove > add {
 		t.Fatalf("add ran before remove: %+v", fake.Calls)
 	}
@@ -131,7 +131,7 @@ func TestHandler_McpFix_All(t *testing.T) {
 		t.Fatalf("user scope ran in %q, want the kit's own directory", dir)
 	}
 	local := findCall(t, fake, []string{"mcp", "add", "--transport", "http", "rise-x-test",
-		"https://mcp-test.rise-x.io/mcp", "-s", "local"})
+		"https://mcp.test.rise-x.io/mcp", "-s", "local"})
 	if dir := fake.Calls[local].Dir; dir != projectPath {
 		t.Fatalf("local scope ran in %q, want %q", dir, projectPath)
 	}
@@ -258,7 +258,7 @@ const connectionsClaudeJSON = `{
   "projects": {
     "PROJECT_PATH": {
       "mcpServers": {
-        "rise-x-test": {"type": "http", "url": "https://mcp-test.rise-x.io/mcp"}
+        "rise-x-test": {"type": "http", "url": "https://mcp.test.rise-x.io/mcp"}
       }
     }
   }

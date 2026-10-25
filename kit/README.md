@@ -122,7 +122,7 @@ steps to connect them:
 1. In Claude Desktop, go to **Customize** > **Connectors**, press **Add**,
    then **Add custom connector**.
 2. Enter the name and URL for each server: `rise-x-test` at
-   `https://mcp-test.rise-x.io/mcp`, and `rise-x` at `https://mcp.rise-x.io/mcp`.
+   `https://mcp.test.rise-x.io/mcp`, and `rise-x` at `https://mcp.rise-x.io/mcp`.
    Press **Continue**, keep what Claude Desktop detected, add no headers, and
    press **Add**.
 3. Open the new connector, press **Connect**, and finish in your browser:
@@ -137,13 +137,14 @@ a session has had them, without the raw check output that would still say the
 skill's copy needs a sign-in. If **Recheck** does not see them yet, open a
 Claude Code session in Claude Desktop first.
 
-Connections set up before Rise-X moved to `mcp.rise-x.io` still point at the
-old address. Rise-X Kit lists any it finds in `~/.claude.json` or in Claude
+Connections set up before Rise-X moved to `mcp.rise-x.io`, and `rise-x-test`
+connections set up before the test server moved to `mcp.test.rise-x.io`, still
+point at an old address. Rise-X Kit lists any it finds in `~/.claude.json` or in Claude
 Desktop's own configuration file (`claude_desktop_config.json`) under **Old
 Rise-X addresses**, with a **Fix** button for the ones added with the `claude`
 CLI; an entry in the Desktop app's file has to be changed there. A connector
 added under **Customize** > **Connectors** lives in your account, where Kit
-cannot see its address; if it predates the move, remove it and add the new
+cannot see its address; if it predates either move, remove it and add the new
 one.
 
 When your organisation delivers the Rise-X skill, its connections belong to

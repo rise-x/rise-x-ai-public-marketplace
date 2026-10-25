@@ -1069,9 +1069,9 @@ function renderSkillsFooter() {
     </div>`;
 }
 
-/** MOVED_NOTE explains a connector that predates the mcp.rise-x.io addresses. */
+/** MOVED_NOTE explains a connector that predates the current MCP addresses. */
 const MOVED_NOTE =
-  'Connectors added in Claude Desktop before the move to mcp.rise-x.io still point at the old address; remove them in <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> and add the new one.';
+  'Connectors added in Claude Desktop before the move to mcp.rise-x.io, and rise-x-test connectors added before the move to mcp.test.rise-x.io, still point at an old address; remove them in <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong> and add the new one.';
 
 const GUIDE_STEPS = [
   'Open <strong class="font-medium text-foreground">Claude Desktop</strong> &rsaquo; <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong>, press <strong class="font-medium text-foreground">Add</strong>, then <strong class="font-medium text-foreground">Add custom connector</strong>.',
