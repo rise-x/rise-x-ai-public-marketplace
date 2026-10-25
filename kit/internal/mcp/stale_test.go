@@ -54,7 +54,7 @@ func TestScan(t *testing.T) {
 			SuggestedURL: "https://mcp.rise-x.io/mcp"},
 		{Name: "risex-test", Scope: ScopeLocal, ProjectPath: "/Users/p/one", Transport: "http",
 			URL:          "https://mcp-server-test.bluesea.eastus.azurecontainerapps.io/mcp",
-			SuggestedURL: "https://mcp-test.rise-x.io/mcp"},
+			SuggestedURL: "https://mcp.test.rise-x.io/mcp"},
 		{Name: "Rise_X", Scope: ScopeDesktop, Transport: "http",
 			URL:          "https://mcp-old.bluesea.eastus.azurecontainerapps.io/mcp",
 			SuggestedURL: "https://mcp.rise-x.io/mcp"},
@@ -107,6 +107,7 @@ func TestSuggestedURL(t *testing.T) {
 		// consulted first.
 		{"https://mcp-server.bluefield-efc1f90d.australiaeast.azurecontainerapps.io/mcp", testURL},
 		{"https://mcp-server.lemonmeadow-b9fe5140.australiaeast.azurecontainerapps.io/mcp", prodURL},
+		{"https://mcp-test.rise-x.io/mcp", testURL},
 	}
 	for _, c := range cases {
 		if got := SuggestedURL(c.url); got != c.want {
@@ -121,7 +122,7 @@ func TestIsStale(t *testing.T) {
 		want      bool
 	}{
 		{"rise-x", "https://mcp.rise-x.io/mcp", false},
-		{"rise-x-test", "https://mcp-test.rise-x.io/mcp", false},
+		{"rise-x-test", "https://mcp.test.rise-x.io/mcp", false},
 		{"rise-x", "https://mcp.rise-x.io:443/mcp", false},
 		// A partner's own Rise-X MCP, hosted anywhere but a known-retired
 		// domain, is not stale - only the domains in oldHostSuffixes are.
@@ -140,6 +141,7 @@ func TestIsStale(t *testing.T) {
 		// An exact known host flags on its own, no rise-x hint in the name.
 		{"mcp-dev", "https://mcp-server.bluefield-efc1f90d.australiaeast.azurecontainerapps.io/mcp", true},
 		{"mcp-prod", "https://mcp-server.lemonmeadow-b9fe5140.australiaeast.azurecontainerapps.io/mcp", true},
+		{"rise-x-test", "https://mcp-test.rise-x.io/mcp", true},
 	}
 	for _, c := range cases {
 		if got := isStale(c.name, c.url); got != c.want {

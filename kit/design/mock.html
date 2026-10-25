@@ -401,10 +401,10 @@
                 <span data-slot="list-name" class="flex items-center gap-2 text-ui">rise-x-test</span>
                 <span data-slot="list-description" class="mt-0.5 block text-xs text-muted-foreground">A safe copy for trying things out</span>
               </div>
-              <span class="shrink-0 font-mono text-xs text-muted-foreground">https://mcp-test.rise-x.io/mcp</span>
+              <span class="shrink-0 font-mono text-xs text-muted-foreground">https://mcp.test.rise-x.io/mcp</span>
               <button
                 data-slot="button" data-variant="ghost" data-size="icon-sm"
-                aria-label="Copy https://mcp-test.rise-x.io/mcp"
+                aria-label="Copy https://mcp.test.rise-x.io/mcp"
                 class="ds-btn text-muted-foreground hover:bg-muted hover:text-foreground size-control-sm rounded-md px-0"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
@@ -449,7 +449,7 @@
             <div data-slot="collapsible-content" class="mt-2 rounded-lg bg-fill-0 px-3.5 py-3">
               <pre class="kit-log text-muted-foreground">$ claude mcp list
 rise-x        https://mcp.rise-x.io/mcp        connected (oauth, expires in 27d)
-rise-x-test   https://mcp-test.rise-x.io/mcp   connected (oauth, expires in 27d)
+rise-x-test   https://mcp.test.rise-x.io/mcp   connected (oauth, expires in 27d)
 
 handshake  ok   protocol 2025-06-18
 tools      ok   94 exposed
@@ -626,7 +626,7 @@ writing ~/.claude/plugins/rise-x-mcp
           <div id="kit-dialog-title" data-slot="dialog-title" class="text-ui font-medium">Remove Rise-X?</div>
           <div id="kit-dialog-body" data-slot="dialog-description" class="mt-1.5 text-xs text-muted-foreground">Claude Code will no longer have its skills or its Rise-X connection. The connector Rise-X in Claude Desktop stays; remove it under Customize &rsaquo; Connectors if you no longer want it.</div>
           <pre id="kit-dialog-detail" class="kit-dialog-detail mt-3 rounded-md bg-fill-0 px-3 py-2 text-muted-foreground">rise-x (everywhere): https://mcp.rise-x.io/mcp
-rise-x-test (one project): https://mcp-test.rise-x.io/mcp</pre>
+rise-x-test (one project): https://mcp.test.rise-x.io/mcp</pre>
           <div data-slot="choice-row" class="mt-3 flex items-start gap-2.5">
             <button type="button" role="checkbox" id="kit-dialog-check" aria-checked="false" data-state="unchecked" data-slot="checkbox" class="peer size-[15px] mt-0.5 shrink-0 rounded-[4px] border border-input bg-card transition-colors duration-100 outline-none focus-visible:ring-3 focus-visible:ring-ring-control/35 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground flex items-center justify-center">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" class="size-3" aria-hidden="true" hidden><path d="M20 6 9 17l-5-5"/></svg>

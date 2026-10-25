@@ -14,10 +14,10 @@ import (
 // The two hosts Rise-X serves MCP from today.
 const (
 	prodURL = "https://mcp.rise-x.io/mcp"
-	testURL = "https://mcp-test.rise-x.io/mcp"
+	testURL = "https://mcp.test.rise-x.io/mcp"
 )
 
-var currentHosts = []string{"mcp.rise-x.io", "mcp-test.rise-x.io"}
+var currentHosts = []string{"mcp.rise-x.io", "mcp.test.rise-x.io"}
 
 // oldHostSuffixes are shared domains Rise-X has served MCP from before the
 // move to mcp.rise-x.io (each entry written with its leading "."), such as
@@ -36,6 +36,7 @@ var exactStaleHosts = map[string]string{
 	"mcp-server.bluefield-efc1f90d.australiaeast.azurecontainerapps.io": testURL,
 	// Production.
 	"mcp-server.lemonmeadow-b9fe5140.australiaeast.azurecontainerapps.io": prodURL,
+	"mcp-test.rise-x.io": testURL,
 }
 
 // Scopes a stale server can be configured at.
@@ -163,7 +164,7 @@ func SuggestedURL(rawURL string) string {
 }
 
 // testHostRe matches a host carrying "test" as a whole label or a
-// dash-separated word: "mcp-test.rise-x.io", "x-test.example". The host is the
+// dash-separated word: "mcp.test.rise-x.io", "x-test.example". The host is the
 // only thing that decides, so neither a connector named "rise-x-latest" nor a
 // "/latest/" path can send a production connector to the test environment.
 var testHostRe = regexp.MustCompile(`(^|[.-])test([.-]|$)`)

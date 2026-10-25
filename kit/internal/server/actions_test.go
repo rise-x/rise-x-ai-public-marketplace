@@ -21,7 +21,7 @@ import (
 // without any "plugin:" prefix.
 const riseXMcpJSON = `{"mcpServers":{
   "rise-x":{"type":"http","url":"https://mcp.rise-x.io/mcp"},
-  "rise-x-test":{"type":"http","url":"https://mcp-test.rise-x.io/mcp"}
+  "rise-x-test":{"type":"http","url":"https://mcp.test.rise-x.io/mcp"}
 }}`
 
 // A mirror of the public marketplace installs the same plugin under its own
