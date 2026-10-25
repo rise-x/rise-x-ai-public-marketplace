@@ -22,7 +22,7 @@ The plugin bundles two HTTP MCP servers:
 
 | Server | URL | Purpose |
 |---|---|---|
-| `rise-x-test` | https://mcp-test.rise-x.io/mcp | Test/sandbox environment — use for experiments |
+| `rise-x-test` | https://mcp.test.rise-x.io/mcp | Test/sandbox environment — use for experiments |
 | `rise-x` | https://mcp.rise-x.io/mcp | Production — real ecosystem data |
 
 **Always authenticate `rise-x-test` first.** Only move on to `rise-x` (prod) once the test server is verified working. This order catches account/tenant problems in a sandbox before they touch real data — with one limit worth telling the user: test and production are **separate identity stores**. The same email is a different user record in each environment, so a clean test sign-in confirms the test account only and says nothing about production access.
@@ -42,7 +42,7 @@ This variable is undocumented/internal (the official env-vars reference only lis
 **You (Claude) cannot perform these steps — never attempt to complete OAuth yourself; guide the user and wait.** Only the user can sign in through the browser.
 
 Ask the user to, based on their surface (§2):
-- **Desktop app:** add the server as a **custom connector** — Customize → Connectors → **Add** → name `rise-x-test`, URL `https://mcp-test.rise-x.io/mcp`, no headers — then complete OAuth in the browser when prompted. (The desktop app has no `/mcp` command, and plugin-bundled servers don't surface an in-app sign-in prompt of their own.) The same custom-connector route covers **Cowork** — connectors sync through the claude.ai account.
+- **Desktop app:** if a `rise-x-test` connector already exists with the old URL `https://mcp-test.rise-x.io/mcp`, have the user remove it first (Customize → Connectors → open it → **Remove**); the old address no longer answers and its sign-in is not accepted. Then add the server as a **custom connector** — Customize → Connectors → **Add** → name `rise-x-test`, URL `https://mcp.test.rise-x.io/mcp`, no headers — then complete OAuth in the browser when prompted. (The desktop app has no `/mcp` command, and plugin-bundled servers don't surface an in-app sign-in prompt of their own.) The same custom-connector route covers **Cowork** — connectors sync through the claude.ai account.
 - **CLI:** run `/mcp` (an interactive panel — arrow keys select `rise-x-test`); if `/mcp` is unavailable (e.g. non-interactive), authenticate from a terminal instead: plugin-bundled servers register under a scoped name, so run `claude mcp list` to confirm it (expect `plugin:rise-x-mcp:rise-x-test`), then `claude mcp login plugin:rise-x-mcp:rise-x-test`.
 
 The `claude mcp` fallback must run in the **user's own terminal** — never through your Bash tool, and never in a cloud session's shell: that sandbox is not the user's machine, so the command appears to succeed while changing nothing the user's client can see.
