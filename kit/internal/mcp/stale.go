@@ -11,13 +11,14 @@ import (
 	"strings"
 )
 
-// The two hosts Rise-X serves MCP from today.
+// The addresses a stale server is repointed to.
 const (
 	prodURL = "https://mcp.rise-x.io/mcp"
 	testURL = "https://mcp.test.rise-x.io/mcp"
 )
 
-var currentHosts = []string{"mcp.rise-x.io", "mcp.test.rise-x.io"}
+// currentHosts are the hosts Rise-X serves MCP from today.
+var currentHosts = []string{"mcp.rise-x.io", "mcp.test.rise-x.io", "mcp.staging.rise-x.io"}
 
 // oldHostSuffixes are shared domains Rise-X has served MCP from before the
 // move to mcp.rise-x.io (each entry written with its leading "."), such as

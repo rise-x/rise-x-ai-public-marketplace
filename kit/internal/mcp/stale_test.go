@@ -123,6 +123,7 @@ func TestIsStale(t *testing.T) {
 	}{
 		{"rise-x", "https://mcp.rise-x.io/mcp", false},
 		{"rise-x-test", "https://mcp.test.rise-x.io/mcp", false},
+		{"rise-x-staging", "https://mcp.staging.rise-x.io/mcp", false},
 		{"rise-x", "https://mcp.rise-x.io:443/mcp", false},
 		// A partner's own Rise-X MCP, hosted anywhere but a known-retired
 		// domain, is not stale - only the domains in oldHostSuffixes are.
