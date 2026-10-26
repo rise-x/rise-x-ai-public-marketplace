@@ -120,8 +120,9 @@ drives in-session: after installing, you can just tell Claude "set up rise-x".
   **Customize** configuration instead (installed there yourself, or
   distributed by your organization).
 - **Network access.** Corporate environments should allowlist:
-  - `mcp.rise-x.io` and `mcp.test.rise-x.io` — the MCP servers; their OAuth
-    authorization and token endpoints live on these same hosts
+  - `mcp.rise-x.io`, `mcp.test.rise-x.io` and `mcp.staging.rise-x.io` — the
+    MCP servers; their OAuth authorization and token endpoints live on these
+    same hosts
   - the Rise-X sign-in page your browser is redirected to during OAuth — if
     your IT team needs the exact hostname, ask your Rise-X contact
   - `github.com` — this marketplace is fetched from GitHub
@@ -140,13 +141,14 @@ Add the marketplace and install `rise-x-mcp` as described in
 [Install the marketplace](#install-the-marketplace) above — slash commands in
 a terminal session, or the plugin browser in a desktop Code session.
 
-### 2. Sign in to both servers
+### 2. Sign in to the servers
 
-The plugin bundles two HTTP MCP servers:
+The plugin bundles three HTTP MCP servers:
 
 | Server | URL | Environment |
 | --- | --- | --- |
 | `rise-x-test` | `https://mcp.test.rise-x.io/mcp` | Test/sandbox — use for anything exploratory |
+| `rise-x-staging` | `https://mcp.staging.rise-x.io/mcp` | Staging — optional; only if your organization runs a staging environment |
 | `rise-x` | `https://mcp.rise-x.io/mcp` | Production — real ecosystem data |
 
 > **Connected to test before?** The test server moved from
@@ -165,10 +167,10 @@ The plugin bundles two HTTP MCP servers:
 >   in again.
 
 **Always connect `rise-x-test` first**, and only move to production once test
-verifies cleanly. Note that test and production are **separate identity
-stores**: the same email is a different user record in each environment, so a
-working test sign-in confirms the test account only — it says nothing about
-production access.
+verifies cleanly. Note that test, staging and production are **separate
+identity stores**: the same email is a different user record in each
+environment, so a working test sign-in confirms the test account only — it
+says nothing about staging or production access.
 
 **Claude Code CLI (terminal):** type `/mcp`, select `rise-x-test` (listed
 under the `rise-x-mcp` plugin), and complete sign-in in your browser. If
@@ -209,7 +211,13 @@ remembers your selection, so it may already be populated in a later
 session). `whoami` answers *which* account and environment you're on, not
 whether access works.
 
-### 4. Repeat for production
+### 4. Repeat for staging and production
+
+If your organization runs a staging environment, connect `rise-x-staging` the
+same way (CLI: `/mcp` or `claude mcp login plugin:rise-x-mcp:rise-x-staging`;
+desktop: custom connector with `https://mcp.staging.rise-x.io/mcp`) and verify
+it with `list_ecosystems` too. Skip it otherwise: without a staging account
+the sign-in fails, and that is expected.
 
 Connect `rise-x` the same way (CLI: `/mcp` or
 `claude mcp login plugin:rise-x-mcp:rise-x`; desktop: custom connector with
@@ -220,13 +228,13 @@ production is a separate identity store, so passing test doesn't carry over.
 
 Ask Claude to run `set_active_ecosystem` with the ecosystem you want. The
 selection is **per server**: setting it on `rise-x-test` sets nothing on
-`rise-x`, so repeat this on each server you'll work with. If
+`rise-x-staging` or `rise-x`, so repeat this on each server you'll work with. If
 `list_ecosystems` returned more than one, confirm which is correct before
 proceeding — **nothing warns you when you're pointed at the wrong tenant**,
 and every Rise-X tool except the session tools requires an active ecosystem.
 
-You're connected once both servers return ecosystems and you've selected an
-ecosystem on the server you'll work with.
+You're connected once each server you signed in to returns ecosystems and
+you've selected an ecosystem on the server you'll work with.
 
 ### Troubleshooting
 
@@ -248,7 +256,7 @@ ecosystem on the server you'll work with.
 ### rise-x-mcp
 
 Configure workflows, query flows and layouts, and manage work items on the
-Rise-X Ecosystem Orchestration Platform (EOP) — via two bundled HTTP MCP
+Rise-X Ecosystem Orchestration Platform (EOP) — via three bundled HTTP MCP
 servers plus domain skills that route Claude to the right tools and
 guardrails for each task: flows, steps, layouts, components, work items,
 assets, dashboards, external-API integrations, and more.
@@ -257,9 +265,9 @@ assets, dashboards, external-API integrations, and more.
 to the right tools and reference docs for flows, layouts, work items,
 assets, dashboards, search, apps, and integrations; a dedicated authoring
 protocol for integration setup (secrets handling, slot-filling, dry-runs);
-and a `setup` skill for first-time connection. Bundles two HTTP MCP servers —
-`rise-x-test` (sandbox) and `rise-x` (production), configured in
-`plugins/rise-x-mcp/.mcp.json`.
+and a `setup` skill for first-time connection. Bundles three HTTP MCP servers —
+`rise-x-test` (sandbox), `rise-x-staging` (staging) and `rise-x` (production),
+configured in `plugins/rise-x-mcp/.mcp.json`.
 
 **Requirements:**
 - Claude Code or Cowork
