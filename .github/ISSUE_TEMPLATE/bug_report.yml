@@ -40,8 +40,9 @@ body:
       label: Which MCP server? (if the issue involves an MCP server connection)
       options:
         - rise-x-test
+        - rise-x-staging
         - rise-x (production)
-        - both
+        - more than one
         - N/A / not server-related
         - other / not listed
     validations:

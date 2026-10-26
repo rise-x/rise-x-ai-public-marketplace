@@ -213,10 +213,9 @@ That gives you exactly one correct way to handle an id you don't have:
 
 If you need an id you don't have, **ask the user**, or look it up in that
 ecosystem with the Rise-X MCP (`list_flows`, `list_asset_types`, `list_agents`
-against the server for that environment — `rise-x-test` for test, `rise-x` for
-production). The plugin ships those two servers only, so staging ids come from
-the user or the staging shell, not from an MCP lookup. Discovery per environment
-is the whole reason ids are keyed this way.
+against the server for that environment — `rise-x-test` for test,
+`rise-x-staging` for staging, `rise-x` for production). Discovery per
+environment is the whole reason ids are keyed this way.
 
 Fill `label` and `description` while you are there. They are optional to the
 parser and not optional in practice: they are what ecosystem management and Ask
@@ -870,10 +869,9 @@ When the bundle is ready, **ask the user whether to deploy**. Two paths:
 
 Load the `rise-x-mcp` skill first (mandatory before any Rise-X MCP call), then
 pick the server for the target environment: **`rise-x-test` → test,
-`rise-x` → production. If the user doesn't name an environment, deploy to
-test** — most users want to try the app there first. Deploying requires the
-environment-orchestrator role. The plugin ships those two servers only, so there
-is no staging server to look ids up on or deploy through. Build the bundle for
+`rise-x-staging` → staging, `rise-x` → production. If the user doesn't name an
+environment, deploy to test** — most users want to try the app there first.
+Deploying requires the environment-orchestrator role. Build the bundle for
 the **same environment** you deploy to (`APP_ENV` above), and check it yourself:
 the backend only validates the shape of the zip's `rise-x-app.json`, so a bundle
 carrying another environment's ids deploys without complaint and fails in the

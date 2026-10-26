@@ -1,7 +1,7 @@
 # rise-x-ai-public-marketplace — maintainer guide
 
 This is the `rise-x-public` Claude Code / Cowork plugin marketplace. It ships
-Rise-X plugins — currently one, `rise-x-mcp` (skills plus two bundled HTTP
+Rise-X plugins — currently one, `rise-x-mcp` (skills plus three bundled HTTP
 MCP servers), with more expected to follow. A plugin's implementation may
 live partly outside this repo (e.g. rise-x-mcp's MCP server code is private)
 — under `plugins/` this repo only ships what Claude Code actually installs:
