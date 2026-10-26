@@ -292,7 +292,7 @@ Help me install and set up the Rise-X plugin:
    my confirmation.
 3. Verify the plugin is installed and enabled; if anything failed, show me the
    exact error and how to fix it before going further.
-4. Then follow the plugin's `setup` skill to connect the two Rise-X MCP servers.
+4. Then follow the plugin's `setup` skill to connect the Rise-X MCP servers.
    I'll complete the OAuth steps in my browser myself when you tell me to.
 5. Once everything works, remind me to enable auto-update for the marketplace
    so plugin fixes arrive automatically — I'll run `/plugin`, open the

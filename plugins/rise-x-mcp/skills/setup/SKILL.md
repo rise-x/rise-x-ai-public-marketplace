@@ -16,7 +16,7 @@ The plugin bundles MCP *clients* only — it is useless without a **Rise-X tenan
 
 If either happens and the user isn't sure whether their org has a tenant, tell them plainly: contact Rise-X via https://rise-x.io to get one provisioned. Don't try to work around this — there is no local fix.
 
-## 1. Three servers, fixed order
+## 1. Servers and order
 
 The plugin bundles three HTTP MCP servers:
 
