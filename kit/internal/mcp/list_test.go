@@ -56,6 +56,22 @@ func TestOverall(t *testing.T) {
 		{"needs auth", []Server{{Status: "! Needs authentication"}}, VerdictNeedsAuth},
 		{"failed wins over connected", []Server{{Status: "✔ Connected"}, {Status: "✘ Failed to connect"}}, VerdictFailed},
 		{"pending", []Server{{Status: "⏸ Pending approval"}}, VerdictPending},
+		{"signed-out staging is optional", []Server{
+			{Name: "plugin:rise-x-mcp:rise-x", Status: "✔ Connected"},
+			{Name: "plugin:rise-x-mcp:rise-x-test", Status: "✔ Connected"},
+			{Name: "plugin:rise-x-mcp:rise-x-staging", Status: "! Needs authentication"},
+		}, VerdictConnected},
+		{"failed staging still counts", []Server{
+			{Name: "plugin:rise-x-mcp:rise-x", Status: "✔ Connected"},
+			{Name: "plugin:rise-x-mcp:rise-x-staging", Status: "✘ Failed to connect"},
+		}, VerdictFailed},
+		{"signed-out prod still needs auth", []Server{
+			{Name: "plugin:rise-x-mcp:rise-x", Status: "! Needs authentication"},
+			{Name: "plugin:rise-x-mcp:rise-x-staging", Status: "! Needs authentication"},
+		}, VerdictNeedsAuth},
+		{"only staging, signed out", []Server{
+			{Name: "plugin:rise-x-mcp:rise-x-staging", Status: "! Needs authentication"},
+		}, VerdictNeedsAuth},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

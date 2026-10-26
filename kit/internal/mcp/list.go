@@ -87,18 +87,31 @@ func RiseXServers(servers []Server) []Server {
 	return out
 }
 
+// optionalServers are rise-x-mcp servers a partner may leave signed out, such
+// as staging, which only some organizations run.
+var optionalServers = []string{riseXPluginPrefix + "rise-x-staging"}
+
 // Overall picks the worst verdict among a set of servers, or
-// VerdictNotInstalled if there are none.
+// VerdictNotInstalled if there are none. An optional server that still needs a
+// sign-in is left out, unless no other server is there to judge.
 func Overall(servers []Server) Verdict {
 	if len(servers) == 0 {
 		return VerdictNotInstalled
 	}
 	worst := VerdictConnected
+	judged := 0
 	for _, s := range servers {
 		v := statusVerdict(s.Status)
+		if v == VerdictNeedsAuth && slices.Contains(optionalServers, s.Name) {
+			continue
+		}
+		judged++
 		if rank(v) > rank(worst) {
 			worst = v
 		}
+	}
+	if judged == 0 {
+		return VerdictNeedsAuth
 	}
 	return worst
 }

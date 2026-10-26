@@ -115,14 +115,18 @@ you installed from another marketplace that mirrors the public one reads
 **Installed from &lt;marketplace&gt;**, and updates from that same
 marketplace.
 
-**Rise-X connection** shows whether the two Rise-X MCP (Model Context Protocol,
+**Rise-X connection** shows whether the Rise-X MCP (Model Context Protocol,
 the interface Claude uses to reach Rise-X) servers are connected, with the
-steps to connect them:
+steps to connect them. The staging server is optional: it counts only once you
+sign in to it, so leaving it signed out does not turn the status to **Sign-in
+needed**.
 
 1. In Claude Desktop, go to **Customize** > **Connectors**, press **Add**,
    then **Add custom connector**.
 2. Enter the name and URL for each server: `rise-x-test` at
    `https://mcp.test.rise-x.io/mcp`, and `rise-x` at `https://mcp.rise-x.io/mcp`.
+   Add `rise-x-staging` at `https://mcp.staging.rise-x.io/mcp` only if your
+   organisation runs a staging environment.
    Press **Continue**, keep what Claude Desktop detected, add no headers, and
    press **Add**.
 3. Open the new connector, press **Connect**, and finish in your browser:

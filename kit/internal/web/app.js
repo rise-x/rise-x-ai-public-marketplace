@@ -1108,7 +1108,9 @@ function connectionRows(mcp) {
         name: row.name,
         description: /test/i.test(row.name)
           ? "A safe copy for trying things out"
-          : "Your live Rise-X environment",
+          : /staging/i.test(row.name)
+            ? "Staging, only if your organisation runs one"
+            : "Your live Rise-X environment",
         trailing:
           `<span class="shrink-0 font-mono text-xs text-muted-foreground">${esc(row.target)}</span>` +
           btn(ICON.copy, {
