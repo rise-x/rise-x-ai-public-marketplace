@@ -7,6 +7,10 @@
     "rise-x-test": {
       "type": "http",
       "url": "https://mcp.test.rise-x.io/mcp"
+    },
+    "rise-x-staging": {
+      "type": "http",
+      "url": "https://mcp.staging.rise-x.io/mcp"
     }
   }
 }

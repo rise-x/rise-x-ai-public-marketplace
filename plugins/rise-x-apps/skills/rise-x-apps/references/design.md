@@ -77,9 +77,8 @@ or agents**:
   environment. Declare only the environments you have real ids for: a new app
   starts at test only, and every dependency needs an id for every environment
   listed in `environments`. Collect another environment's ids when the app
-  ships there, per MCP server (`rise-x-test` → test, `rise-x` → production).
-  The plugin ships no staging server, so staging ids come from the user or the
-  staging shell. An agent is declared with
+  ships there, per MCP server (`rise-x-test` → test, `rise-x-staging` →
+  staging, `rise-x` → production). An agent is declared with
   `kind: "agent"` and its id field is `agentId`, not `flowOriginId`; an agent
   is created per ecosystem with no promotion path, so its id always differs
   between environments and the per-environment block is mandatory. See
