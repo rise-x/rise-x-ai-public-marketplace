@@ -17,11 +17,12 @@ import (
 	"github.com/rise-x/rise-x-ai-public-marketplace/kit/internal/runner/runnertest"
 )
 
-// riseXMcpJSON is the rise-x-mcp plugin's real .mcp.json: two servers, named
+// riseXMcpJSON is the rise-x-mcp plugin's real .mcp.json: three servers, named
 // without any "plugin:" prefix.
 const riseXMcpJSON = `{"mcpServers":{
   "rise-x":{"type":"http","url":"https://mcp.rise-x.io/mcp"},
-  "rise-x-test":{"type":"http","url":"https://mcp.test.rise-x.io/mcp"}
+  "rise-x-test":{"type":"http","url":"https://mcp.test.rise-x.io/mcp"},
+  "rise-x-staging":{"type":"http","url":"https://mcp.staging.rise-x.io/mcp"}
 }}`
 
 // A mirror of the public marketplace installs the same plugin under its own
@@ -39,8 +40,8 @@ func TestRiseXMcpConfig_MirrorMarketplace(t *testing.T) {
 	for i, cs := range got {
 		names[i] = cs.Name
 	}
-	if len(names) != 2 || names[0] != "rise-x" || names[1] != "rise-x-test" {
-		t.Fatalf("configured = %v, want the mirror's two servers", names)
+	if len(names) != 3 || names[0] != "rise-x" || names[1] != "rise-x-staging" || names[2] != "rise-x-test" {
+		t.Fatalf("configured = %v, want the mirror's three servers", names)
 	}
 }
 

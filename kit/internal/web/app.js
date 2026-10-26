@@ -1077,7 +1077,7 @@ const GUIDE_STEPS = [
   'Open <strong class="font-medium text-foreground">Claude Desktop</strong> &rsaquo; <strong class="font-medium text-foreground">Customize</strong> &rsaquo; <strong class="font-medium text-foreground">Connectors</strong>, press <strong class="font-medium text-foreground">Add</strong>, then <strong class="font-medium text-foreground">Add custom connector</strong>.',
   'Paste the name and address from a row above and press <strong class="font-medium text-foreground">Continue</strong>. Keep what it detected, add no headers, and press <strong class="font-medium text-foreground">Add</strong>.',
   'Open the new connector, press <strong class="font-medium text-foreground">Connect</strong>, and finish in your browser: <strong class="font-medium text-foreground">Continue connecting</strong>, then sign in.',
-  'Repeat for the other row, then come back here and press <strong class="font-medium text-foreground">Recheck</strong>.',
+  'Repeat for the other rows you need (skip staging unless your organisation runs one), then come back here and press <strong class="font-medium text-foreground">Recheck</strong>.',
 ];
 
 /** SESSION_HINT says where Kit reads Desktop connectors from, since Recheck
@@ -1096,6 +1096,13 @@ function desktopNote(names) {
   </div>`;
 }
 
+/** ROW_DESCRIPTIONS describes each bundled server by its name without the
+ * plugin prefix; any other name is the live environment. */
+const ROW_DESCRIPTIONS = {
+  "rise-x-test": "A safe copy for trying things out",
+  "rise-x-staging": "Staging, only if your organisation runs one",
+};
+
 function connectionRows(mcp) {
   const configured = mcp.configured || [];
   const rows = configured.length
@@ -1106,9 +1113,9 @@ function connectionRows(mcp) {
     .map((row) =>
       listItem({
         name: row.name,
-        description: /test/i.test(row.name)
-          ? "A safe copy for trying things out"
-          : "Your live Rise-X environment",
+        description:
+          ROW_DESCRIPTIONS[row.name.replace(/^plugin:rise-x-mcp:/, "")] ||
+          "Your live Rise-X environment",
         trailing:
           `<span class="shrink-0 font-mono text-xs text-muted-foreground">${esc(row.target)}</span>` +
           btn(ICON.copy, {
