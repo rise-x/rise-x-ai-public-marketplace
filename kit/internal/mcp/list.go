@@ -92,17 +92,21 @@ func RiseXServers(servers []Server) []Server {
 var optionalServers = []string{riseXPluginPrefix + "rise-x-staging"}
 
 // Overall picks the worst verdict among a set of servers, or
-// VerdictNotInstalled if there are none. An optional server that still needs a
-// sign-in is left out, unless no other server is there to judge.
+// VerdictNotInstalled if there are none. An optional server that is not
+// connected is left out, unless no other server is there to judge; then its
+// own verdict stands.
 func Overall(servers []Server) Verdict {
 	if len(servers) == 0 {
 		return VerdictNotInstalled
 	}
-	worst := VerdictConnected
+	worst, worstSkipped := VerdictConnected, VerdictConnected
 	judged := 0
 	for _, s := range servers {
 		v := statusVerdict(s.Status)
-		if v == VerdictNeedsAuth && slices.Contains(optionalServers, s.Name) {
+		if v != VerdictConnected && slices.Contains(optionalServers, s.Name) {
+			if rank(v) > rank(worstSkipped) {
+				worstSkipped = v
+			}
 			continue
 		}
 		judged++
@@ -111,7 +115,7 @@ func Overall(servers []Server) Verdict {
 		}
 	}
 	if judged == 0 {
-		return VerdictNeedsAuth
+		return worstSkipped
 	}
 	return worst
 }

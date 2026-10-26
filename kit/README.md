@@ -117,9 +117,9 @@ marketplace.
 
 **Rise-X connection** shows whether the Rise-X MCP (Model Context Protocol,
 the interface Claude uses to reach Rise-X) servers are connected, with the
-steps to connect them. The staging server is optional: it counts only once you
-sign in to it, so leaving it signed out does not turn the status to **Sign-in
-needed**.
+steps to connect them. The staging server is optional: it counts only while it
+is connected, so leaving it signed out, or staging being down, does not change
+the status.
 
 1. In Claude Desktop, go to **Customize** > **Connectors**, press **Add**,
    then **Add custom connector**.
