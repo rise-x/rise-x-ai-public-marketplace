@@ -81,9 +81,9 @@ A filter node is exactly **one** of: a leaf condition (`field` + `operator` + `v
 | `notEquals` | all types | 1 | |
 | `in` | all except boolean | 1+ | Set membership. Rejected on boolean (use `equals`/`notEquals`) — listing both values of a 2-valued type is a no-op → 400. |
 | `notIn` | all except boolean | 1+ | Rejected on boolean. |
-| `contains` | Flow / Company strings | 1 | Substring match. **Flow and Company only** (their whitelist columns are indexed) — `search_works` / `search_assets` reject it, and it is never allowed on `data.*` (use `startsWith`). Not allowed on guid / number / date / boolean. |
-| `startsWith` | string only | 1 | Leading-anchored, case-insensitive prefix match. Allowed on all string fields (whitelist + `data.*`) on every resource. |
-| `endsWith` | Flow / Company strings | 1 | Trailing-anchored, case-insensitive suffix match. **Flow and Company only** — `search_works` / `search_assets` reject it, and it is never allowed on `data.*`. |
+| `contains` | string only | 1 | Case-insensitive substring match. |
+| `startsWith` | string only | 1 | Leading-anchored, case-insensitive prefix match. |
+| `endsWith` | string only | 1 | Trailing-anchored, case-insensitive suffix match. |
 | `between` | number / date | exactly 2 | Inclusive range |
 | `greaterThan` | number / date | 1 | NOT `gt` |
 | `greaterThanOrEqual` | number / date | 1 | NOT `gte` |
@@ -93,8 +93,6 @@ A filter node is exactly **one** of: a leaf condition (`field` + `operator` + `v
 | `notExists` | all types | 0 | Field is absent |
 
 There is no wildcard syntax. `equals` is an exact match, so a `*` in the value is a literal character: `{"operator": "equals", "values": ["*fire*"]}` returns an empty page, not a 400. For a prefix match use `startsWith`.
-
-`contains` and `endsWith` are **Flow- and Company-only**: accepted on `search_flows` and `search_companies` string fields, whose whitelist columns are indexed, and **rejected with 400** everywhere else — on `search_works` and `search_assets` (whitelist) strings, and on **all** `data.*` string paths (unanchored / trailing-anchored regex is non-indexable on dynamic fields). The portable string operators — valid on every resource and on `data.*` — are `equals` / `notEquals` / `in` / `notIn` / `startsWith`. So in `search_works`, the only partial string match is a prefix (`startsWith`). `search_works` has no suffix or substring match on any field, `data.*` included: to find values that contain a word, project the field with `fields` + `enforce_fields=True`, page through, and match client-side.
 
 > ⚠️ **Empty `contains` / `startsWith` / `endsWith` values are rejected.** Passing `{"operator": "endsWith", "values": [""]}` or `[" "]` (whitespace) — likewise for `contains` / `startsWith` — returns 400 from the validator — previously this silently produced a match-everything regex that scanned every document. If the caller's intent is "any/no value", use `exists` / `notExists` instead.
 
@@ -200,7 +198,7 @@ Works carry per-flow user-defined data alongside the static POCO fields. The sta
 | `flowType` | string | free-form — flow-defined identifier (e.g. `"vessel-inspection"`). |
 | `flowId`, `flowOriginId`, `environmentId`, `companyId`, `createdBy`, `lastModifiedBy` | guid | `equals`/`notEquals`/`in`/`notIn`/`exists`/`notExists` only. `companyId` is opt-in for projection. |
 | `environments` | guid (array-valued) | the environment ids the work belongs to; `in [...]` matches any element. Opt-in for projection. |
-| `comments`, `initiatorPartyNames`, `assignedRoles` | string | Prefix match via `startsWith`; `search_works` has no suffix or substring match. `assignedRoles` is array-valued (`in [...]` matches any element) and opt-in for projection. |
+| `comments`, `initiatorPartyNames`, `assignedRoles` | string | `assignedRoles` is array-valued (`in [...]` matches any element) and opt-in for projection. |
 | `assignedUsers.id` | guid | filter "works assigned to user X" — most common case |
 | `assignedUsers.displayName` | string | filter by assigned user's display name |
 | `assignedUsers.email` | string | filter by assigned user's email |
@@ -347,7 +345,7 @@ Searchable without a `get_flow_data_schema` call — but still inside the mandat
 | `statusDisplay` | object — projection-only | whole-sub-doc escape hatch; rejects filter / sort with 400 |
 | `data` | object — projection-only | whole-data escape hatch; rejects filter / sort with 400 (see below) |
 
-Operators, enum matching, the Object-root-can't-be-a-filter/sort-leaf rule, and the empty-`startsWith` guard are all **identical to Work**. `contains` / `endsWith` are **Flow- and Company-only** — `search_assets` rejects them with 400 (use `startsWith`). Mixed-type tolerance and the date/number quirks are identical too (see the Work [§ Date and number quirks](#date-and-number-quirks-on-data)).
+Operators, enum matching, the Object-root-can't-be-a-filter/sort-leaf rule, and the empty-`startsWith` guard are all **identical to Work**. Mixed-type tolerance and the date/number quirks are identical too (see the Work [§ Date and number quirks](#date-and-number-quirks-on-data)).
 
 ### Asset `data.*` projection trims like Work — with two shape caveats
 
@@ -399,7 +397,7 @@ The static whitelist for `search_companies`. No enum fields; the string columns 
 | Field key | Type | Notes |
 |---|---|---|
 | `id` | guid | direct lookup |
-| `name`, `displayName`, `shortCode`, `companyNumber` | string | free-form, user-supplied. `contains` / `startsWith` / `endsWith` all supported — Company shares Flow's indexed-column allowance, unlike Work and Asset. |
+| `name`, `displayName`, `shortCode`, `companyNumber` | string | free-form, user-supplied. |
 | `domains` | array | user-supplied domain names; `equals` / `notEquals` / `in` / `notIn` only (`in` matches any element). Typed `array`, not string, so `startsWith` / `contains` / `endsWith` on it are a 400. |
 | `lastModified`, `created` | date | range / comparison ops supported |
 
@@ -567,7 +565,7 @@ await search_assets(
 )
 ```
 
-`contains` / `endsWith` are Flow- and Company-only — assets use `startsWith`. Requesting a specific `data.*` path trims the folded `data` object to just that path; bare `data` returns the whole sub-document (still pinned, but no schema lookup). See [§ Asset Search and data.* Fields](#asset-search-and-data-fields).
+Requesting a specific `data.*` path trims the folded `data` object to just that path; bare `data` returns the whole sub-document (still pinned, but no schema lookup). See [§ Asset Search and data.* Fields](#asset-search-and-data-fields).
 
 ## Common Pitfalls
 
