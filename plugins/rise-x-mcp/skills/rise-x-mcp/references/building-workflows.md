@@ -47,7 +47,7 @@ User: "build a new inspection workflow" or "create an asset flow for vessels"
         |     GATE: Wait for user approval before proceeding.
         |
         +-- Phase 2: BUILD STRUCTURE
-        |     1. create_flow_draft(flow_id)
+        |     1. create_flow(flow_resource_type, update_flow_flags)  -- new flow, already in draft mode
         |     2. update_flow_properties(flow_id, {displayName, description, icon})
         |     3. add_step(flow_id, position, step_name, task_name)  -- repeat per step
         |     4. get_flow_steps(flow_id)  -- capture stepIds, taskIds, layoutIds
@@ -57,7 +57,7 @@ User: "build a new inspection workflow" or "create an asset flow for vessels"
         |     5. update_component(layoutId, sectionId, {label, properties})  -- label the section
         |     6. add_components(layoutId, [{fields...}], parent_section_id)  -- add fields
         |     Repeat for each task's layout.
-        |     NOTE: DO NOT call create_layout_draft here. create_flow_draft already
+        |     NOTE: DO NOT call create_layout_draft here. create_flow already
         |     created layout drafts for all tasks. The layoutIds from get_flow_steps
         |     ARE the draft layout IDs. Calling create_layout_draft creates orphan
         |     drafts that won't be published by publish_flow.

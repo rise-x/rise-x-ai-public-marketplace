@@ -69,5 +69,5 @@ Always run this before any other operations:
 
 - **Switching ecosystem mid-session** is safe but changes the target for ALL tools immediately
 - **Deployment environment** is fixed — you cannot switch between dev/test/prod at runtime
-- **Every tool except the 3 session tools** requires an active ecosystem — calls will fail with an error message
+- **Every tool except the 5 session tools** requires an active ecosystem — calls will fail with an error message
 - `list_ecosystems` uses a "bare" API wrapper (no ecosystem header) since it lists across workspaces
