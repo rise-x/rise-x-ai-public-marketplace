@@ -63,7 +63,7 @@ Lightweight projected list — **best starting point** for understanding flow st
 
 Returns: `[{id, stepName, stepDisplayName, taskDisplayName, stepId, taskId, layoutId, actionSetId}]`
 
-- `id` — composite step identifier used by `get_flow_step`, `rename_step(..., target="task")`, `manage_action`.
+- `id` — composite step identifier. Required by `get_flow_step`; also accepted by `manage_action`, `manage_task_invites`, `delete_step`, `rename_step` (see the ID mapping table in `building-workflows.md`).
 - `stepName` — internal camelCase name used for `ByStepName` action routing. For v3-style flows (asset types, legacy workflows) this is slash form like `UntitledStep/Generated-<guid>`; for v4 native flows it is bare like `Step_1`.
 - `stepDisplayName` / `taskDisplayName` — human-readable labels.
 - `stepId` / `taskId` / `actionSetId` / `layoutId` — internal GUIDs.

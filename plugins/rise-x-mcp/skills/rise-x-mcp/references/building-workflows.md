@@ -256,7 +256,7 @@ instead of re-fetching.
 
 ### Phase 2: Layout & Components (for each task)
 
-**CRITICAL — Do NOT call `create_layout_draft` here.** When `create_flow_draft` runs, it automatically creates draft copies of all associated layouts. The `layoutId` values from `get_flow_steps` ARE already draft IDs. Calling `create_layout_draft` on them creates **orphan drafts** that are NOT linked to the flow — `publish_flow` will publish the flow's own (empty) layout drafts, not your orphans.
+**CRITICAL — Do NOT call `create_layout_draft` here.** When `create_flow` (new flow) or `create_flow_draft` (existing flow) runs, it automatically creates draft copies of all associated layouts. The `layoutId` values from `get_flow_steps` ARE already draft IDs. Calling `create_layout_draft` on them creates **orphan drafts** that are NOT linked to the flow — `publish_flow` will publish the flow's own (empty) layout drafts, not your orphans.
 
 ```
 # Each layout already has a default empty section. Get its ID from the response
