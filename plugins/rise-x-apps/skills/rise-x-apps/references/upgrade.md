@@ -58,7 +58,7 @@ approval gate, because no screen changes. Don't run it through those out of
 habit.
 
 1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
-   outside), then `pnpm install`. If the app passes `useHistory` to
+   outside), then `pnpm install --prefer-offline`. If the app passes `useHistory` to
    `agents.run` or `deps.<alias>.agent.run` — `useHistory: false` is what the
    old skill taught — delete the argument: 0.14.0 drops it, so the build fails
    on it, and the gateway ignores the flag anyway, so those runs are already

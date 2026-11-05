@@ -48,10 +48,10 @@ Returns:
 
 ## Rise-X tools are deferred (client-side)
 
-In clients that lazy-load MCP tools (e.g. Claude Code), the Rise-X tools are **deferred**: only their names are known up front, and a tool cannot be invoked until its schema is fetched via **`tool_search`** (select the tool by name first). If no Rise-X tools appear at all, the **connector is disabled** — enable/re-enable the Rise-X MCP connector for the session, then the tools attach. Two consequences worth knowing:
+In clients that lazy-load MCP tools, the Rise-X tools are **deferred**: only their names are known up front, and a tool cannot be invoked until the client's tool-search tool fetches its schema (select the tool by name first). Clients that load every MCP tool up front skip this step. If no Rise-X tools appear at all, the **connector is disabled** — enable/re-enable the Rise-X MCP connector for the session, then the tools attach. Two consequences worth knowing:
 
-- A fresh session may need a `tool_search` pass (or a connector toggle) before the first `set_active_ecosystem` / `whoami` call resolves.
-- `tool_search`'s argument shape is **client-specific** — some builds take a single `query` string, others a `keywords` **list** (a list-expecting build returns `keywords: Input should be a valid list` for a bare string, so wrap single terms in a list there). If one form is rejected, try the other.
+- A fresh session may need a tool-search pass (or a connector toggle) before the first `set_active_ecosystem` / `whoami` call resolves.
+- The tool-search tool's argument shape is **client-specific** — some builds take a single `query` string, others a `keywords` **list** (a list-expecting build returns `keywords: Input should be a valid list` for a bare string, so wrap single terms in a list there). If one form is rejected, try the other.
 
 ## Session Initialization Recipe
 
