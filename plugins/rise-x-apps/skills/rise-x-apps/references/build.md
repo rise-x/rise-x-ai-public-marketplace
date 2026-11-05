@@ -28,9 +28,10 @@ pnpm start
 
 In-repo apps are pnpm workspace members (`apps/*` in `pnpm-workspace.yaml`).
 The scaffolder writes a registry version for `@rise-x/apps-sdk` — change it to
-`"workspace:*"` in the new app's `package.json` and run `pnpm install --prefer-offline` at the
-repo root so the app links to `packages/apps-sdk` directly. The repo's own
-git conventions apply — commit only when the user asks.
+`"workspace:*"` in the new app's `package.json` and run
+`pnpm install --prefer-offline` at the repo root so the app links to
+`packages/apps-sdk` directly. The repo's own git conventions apply — commit
+only when the user asks.
 
 **Move the approved mock in.** The design phase leaves it wherever the user
 was working; put it at `design/<app>.v<n>.html` inside the new app now. §Build
@@ -47,9 +48,11 @@ cd <name>
 git init && git add -A && git commit -m "chore: scaffold <name> Rise-X app"
 ```
 
-Whenever you run the install yourself, for example after `--skip-install` or a
-`package.json` change, use `pnpm install --prefer-offline`, never `--offline`:
-pnpm can't resolve versions offline for an app that has no lockfile yet.
+On either path, whenever you run the install yourself, for example after
+`--skip-install` or a hand edit to `package.json`, use
+`pnpm install --prefer-offline`, never `--offline`: pnpm can't resolve versions
+offline for an app that has no lockfile yet. Add a new dependency with a plain
+`pnpm add <pkg>`, which resolves through the configured registry.
 
 Initialize git right after scaffolding (the template ships a `.gitignore`)
 and maintain the app's history with **conventional commits** from the first
@@ -945,9 +948,10 @@ Whether you scaffolded a new app or modified an existing one, the user can't see
    screen — layout, spacing, states, dark mode, and the mobile frame if the
    UX level has one. Fix drift in the app (or get the user's OK for the
    deviation) before going further.
-3. **Run a code review.** Run a code-review skill with its fix option over
-   the new app code and apply the fixes it confirms. If no code-review skill
-   is available, say so instead of skipping silently.
+3. **Run a code review.** Run the `code-review` skill (or your runtime's
+   equivalent) with its fix option (`--fix`) over the new app code and apply
+   the fixes it confirms. If no code-review skill is available, say so instead
+   of skipping silently.
 4. **Validate the manifest, and read the scan warnings.** The manifest,
    `validate` and `scan` need `@rise-x/apps-sdk` >= 0.12.0. `pnpm validate` exits
    zero, meaning every environment in `rise-x-app.json` resolves — not just the

@@ -57,8 +57,10 @@ missing, the docs axis — not steps 3 and 4, and so no design phase and no
 approval gate, because no screen changes. Don't run it through those out of
 habit.
 
-1. **Bump the SDK.** `@rise-x/apps-sdk` to `workspace:*` in-repo (latest npm
-   outside), then `pnpm install --prefer-offline`. If the app passes `useHistory` to
+1. **Bump the SDK.** In-repo, set `@rise-x/apps-sdk` to `workspace:*` and run
+   `pnpm install --prefer-offline` at the repo root. Outside the repo, run
+   `pnpm add @rise-x/apps-sdk@latest` without `--prefer-offline`, which can
+   resolve `latest` from stale cached metadata. If the app passes `useHistory` to
    `agents.run` or `deps.<alias>.agent.run` — `useHistory: false` is what the
    old skill taught — delete the argument: 0.14.0 drops it, so the build fails
    on it, and the gateway ignores the flag anyway, so those runs are already

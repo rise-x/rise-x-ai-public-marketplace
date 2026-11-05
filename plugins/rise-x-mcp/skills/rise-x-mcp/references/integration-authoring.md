@@ -99,7 +99,7 @@ If the user picks a `type` and you're missing any field in its row, **stop and a
 
 ### 4. Batch the questions
 
-When you have one or more missing slots, ask everything you need in a **single** message to the user with one sub-question per slot. Bad:
+When you have one or more missing slots, ask everything you need in a **single** message to the user with one sub-question per slot, or through your runtime's question tool, if it has one. Bad:
 
 > 🚫 "What's the baseUri?"
 > *(waits)*
@@ -177,7 +177,7 @@ These are belt-and-braces with the server-side fixes (`RiseIntegrationBuilder` d
 `delete_integration` and `delete_integration_endpoint` are both **physical deletes** in v4 — there is no soft-delete state, and no `undelete` route. The integration document (or endpoint entry) is removed from MongoDB immediately, the key-vault encryption secret is best-effort dropped, and flows that referenced the removed item start failing at runtime. Before calling either:
 
 1. Show the user the integration name, endpoint name(s), and any flow references you can find (no automated lookup exists today — say so).
-2. Ask the user one explicit question with the options `Delete` and `Cancel`, and wait for the answer. Do not infer consent from "yeah ok" / "go ahead" earlier in the chat — confirm at the moment of action.
+2. Ask the user one explicit question with the options `Delete` and `Cancel` (through your runtime's question tool, if it has one), and wait for the answer. Do not infer consent from "yeah ok" / "go ahead" earlier in the chat — confirm at the moment of action.
 3. If confirmed, call the delete and report the success/404 result.
 
 There is no draft / publish cycle for integrations (see `integrations.md` pitfall #6) and no recovery path once a delete returns success — recreating the integration requires a fresh `update_integration` with all configuration (and re-collecting any secrets). Treat each delete as final.
