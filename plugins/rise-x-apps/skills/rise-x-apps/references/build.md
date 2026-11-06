@@ -28,9 +28,10 @@ pnpm start
 
 In-repo apps are pnpm workspace members (`apps/*` in `pnpm-workspace.yaml`).
 The scaffolder writes a registry version for `@rise-x/apps-sdk` — change it to
-`"workspace:*"` in the new app's `package.json` and run `pnpm install` at the
-repo root so the app links to `packages/apps-sdk` directly. The repo's own
-git conventions apply — commit only when the user asks.
+`"workspace:*"` in the new app's `package.json` and run
+`pnpm install --prefer-offline` at the repo root so the app links to
+`packages/apps-sdk` directly. The repo's own git conventions apply — commit
+only when the user asks.
 
 **Move the approved mock in.** The design phase leaves it wherever the user
 was working; put it at `design/<app>.v<n>.html` inside the new app now. §Build
@@ -46,6 +47,12 @@ npx @rise-x/apps-sdk init <name> --pm=pnpm   # drop --pm if pnpm isn't installed
 cd <name>
 git init && git add -A && git commit -m "chore: scaffold <name> Rise-X app"
 ```
+
+On either path, whenever you run the install yourself, for example after
+`--skip-install` or a hand edit to `package.json`, use
+`pnpm install --prefer-offline`, never `--offline`: pnpm can't resolve versions
+offline for an app that has no lockfile yet. Add a new dependency with a plain
+`pnpm add <pkg>`, which resolves through the configured registry.
 
 Initialize git right after scaffolding (the template ships a `.gitignore`)
 and maintain the app's history with **conventional commits** from the first
@@ -78,7 +85,7 @@ What the scaffolder creates (**SDK >= 0.11.0** — earlier versions emit webpack
 ```
 <name>/
 ├── AGENTS.md              # agent guide: architecture in the Rise host, stack, commands, APP.md discipline
-├── CLAUDE.md              # one-line @AGENTS.md import so Claude Code loads the same guide — edit AGENTS.md
+├── CLAUDE.md              # one-line @AGENTS.md import for agents that read CLAUDE.md — edit AGENTS.md
 ├── README.md              # app readme; points at APP.md and AGENTS.md
 ├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod, plus `validate`, `build:staging`, `build:prod` (SDK >= 0.12.0)
 ├── rise-x-app.json        # app dependency manifest (SDK >= 0.12.0): alias → per-environment ids; the build preset resolves it (no dependencies yet)
@@ -941,10 +948,10 @@ Whether you scaffolded a new app or modified an existing one, the user can't see
    screen — layout, spacing, states, dark mode, and the mobile frame if the
    UX level has one. Fix drift in the app (or get the user's OK for the
    deviation) before going further.
-3. **Run a code review.** Invoke the `code-review` skill with `--fix`
-   (`/code-review --fix`) over the new app code and apply the fixes it
-   confirms. If the skill isn't available, say so instead of skipping
-   silently.
+3. **Run a code review.** Run the `code-review` skill (or your runtime's
+   equivalent) with its fix option (`--fix`) over the new app code and apply
+   the fixes it confirms. If no code-review skill is available, say so instead
+   of skipping silently.
 4. **Validate the manifest, and read the scan warnings.** The manifest,
    `validate` and `scan` need `@rise-x/apps-sdk` >= 0.12.0. `pnpm validate` exits
    zero, meaning every environment in `rise-x-app.json` resolves — not just the

@@ -276,7 +276,7 @@ parameters:
 
 ## Question templates
 
-Snippets for the batched `AskUserQuestion` call during slot-filling. Adapt — don't paste verbatim.
+Snippets for the batched question during slot-filling. Adapt — don't paste verbatim. Render each template as one message to the user, or through your runtime's question tool if it has one.
 
 ### New REST integration with token auth
 

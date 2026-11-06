@@ -2,7 +2,7 @@
 
 The MCP server manages **federated apps**: independent Module-Federation bundles that run inside
 the Diana shell as custom UIs. Six tools cover the app registry and bundle deployment — you can
-release an app end-to-end from a Claude session, no manual zip upload through the shell UI.
+release an app end-to-end from an agent session, no manual zip upload through the shell UI.
 
 > **Scope:** these tools manage *deployment and the registry*. **Authoring** an app (scaffolding,
 > `@rise-x/apps-sdk` code, connectors) is covered by the `rise-x-apps` skill in this marketplace's
