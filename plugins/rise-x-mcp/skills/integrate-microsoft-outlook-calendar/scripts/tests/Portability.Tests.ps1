@@ -4,7 +4,7 @@ BeforeAll {
 
 Describe 'Installed marketplace skill portability' {
     BeforeEach {
-        $installed = Join-Path $TestDrive 'installed skill'
+        $installed = Join-Path $TestDrive ('installed skill-' + [guid]::NewGuid().ToString('N'))
         Copy-Item $skill $installed -Recurse
         $entry = Join-Path $installed 'scripts/Start-CalendarSetup.ps1'
     }
