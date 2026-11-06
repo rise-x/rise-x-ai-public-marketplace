@@ -1,0 +1,54 @@
+name: Calendar setup checks
+
+on:
+  pull_request:
+    branches: [main, 'release/**']
+    paths:
+      - 'plugins/rise-x-mcp/skills/integrate-microsoft-outlook-calendar/**'
+      - '.github/workflows/calendar-setup-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: plugins/rise-x-mcp/skills/integrate-microsoft-outlook-calendar
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test tools (no cloud provider modules or credentials)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module Pester -RequiredVersion 6.2.0 -Scope CurrentUser -Repository PSGallery -Force
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Repository PSGallery -Force
+      - name: Analyze scripts and run offline regression tests
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Pester -RequiredVersion 6.2.0
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0
+          # Test the complete skill outside the checkout, as an installed plugin.
+          $installed = Join-Path ([IO.Path]::GetTempPath()) ('calendar-skill-' + [guid]::NewGuid().ToString('N'))
+          Copy-Item . $installed -Recurse
+          Push-Location $installed
+          try {
+            $findings = @(Get-ChildItem ./scripts/*.ps1 | Invoke-ScriptAnalyzer -Severity Error,Warning)
+            if ($findings.Count) { $findings | Format-Table -Wrap; throw 'Script analysis failed.' }
+            $result = Invoke-Pester ./scripts/tests -Output Detailed -PassThru
+            if ($result.FailedCount -or $result.TotalCount -eq 0) { throw 'Offline setup tests failed or no tests ran.' }
+          } finally {
+            Pop-Location
+            Remove-Item $installed -Recurse -Force
+          }

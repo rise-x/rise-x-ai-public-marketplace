@@ -1,0 +1,7 @@
+{
+  "ExchangeOnlineManagement": "3.9.2",
+  "Microsoft.Graph.Authentication": "2.36.1",
+  "Microsoft.Graph.Applications": "2.36.1",
+  "Microsoft.PowerShell.SecretManagement": "1.1.2",
+  "Microsoft.PowerShell.SecretStore": "1.0.6"
+}
