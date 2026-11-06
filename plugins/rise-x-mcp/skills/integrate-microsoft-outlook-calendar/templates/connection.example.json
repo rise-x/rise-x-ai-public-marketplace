@@ -1,0 +1,14 @@
+{
+  "tenantId": "REPLACE_WITH_TENANT_GUID",
+  "clientId": "REPLACE_WITH_CLIENT_GUID",
+  "mailbox": "bookings@example.com",
+  "excludedMailbox": "excluded@example.com",
+  "calendarId": "",
+  "riseXBaseUrl": "https://your-rise-x-api.example.com",
+  "ecosystem": "your-test-ecosystem",
+  "environment": "test",
+  "applicationName": "Rise-X Calendar Lab",
+  "scopeName": "RiseXCalendarLabMailbox",
+  "assignmentName": "RiseXCalendarLabCalendars",
+  "integrationName": "OutlookBusinessCalendar"
+}

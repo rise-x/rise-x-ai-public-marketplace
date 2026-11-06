@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tenantId",
+    "mailbox",
+    "excludedMailbox",
+    "riseXBaseUrl",
+    "ecosystem",
+    "environment",
+    "applicationName",
+    "scopeName",
+    "assignmentName",
+    "integrationName"
+  ],
+  "properties": {
+    "tenantId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "mailbox": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+    },
+    "excludedMailbox": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+    },
+    "riseXBaseUrl": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ecosystem": {
+      "type": "string",
+      "minLength": 1
+    },
+    "environment": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "applicationName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 _.-]{0,100}$"
+    },
+    "scopeName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 _.-]{0,100}$"
+    },
+    "assignmentName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 _.-]{0,100}$"
+    },
+    "integrationName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 _.-]{0,100}$"
+    },
+    "clientId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "calendarId": {
+      "type": "string"
+    }
+  }
+}

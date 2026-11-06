@@ -1,0 +1,122 @@
+[
+  {
+    "alias": "calendarQuery",
+    "endpoint": {
+      "name": "QueryCalendar",
+      "method": "GET",
+      "endpointUri": "/users/__MAILBOX____CALENDAR__/calendarView?startDateTime={$.from}&endDateTime={$.to}&$top=100",
+      "request": null,
+      "responseValuePath": "$.value",
+      "headers": {
+        "Prefer": "outlook.timezone=\"UTC\""
+      },
+      "parameters": [],
+      "enableForAssetSearch": false
+    }
+  },
+  {
+    "alias": "calendarGet",
+    "endpoint": {
+      "name": "GetEvent",
+      "method": "GET",
+      "endpointUri": "/users/__MAILBOX____CALENDAR__/events/{$.eventId}",
+      "request": null,
+      "responseValuePath": "$",
+      "headers": {
+        "Prefer": "outlook.timezone=\"UTC\""
+      },
+      "parameters": [],
+      "enableForAssetSearch": false
+    }
+  },
+  {
+    "alias": "calendarCreate",
+    "endpoint": {
+      "name": "CreateEvent",
+      "method": "POST",
+      "endpointUri": "/users/__MAILBOX____CALENDAR__/events",
+      "request": {
+        "subject": "$.subject",
+        "body": {
+          "contentType": "HTML",
+          "content": "$.description"
+        },
+        "start": {
+          "dateTime": "$.start",
+          "timeZone": "UTC"
+        },
+        "end": {
+          "dateTime": "$.end",
+          "timeZone": "UTC"
+        },
+        "transactionId": "$.transactionId",
+        "attendees": "$.attendees"
+      },
+      "responseValuePath": "$",
+      "headers": {
+        "Prefer": "outlook.timezone=\"UTC\""
+      },
+      "parameters": [],
+      "enableForAssetSearch": false
+    }
+  },
+  {
+    "alias": "calendarUpdate",
+    "endpoint": {
+      "name": "UpdateEvent",
+      "method": "PATCH",
+      "endpointUri": "/users/__MAILBOX____CALENDAR__/events/{$.eventId}",
+      "request": {
+        "subject": "$.subject",
+        "start": {
+          "dateTime": "$.start",
+          "timeZone": "UTC"
+        },
+        "end": {
+          "dateTime": "$.end",
+          "timeZone": "UTC"
+        }
+      },
+      "responseValuePath": "$",
+      "headers": {
+        "Prefer": "outlook.timezone=\"UTC\""
+      },
+      "parameters": [],
+      "enableForAssetSearch": false
+    }
+  },
+  {
+    "alias": "calendarSetAttendees",
+    "endpoint": {
+      "name": "SetAttendees",
+      "method": "PATCH",
+      "endpointUri": "/users/__MAILBOX____CALENDAR__/events/{$.eventId}",
+      "request": {
+        "attendees": "$.attendees"
+      },
+      "responseValuePath": "$",
+      "headers": {
+        "Prefer": "outlook.timezone=\"UTC\""
+      },
+      "parameters": [],
+      "enableForAssetSearch": false
+    }
+  },
+  {
+    "alias": "calendarCancel",
+    "endpoint": {
+      "name": "CancelEvent",
+      "method": "POST",
+      "endpointUri": "/users/__MAILBOX__/events/{$.eventId}/cancel",
+      "request": {
+        "comment": "$.comment"
+      },
+      "responseValuePath": "$",
+      "headers": {
+        "Prefer": "outlook.timezone=\"UTC\""
+      },
+      "parameters": [],
+      "enableForAssetSearch": false
+    }
+  }
+]

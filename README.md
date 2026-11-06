@@ -269,6 +269,17 @@ and a `setup` skill for first-time connection. Bundles three HTTP MCP servers â€
 `rise-x-test` (sandbox), `rise-x-staging` (staging) and `rise-x` (production),
 configured in `plugins/rise-x-mcp/.mcp.json`.
 
+**Shared Outlook calendars:** ask "Help me set up a shared Outlook mailbox and
+connect its calendar to Rise-X." The bundled
+[`integrate-microsoft-outlook-calendar` skill](plugins/rise-x-mcp/skills/integrate-microsoft-outlook-calendar/SKILL.md)
+includes PowerShell setup/recovery scripts, scoped Microsoft access, secure
+credential storage, six calendar endpoints and app-binding instructions. No
+separate app checkout is required. This is a pilot recipe: guided clean-machine
+and HTML recipient acceptance remain pending. It requires an interactive Microsoft
+365 administrator session on a trusted workstation with PowerShell 7.4 or newer;
+an agent without local terminal access can guide the administrator through it.
+Teams meeting creation is deferred.
+
 **Requirements:**
 - Claude Code or Cowork
 - A Rise-X tenant account (the plugin authenticates against your
