@@ -3,6 +3,7 @@
 The MCP server manages **federated apps**: independent Module-Federation bundles that run inside
 the Diana shell as custom UIs. Six tools cover the app registry and bundle deployment — you can
 release an app end-to-end from an agent session, no manual zip upload through the shell UI.
+Three more read an app's source code: see § Reading an app's source.
 
 > **Scope:** these tools manage *deployment and the registry*. **Authoring** an app (scaffolding,
 > `@rise-x/apps-sdk` code, connectors) is covered by the `rise-x-apps` skill in this marketplace's
@@ -20,6 +21,9 @@ release an app end-to-end from an agent session, no manual zip upload through th
 | `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`, `featureFlags`, declared `dependencies`) |
 | `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Accepts `feature_flags` — **a passed dict replaces the stored flags wholesale** (one field, no per-key merge), so send it complete or keys you omit are silently dropped. Does NOT touch the bundle |
 | `delete_app(app_id)` | Soft-delete from the registry (bundle blobs cleaned). Redeploying under the same id restores it |
+| `list_app_source(app_id, ref?)` | Read-only, app Owners only. Every file and directory of the app's source (`path`, `type`, `size`); the `hint` names the ref it read at |
+| `get_app_source_file(app_id, path, ref?)` | Read-only, app Owners only. One file's text; a file that is not text comes back as `binary: true` with no content |
+| `search_app_source(app_id, query, ref?, path?)` | Read-only, app Owners only. Bounded text search over the source; returns `path`, `line`, `text` per match |
 
 ## Deploying a bundle (the three-step flow)
 
@@ -137,6 +141,39 @@ declaration rather than a broken tool.
 
 **Declaring an agent doesn't make it callable from here.** No MCP tool runs or spawns an agent;
 the declaration records it for the ecosystem and lets the app's own code call it.
+
+## Reading an app's source
+
+Each app's source lives in its own Git repository, kept in sync by the platform. The three source
+tools read it with the caller's own token and do no checks of their own: the platform decides.
+
+**Only app Owners can read it.** An ecosystem editor or owner without the Owner role on the app
+gets `error.code: no_source_access`. Tell the user that plainly; don't retry or look for another
+way in.
+
+**`ref`** is a branch, tag or commit. Omitted, it is the published version's tag (`v` plus the
+version), or the default branch before the first publish. Take the ref from the
+`list_app_source` hint and pass it to the follow-up reads, so they all see the same version.
+
+**Search is bounded.** `search_app_source` matches `query` literally, ignoring case, line by
+line. It reads at most 50 files, skips files over 256 KiB and files that are not text, and stops
+at 100 matches. `warnings` say what was left out (`search_bounded`, `matches_capped`,
+`files_too_large`, `files_not_text`); narrow with `path` (a directory or one file) or a more
+specific `query`. Each file costs one platform call, so prefer `path` over a repo-wide search.
+
+**Reading a file.** `get_app_source_file` returns `ref`, `path`, `size` and `content`. The
+platform refuses a file over 1 MiB.
+
+| `error.code` | Meaning |
+|---|---|
+| `no_source_access` | The caller is not an Owner of the app |
+| `no_source` | The app has no repository yet, is not in the active ecosystem, or the server does not have app source switched on |
+| `bad_ref` | The ref is not a valid branch, tag or commit name, or names nothing in the repository |
+| `file_not_found` | No file at that path and ref; `list_app_source` shows the paths |
+| `http_400` | Any other platform refusal, message passed through: a path outside the repository, a file over 1 MiB, or the source could not be read just now (retry once) |
+
+On an MCP server without this release the three tools are absent: read that as not supported
+here.
 
 ## Release workflow recipes
 
