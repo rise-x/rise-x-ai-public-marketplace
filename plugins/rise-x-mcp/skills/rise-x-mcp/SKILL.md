@@ -1,6 +1,6 @@
 ---
 name: rise-x-mcp
-description: "You MUST invoke this skill before calling any Rise-X MCP server tool. Use when the user explicitly mentions Rise-X, rise-x, EOP, or a Rise-X ecosystem, or when established conversation context makes the request a Rise-X operation. Covers workflows, layouts/components, dashboards, work items, assets, search/data schemas, actions/approvals, pipelines/exports, integrations/external APIs, app deployment, and AI agent configuration and management. Do not trigger for generic workflow or software requests without Rise-X context, or when only editing the Rise-X MCP server Python implementation."
+description: "You MUST invoke this skill before calling any Rise-X MCP server tool. Use when the user explicitly mentions Rise-X, rise-x, EOP, or a Rise-X ecosystem, or when established conversation context makes the request a Rise-X operation. Covers workflows, layouts/components, dashboards, work items, assets, search/data schemas, actions/approvals, pipelines/exports, integrations/external APIs, app deployment and source, and AI agent configuration and management. Do not trigger for generic workflow or software requests without Rise-X context, or when only editing the Rise-X MCP server Python implementation."
 metadata:
   author: rise-x
 ---
