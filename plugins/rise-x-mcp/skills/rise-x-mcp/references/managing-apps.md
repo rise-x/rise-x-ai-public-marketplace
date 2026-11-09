@@ -21,9 +21,9 @@ Three more read an app's source code: see § Reading an app's source.
 | `get_app(app_id)` | Full manifest for one app (incl. `module`, `description`, `icon`, `featureFlags`, declared `dependencies`) |
 | `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Accepts `feature_flags` — **a passed dict replaces the stored flags wholesale** (one field, no per-key merge), so send it complete or keys you omit are silently dropped. Does NOT touch the bundle |
 | `delete_app(app_id)` | Soft-delete from the registry (bundle blobs cleaned). Redeploying under the same id restores it |
-| `list_app_source(app_id, ref?)` | Read-only, app Owners only. Every file and directory of the app's source (`path`, `type`, `size`); the `hint` names the ref it read at |
-| `get_app_source_file(app_id, path, ref?)` | Read-only, app Owners only. One file's text; a file that is not text comes back as `binary: true` with no content |
-| `search_app_source(app_id, query, ref?, path?)` | Read-only, app Owners only. Bounded text search over the source; returns `path`, `line`, `text` per match |
+| `list_app_source(app_id, ref?)` | Read-only, app Owners only. The files and directories of the app's source (`path`, `type`, `size`), cut short with a `tree_truncated` warning on a very large repository; the `hint` names the ref it read at |
+| `get_app_source_file(app_id, path, ref?)` | Read-only, app Owners only. One file exactly as stored, after a `---` line; a file that is not text comes back as `binary: true` with no content |
+| `search_app_source(app_id, query, ref?, path?)` | Read-only, app Owners only. Bounded text search over the source; returns `path` and `line` per match, then the matching lines as `path:line: text` after a `---` line |
 
 ## Deploying a bundle (the three-step flow)
 
@@ -163,37 +163,46 @@ way in.
 
 **`ref`** is a branch, tag or commit. Omitted, it is the published version's tag (`v` plus the
 version) when the repository has that tag, otherwise the default branch, so leaving it out never
-gives `bad_ref`. Deploying a bundle does not tag the repository, so for an app released with
+gives `bad_ref`. A repository with no commits yet has nothing on its default branch: listing and
+searching it answer `no_source`, and a file read answers `file_not_found`. Deploying a bundle
+does not tag the repository, so for an app released with
 `deploy_app` an omitted ref usually reads the default branch, which may not match the deployed
 version. Take the ref from the `list_app_source` hint and pass it to the follow-up reads. With
 ref omitted the hint names a tag or a branch, never a commit, and a branch can move between calls,
 so reads pinned to a branch can still see different versions.
 
 **Search is bounded.** `search_app_source` matches `query` literally, ignoring case, line by
-line. It reads at most 50 files, skips files over 256 KiB and files that are not text, and stops
-at 100 matches. `warnings` say what was left out (`search_bounded`, `matches_capped`,
-`files_too_large`, `files_not_text`); narrow with `path` (a directory or one file) or a more
-specific `query`. Each file costs one platform call, so prefer `path` over a repo-wide search.
+line. It reads at most 50 files, and files that are not text count toward the 50 though they are
+not searched. It skips files over 256 KiB and stops at 100 matches. `warnings` say what was left
+out (`search_bounded`, `matches_capped`, `files_too_large`, `files_not_text`, `tree_truncated`)
+or that `path` matched no file (`path_not_found`); narrow with `path` (a directory or one file)
+or a more specific `query`. Each file costs one platform call, so prefer `path` over a repo-wide
+search. The envelope's `items` carry `path` and `line`; after a `---` line, each match follows as
+`path:line: text`, the line as written and cut to 200 characters around the match.
 
-**Reading a file.** `get_app_source_file` returns `ref`, `path`, `size` and `content`, or
-`binary: true` and no `content` for a file that is not text. The platform refuses a file over
-1 MiB.
+**Reading a file.** `get_app_source_file` returns `ref`, `path` and `size` as YAML, then a `---`
+line, then the file exactly as stored, to the end of the result: no escaping, so line numbers
+from a search match it. A file that is not text comes back as YAML only, with `binary: true` and
+no content. The platform refuses a file over 1 MiB.
 
-Every failure carries an `error.code` and a `hint`. Act on the code:
+`app_id` must be the app's GUID; anything else gets `validation` before any call. Every failure
+carries an `error.code`, and the source codes below carry a `hint`. Act on the code:
 
 | `error.code` | Meaning | Next move |
 |---|---|---|
 | `no_source_access` | The caller is not an Owner of the app | Tell the user; don't retry |
-| `no_source` | The app has no synced repository yet | Tell the user; retrying now won't help |
+| `no_source` | The app has no synced repository yet, or its repository has no commits | Tell the user; retrying now won't help |
 | `app_not_found` | The app is not in the active ecosystem, or was deleted | Check `list_apps` and `get_active_ecosystem`; if the app is in another ecosystem, offer to switch |
 | `source_disabled` | Reading app source is switched off on this server | Tell the user it is an admin setting they can't change |
-| `bad_ref` | The ref is not a valid branch, tag or commit name, or names nothing in the repository | Pass a ref that exists, or omit it |
-| `file_not_found` | No file at that path and ref | `list_app_source` with the same ref shows the paths |
+| `bad_ref` | The ref is not a valid branch, tag or commit name, or names nothing in the repository (listing and searching; a file read answers `file_not_found` instead) | Pass a ref that exists, or omit it |
+| `file_not_found` | No file at that path and ref, or no such ref | `list_app_source` with the same ref shows the paths |
 | `bad_path` | The path could leave the repository | Don't retry; pass a path from `list_app_source` |
 | `file_too_large` | The file is over 1 MiB | Don't retry; tell the user |
 | `source_unavailable` | The platform could not read the repository just now | Retry once, then tell the user |
 
-Any other failure gets the generic codes every tool uses (`http_<status>`, `transient`, `unknown`).
+`validation` (a bad `app_id` or an empty `query`) and `unexpected_response` (the platform answered
+in a shape the tool does not know) carry no hint. Any other failure gets the generic codes every
+tool uses (`http_<status>`, `transient`, `unknown`).
 
 On an MCP server without this release the three tools are absent: read that as not supported
 here.
