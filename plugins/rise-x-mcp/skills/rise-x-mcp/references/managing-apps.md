@@ -176,8 +176,11 @@ line. It reads at most 50 files, and files that are not text count toward the 50
 not searched. It skips files over 256 KiB and stops at 100 matches. `warnings` say what was left
 out (`search_bounded`, `matches_capped`, `files_too_large`, `files_not_text`, `tree_truncated`)
 or that `path` matched no file (`path_not_found`); narrow with `path` (a directory or one file)
-or a more specific `query`. Each file costs one platform call, so prefer `path` over a repo-wide
-search. The envelope's `items` carry `path` and `line`; after a `---` line, each match follows as
+or a more specific `query`. `partial_failure` means some files could not be read: the matches from
+the rest are kept, and its `paths` names the files skipped. Tell the user which files were
+skipped; if they matter, retry only those, with `get_app_source_file` or a search with `path` set
+to one of them. The search fails outright only when no file could be read. Each file costs one
+platform call, so prefer `path` over a repo-wide search. The envelope's `items` carry `path` and `line`; after a `---` line, each match follows as
 `path:line: text`, the line as written and cut to 200 characters around the match.
 
 **Reading a file.** `get_app_source_file` returns `ref`, `path` and `size` as YAML, then a `---`
