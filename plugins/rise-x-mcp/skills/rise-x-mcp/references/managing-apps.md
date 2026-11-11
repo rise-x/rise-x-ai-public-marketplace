@@ -22,8 +22,8 @@ Three more read an app's source code: see § Reading an app's source.
 | `update_app(app_id, …fields)` | Metadata-only read-modify-write; pass just the fields that change. Accepts `feature_flags` — **a passed dict replaces the stored flags wholesale** (one field, no per-key merge), so send it complete or keys you omit are silently dropped. Does NOT touch the bundle |
 | `delete_app(app_id)` | Soft-delete from the registry (bundle blobs cleaned). Redeploying under the same id restores it |
 | `list_app_source(app_id, ref?)` | Read-only, app Owners only. The files and directories of the app's source (`path`, `type`, `size`), cut short with a `tree_truncated` warning on a very large repository; the `hint` names the ref it read at |
-| `get_app_source_file(app_id, path, ref?)` | Read-only, app Owners only. One file exactly as stored, after a `---` line; a file that is not text comes back as `binary: true` with no content |
-| `search_app_source(app_id, query, ref?, path?)` | Read-only, app Owners only. Bounded text search over the source; returns `path` and `line` per match, then the matching lines as `path:line: text` after a `---` line |
+| `get_app_source_file(app_id, path, ref?, start_line=1, max_lines=500)` | Read-only, app Owners only. One file exactly as stored, after a `---` line, at most 500 lines and 50,000 characters per call; a longer file comes back cut, with a `hint` naming the `start_line` to read on from. A file that is not text comes back as `binary: true` with no content |
+| `search_app_source(app_id, query, ref?, path?)` | Read-only, app Owners only. One platform-side text search over the whole source, or only under `path`, stopping at 100 matches; returns `path` and `line` per match, then the matching lines as `path:line: text` after a `---` line |
 
 ## Deploying a bundle (the three-step flow)
 
@@ -171,22 +171,28 @@ version. Take the ref from the `list_app_source` hint and pass it to the follow-
 ref omitted the hint names a tag or a branch, never a commit, and a branch can move between calls,
 so reads pinned to a branch can still see different versions.
 
-**Search is bounded.** `search_app_source` matches `query` literally, ignoring case, line by
-line. It reads at most 50 files, and files that are not text count toward the 50 though they are
-not searched. It skips files over 256 KiB and stops at 100 matches. `warnings` say what was left
-out (`search_bounded`, `matches_capped`, `files_too_large`, `files_not_text`, `tree_truncated`)
-or that `path` matched no file (`path_not_found`); narrow with `path` (a directory or one file)
-or a more specific `query`. `partial_failure` means some files could not be read: the matches from
-the rest are kept, and its `paths` names the files skipped. Tell the user which files were
-skipped; if they matter, retry only those, with `get_app_source_file` or a search with `path` set
-to one of them. The search fails outright only when no file could be read. Each file costs one
-platform call, so prefer `path` over a repo-wide search. The envelope's `items` carry `path` and `line`; after a `---` line, each match follows as
-`path:line: text`, the line as written and cut to 200 characters around the match.
+**Search runs on the platform.** `search_app_source` is one platform call that searches the whole
+repository at the ref, or only the file or directory named in `path` (e.g. `src/components`). It
+matches `query` literally, ignoring case, line by line, and stops at 100 matches. `warnings` say
+what was left out: `matches_capped` (more lines matched than came back; the search stopped there,
+so the file count in the `hint` covers only the files searched before it stopped),
+`files_skipped` (files not searched because they are not text or are too large), or
+`path_not_found` (no file at or under `path`). Narrow a capped search with `path` or a more
+specific `query`. The `hint` names the ref searched and how many files were searched. The
+envelope's `items` carry `path` and `line`; after a `---` line, each match follows as
+`path:line: text`, the line as written and cut to 200 characters. To read around a match, pass
+its `line` as `start_line` to `get_app_source_file`.
 
 **Reading a file.** `get_app_source_file` returns `ref`, `path` and `size` as YAML, then a `---`
 line, then the file exactly as stored, to the end of the result: no escaping, so line numbers
-from a search match it. A file that is not text comes back as YAML only, with `binary: true` and
-no content. The platform refuses a file over 1 MiB.
+from a search match it. One call returns at most 500 lines and 50,000 characters: `start_line`
+(default 1) is the first line, and `max_lines` (1 to 500, default 500) how many to return, fewer
+when they pass 50,000 characters. When the result is not the whole file, the YAML adds
+`lines: <first>-<last> of <total>`; when lines are left, it also has `truncated: true` and a
+`hint` naming the `start_line` that reads on, so call again with it. A single line over 50,000
+characters (minified code, say) shows only its start, also with `truncated: true`. A `start_line`
+past the end of the file gets `validation`. A file that is not text comes back as YAML only, with
+`binary: true` and no content. The platform refuses a file over 1 MiB.
 
 `app_id` must be the app's GUID; anything else gets `validation` before any call. Every failure
 carries an `error.code`, and the source codes below carry a `hint`. Act on the code:
@@ -201,11 +207,13 @@ carries an `error.code`, and the source codes below carry a `hint`. Act on the c
 | `file_not_found` | No file at that path and ref, or no such ref | `list_app_source` with the same ref shows the paths |
 | `bad_path` | The path could leave the repository | Don't retry; pass a path from `list_app_source` |
 | `file_too_large` | The file is over 1 MiB | Don't retry; tell the user |
+| `source_too_large` | The repository at that ref is too large to search | Don't retry, and a narrower `path` won't help: find files with `list_app_source` and read them with `get_app_source_file` |
 | `source_unavailable` | The platform could not read the repository just now | Retry once, then tell the user |
 
-`validation` (a bad `app_id` or an empty `query`) and `unexpected_response` (the platform answered
-in a shape the tool does not know) carry no hint. Any other failure gets the generic codes every
-tool uses (`http_<status>`, `transient`, `unknown`).
+`validation` means an argument is wrong: an `app_id` that is not a GUID, an empty `query`, or a
+`start_line` past the end of the file (the `message` gives the file's line count).
+`unexpected_response` means the platform answered in a shape the tool does not know. Any other
+failure gets the generic codes every tool uses (`http_<status>`, `transient`, `unknown`).
 
 On an MCP server without this release the three tools are absent: read that as not supported
 here.
