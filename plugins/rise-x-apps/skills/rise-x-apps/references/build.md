@@ -890,8 +890,8 @@ running app.
 2. Upload the zip. With an `upload_bundle` tool (a sandbox with no network
    access), call it with the zip's path relative to the workspace root, for
    example `upload_bundle(path="<name>/<name>-bundle.zip")`. It returns the
-   `upload_id` and the size. Otherwise, PUT the zip yourself:
-   `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
+   `upload_id` and the size. Otherwise, PUT the zip yourself from the app
+   directory: `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
    If the PUT can't reach the URL and there is no `upload_bundle` tool, stop
    and tell the user the bundle is ready at `<name>/<name>-bundle.zip` to
    deploy from the Apps UI (see the fallback below).

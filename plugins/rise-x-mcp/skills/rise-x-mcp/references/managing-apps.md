@@ -61,7 +61,9 @@ the `upload_id` it returns to step 3. Don't call `request_bundle_upload` or `cur
 
 - **Single-use** and short-TTL (default 15 minutes) — one successful PUT consumes the *URL*; the
   staged bundle then waits for `deploy_app`. If the TTL lapses, call `request_bundle_upload`
-  again (with `upload_bundle`, call `upload_bundle` again).
+  again. With `upload_bundle` the URL is used at once, so what can expire is the staged
+  upload: when `deploy_app` answers `upload_not_found`, call `upload_bundle` again for a fresh
+  `upload_id` (not `request_bundle_upload`, which its hint names).
 - The token in the URL is the credential (bound to your session); staged bytes are inert until
   `deploy_app` forwards them to the platform with *your* bearer token.
 - A `localhost_public_url` warning in the step-1 response means the server's `MCP_PUBLIC_URL` is
