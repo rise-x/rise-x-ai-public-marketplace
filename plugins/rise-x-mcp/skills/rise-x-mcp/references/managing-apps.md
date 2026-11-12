@@ -165,11 +165,11 @@ way in.
 version) when the repository has that tag, otherwise the default branch, so leaving it out never
 gives `bad_ref`. A repository with no commits yet has nothing on its default branch: listing and
 searching it answer `no_source`, and a file read answers `file_not_found`. Deploying a bundle
-does not tag the repository, so for an app released with
-`deploy_app` an omitted ref usually reads the default branch, which may not match the deployed
-version. Take the ref from the `list_app_source` hint and pass it to the follow-up reads. With
-ref omitted the hint names a tag or a branch, never a commit, and a branch can move between calls,
-so reads pinned to a branch can still see different versions.
+does not tag the repository, so for an app released with `deploy_app` an omitted ref usually
+reads the default branch, which may not match the deployed version. Take the ref from the
+`list_app_source` hint and pass it to the follow-up reads. With ref omitted the hint names a tag
+or a branch, never a commit, and a branch can move between calls, so reads pinned to a branch can
+still see different versions.
 
 **Search runs on the platform.** `search_app_source` is one platform call that searches the whole
 repository at the ref, or only the file or directory named in `path` (e.g. `src/components`). It
@@ -180,8 +180,10 @@ so the file count in the `hint` covers only the files searched before it stopped
 `path_not_found` (no file at or under `path`). Narrow a capped search with `path` or a more
 specific `query`. The `hint` names the ref searched and how many files were searched. The
 envelope's `items` carry `path` and `line`; after a `---` line, each match follows as
-`path:line: text`, the line as written and cut to 200 characters. To read around a match, pass
-its `line` as `start_line` to `get_app_source_file`.
+`path:line: text`, the line as written and cut to 200 characters around the match. To read around
+a match, pass its `line` as `start_line` to `get_app_source_file`. For a match deep in a very long
+line (minified code, say) the excerpt is the only place it shows, since a file read returns just
+the first 50,000 characters of that line: report the excerpt, and don't say there is no match.
 
 **Reading a file.** `get_app_source_file` returns `ref`, `path` and `size` as YAML, then a `---`
 line, then the file exactly as stored, to the end of the result: no escaping, so line numbers
@@ -190,9 +192,12 @@ from a search match it. One call returns at most 500 lines and 50,000 characters
 when they pass 50,000 characters. When the result is not the whole file, the YAML adds
 `lines: <first>-<last> of <total>`; when lines are left, it also has `truncated: true` and a
 `hint` naming the `start_line` that reads on, so call again with it. A single line over 50,000
-characters (minified code, say) shows only its start, also with `truncated: true`. A `start_line`
-past the end of the file gets `validation`. A file that is not text comes back as YAML only, with
-`binary: true` and no content. The platform refuses a file over 1 MiB.
+characters (minified code, say) shows only its start, also with `truncated: true`. Out-of-range
+values are clamped, not refused: `max_lines` below 1 reads one line and above 500 reads 500, and
+a `start_line` below 1 reads from line 1. An empty file read from line 1 comes back as the header
+with nothing after the `---` line; only a `start_line` above 1 that is past the last line gets
+`validation`. A file that is not text comes back as YAML only, with `binary: true` and no
+content. The platform refuses a file over 1 MiB.
 
 `app_id` must be the app's GUID; anything else gets `validation` before any call. Every failure
 carries an `error.code`, and the source codes below carry a `hint`. Act on the code:
@@ -201,7 +206,7 @@ carries an `error.code`, and the source codes below carry a `hint`. Act on the c
 |---|---|---|
 | `no_source_access` | The caller is not an Owner of the app | Tell the user; don't retry |
 | `no_source` | The app has no synced repository yet, or its repository has no commits | Tell the user; retrying now won't help |
-| `app_not_found` | The app is not in the active ecosystem, or was deleted | Check `list_apps` and `get_active_ecosystem`; if the app is in another ecosystem, offer to switch |
+| `app_not_found` | The app is not in the active ecosystem, or was deleted | Check `list_apps` and `get_active_ecosystem`; if the app is in another ecosystem, offer to switch with `set_active_ecosystem` |
 | `source_disabled` | Reading app source is switched off on this server | Tell the user it is an admin setting they can't change |
 | `bad_ref` | The ref is not a valid branch, tag or commit name, or names nothing in the repository (listing and searching; a file read answers `file_not_found` instead) | Pass a ref that exists, or omit it |
 | `file_not_found` | No file at that path and ref, or no such ref | `list_app_source` with the same ref shows the paths |
@@ -211,7 +216,7 @@ carries an `error.code`, and the source codes below carry a `hint`. Act on the c
 | `source_unavailable` | The platform could not read the repository just now | Retry once, then tell the user |
 
 `validation` means an argument is wrong: an `app_id` that is not a GUID, an empty `query`, or a
-`start_line` past the end of the file (the `message` gives the file's line count).
+`start_line` above 1 past the end of the file (the `message` gives the file's line count).
 `unexpected_response` means the platform answered in a shape the tool does not know. Any other
 failure gets the generic codes every tool uses (`http_<status>`, `transient`, `unknown`).
 
