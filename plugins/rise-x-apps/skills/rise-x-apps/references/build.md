@@ -567,7 +567,8 @@ const page = await work.search({
     { field: 'flowOriginId', operator: 'equals', values: [flow.flowOriginId] },
     // status values: Open/Closed/Completed/Deleted/Ok. Step-level values like
     // 'InProgress' live on flowState — a DIFFERENT field; filtering status by
-    // them matches nothing.
+    // them matches nothing. 'Open' also matches FINISHED items: for "not
+    // done", filter flowState instead (notEquals 'Complete').
     { field: 'status', operator: 'in', values: ['Open'] },
   ] },
   // Projection. A `data.*` path resolves against the PINNED flow's schema and
@@ -647,15 +648,15 @@ const { data } = await apps.get('/api/v4/config/apps');
 ```
 
 **Work item state: which call does what.** Never guess an event name or which field means "done". A work item has two state fields:
-- `status` is the record's lifecycle: `Open` from `work.start`, `Deleted` after `work.delete` or when the flow is cancelled or declined.
-- `flowState` (on `work.search` rows) is the flow engine's position: `InProgress` while a step is open, `Complete` once the flow's last step is submitted, `Deleted` after a delete.
+- `status` is the record's lifecycle: `Open` from `work.start`, `Deleted` after `work.delete` or when the flow is cancelled or declined. A finished item can still read `Open`, so `status` never tells you it's done.
+- `flowState` (on `work.search` rows; the same value is `state` on `work.get`) is the flow engine's position: `InProgress` while a step is open, `Complete` once the flow's last step is submitted, `Deleted` after a delete.
 
 Each change has one call:
 - **Change a field:** `work.patchData(id, { originId, path, value })`. It writes data and runs no action.
-- **Move to another step, or approve, reject, send back, finish:** `work.submit({ workId, actionName })`, with the action's `eventName` as `actionName`. The server checks the name against the flow's events (only the named step's when you pass `stepName`) and the action's condition against the saved data, so await `patchData` first. A wrong name or a failed condition returns 403 and leaves the work unchanged. Pass `stepName` to get the step's valid event names listed in the `Action not available (#3020)` message.
+- **Move to another step, or approve, reject, send back, finish:** `work.submit({ workId, actionName })`, with the action's `eventName` as `actionName` (its `name` only when it has no `eventName`, the shell's rule). The server checks the name against the flow's events (only the named step's when you pass `stepName`) and the action's condition against the saved data, so await `patchData` first. On API 3.80.0 and later, a wrong name or a failed condition returns 403 and leaves the work unchanged. Older builds skip both checks: a wrong name runs the step's first action, with no error. Pass `stepName` to get the step's valid event names listed in the `Action not available (#3020)` message.
 - **Delete:** `work.delete(id)` is a soft delete. It sets `status`, `flowState`, and every open step to `Deleted`; the record stays. `work.search` leaves it out unless the filter names `status`. A second delete returns 404 (`NOT_FOUND`). The SDK has no restore call.
 
-"Done" means the flow reached its end: `flowState` is `Complete`, and a submit of the last step's action gets it there. Read done from `flowState`, never from `status`. If the app needs a done flag that doesn't end the flow, make it a data field set with `patchData`, and decide which one at design time. Read the event names from the flow before writing app code: `get_flow_steps` on the Rise-X MCP gives each step's `id`, and `get_flow_step(flow_id, id)` or `get_flow_config(flow_id)` gives its actions with `eventName`. At runtime, `(await work.get(id)).actions` lists the actions the work's active step offers.
+"Done" means the flow reached its end: `flowState` is `Complete`, and a submit of the last step's action gets it there. Read done from `flowState`, never from `status`; for one item, that is `(await work.get(id))?.state === 'Complete'`. If the app needs a done flag that doesn't end the flow, make it a data field set with `patchData`, and decide which one at design time. Read the event names from the flow before writing app code: `get_flow_steps` on the Rise-X MCP gives each step's `id`, and `get_flow_step(flow_id, id)` or `get_flow_config(flow_id)` gives its actions with `eventName`. At runtime, `(await work.get(id)).actions` lists the actions the work's active step offers.
 
 **Reference by id, not by name.** Users rename flows, steps, tasks, and asset types freely (`displayName`), and internal `name`s change when a flow is rebuilt — ids are the only rename-proof reference. Declare `flowOriginId`s in `rise-x-app.json` (task/step ids, which the manifest doesn't carry, stay in app config); never hardcode display names. `flows.findTask({ flow, task })` matches by id, exact name, or case-insensitive displayName — the name forms are for dev-time exploration, not shipped code. When the user's input *is* a name (a search box), go through `flows.list({ search })` and let them pick.
 
