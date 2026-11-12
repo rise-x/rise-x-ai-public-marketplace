@@ -885,8 +885,18 @@ carrying another environment's ids deploys without complaint and fails in the
 running app.
 
 1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
-2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
+   Skip this step when your runtime has an `upload_bundle` tool: that tool
+   requests the URL itself.
+2. Upload the zip. With an `upload_bundle` tool (a sandbox with no network
+   access), call it with the zip's path relative to the workspace root, for
+   example `upload_bundle(path="<name>/<name>-bundle.zip")`. It returns the
+   `upload_id` and the size. Otherwise, PUT the zip yourself from the app
+   directory: `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
+   If the PUT can't reach the URL and there is no `upload_bundle` tool, stop
+   and tell the user the bundle is ready at `<name>/<name>-bundle.zip` to
+   deploy from the Apps UI (see the fallback below).
 3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` —
+   `upload_id` is the `uploadId` from step 1 or the one `upload_bundle` returned;
    omit `app_id` for a brand-new app (a GUID is generated and returned); pass
    the existing GUID to release a new version. `version` comes from the app's
    `package.json` and must be unique per app — bump it every release (the
