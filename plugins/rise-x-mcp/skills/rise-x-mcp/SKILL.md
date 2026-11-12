@@ -1,6 +1,6 @@
 ---
 name: rise-x-mcp
-description: "You MUST invoke this skill before calling any Rise-X MCP server tool. Use when the user explicitly mentions Rise-X, rise-x, EOP, or a Rise-X ecosystem, or when established conversation context makes the request a Rise-X operation. Covers workflows, layouts/components, dashboards, work items, assets, search/data schemas, actions/approvals, pipelines/exports, integrations/external APIs, app deployment, and AI agent configuration and management. Do not trigger for generic workflow or software requests without Rise-X context, or when only editing the Rise-X MCP server Python implementation."
+description: "You MUST invoke this skill before calling any Rise-X MCP server tool. Use when the user explicitly mentions Rise-X, rise-x, EOP, or a Rise-X ecosystem, or when established conversation context makes the request a Rise-X operation. Covers workflows, layouts/components, dashboards, work items, assets, search/data schemas, actions/approvals, pipelines/exports, integrations/external APIs, app deployment and source, and AI agent configuration and management. Do not trigger for generic workflow or software requests without Rise-X context, or when only editing the Rise-X MCP server Python implementation."
 metadata:
   author: rise-x
 ---
@@ -187,7 +187,7 @@ warning. Canonical names you'll use most: `input-text`, `input-select`,
 | Discover a flow's / asset type's `data.*` paths before composing a Work or Asset search | `references/advanced-search.md` |
 | Configure CSV / report exports of work data (incl. expanding data-grid rows into one row each) | `references/exports.md` |
 | Configure data pipelines / flow rules (auto data operations on watched-data change — set/copy/map paths, alerts, dates) | `references/pipelines.md` |
-| Deploy a federated-app bundle, release a new app version, list/update/delete apps in the registry, or inspect an app's dependencies (the flows, asset types, and agents it uses) (`request_bundle_upload` → PUT zip → `deploy_app`; `list_apps`, `get_app`, `update_app`, `delete_app`) | `references/managing-apps.md` |
+| Deploy a federated-app bundle, release a new app version, list/update/delete apps in the registry, inspect an app's dependencies (the flows, asset types, and agents it uses), or read an app's source code (`request_bundle_upload` → PUT zip → `deploy_app`; `list_apps`, `get_app`, `update_app`, `delete_app`; `list_app_source`, `get_app_source_file`, `search_app_source`) | `references/managing-apps.md` |
 | Configure, import, inspect, or test an integration (external API + endpoints called from `JsonEndPoint` activities) | `references/integrations.md` for read-only inspection (domain shape, lifecycle, pitfalls). For any *mutating* integration call (`update_integration`, `update_integration_endpoint`, `import_integrations`, `delete_integration`, `delete_integration_endpoint`, `test_integration_endpoint`, `test_integration_endpoint_in_flow`), load `references/integration-authoring.md` BEFORE calling the tool — it enforces the slot-filling + secrets protocol. Vendor/auth worked recipes (API key, Bearer, OAuth2 client credentials, webhooks, Postman imports) live in `references/integration-patterns.md`. |
 | Create, list, update, or delete AI agent configurations (name, system prompt, model, MCP servers, hosted OpenAI tools) | `references/managing-agents.md` |
 | Create, upload files to, check, renew, rename, rebuild, or delete a vector store; wire a corpus into `file_search` or an agent run (vector store, file search, upload documents for an agent, corpus) | `references/managing-vector-stores.md` |
@@ -218,7 +218,7 @@ doesn't show up in the UI.
 
 ## Tool Inventory
 
-All 97 tools grouped by category (Session, Flow, Flow Structure, Flow Config,
+All 100 tools grouped by category (Session, Flow, Flow Structure, Flow Config,
 Columns, Layout, Component, Schema, Compare, Work, Search, Asset, Apps,
 Dashboard, Integration, Agent, Vector Store), with signatures and per-tool caveats:
 `references/tool-inventory.md`. Load it when you need an exact tool name or
