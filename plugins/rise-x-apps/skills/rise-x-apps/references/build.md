@@ -541,9 +541,11 @@ const created = await work.start({ flowId: flow.id, data: { title: 'New' } });
 await work.patchData(created.id, { originId: created.flowOriginId!, path: '$.title', value: 'Renamed' });
 // Submit the action the user chose from the work's own list, by its eventName.
 // Never guess a name or take actions[0] (see "Work item state" below).
-// work.get resolves null when the item doesn't exist.
+// work.get resolves null when the item doesn't exist. A missing action is normal
+// (another user moved the step): tell the user and refresh, never skip silently.
 const chosen = (await work.get(created.id))?.actions.find((a) => a.id === pickedActionId);
-if (chosen) await work.submit({ workId: created.id, actionName: chosen.eventName ?? chosen.name! });
+if (!chosen) throw new Error(`Action ${pickedActionId} is not available on this item`);
+await work.submit({ workId: created.id, actionName: chosen.eventName ?? chosen.name! });
 await work.delete(created.id); // soft delete: status becomes 'Deleted'; a second delete 404s
 
 // Listing filters STRICTLY by flowOriginId — pass the flow object (or a bare
