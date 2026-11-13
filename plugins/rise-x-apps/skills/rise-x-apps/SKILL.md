@@ -32,6 +32,7 @@ Existing-app work skips straight to the matching phase:
 | Intent | Read |
 | --- | --- |
 | "Add a feature to app <x>" — anything that adds or changes UI | `references/design.md` first (mock → approval), then `references/build.md` |
+| Connect an Outlook shared calendar / provision its mailbox and integration endpoints | Load `integrate-microsoft-outlook-calendar` from the `rise-x-mcp` plugin in this marketplace. It bundles setup scripts and six environment bindings; then follow `references/build.md`. If absent, install that plugin first. No private app checkout is needed. |
 | Shell hooks / connectors / query layer / lifecycle hooks — no UI change | `references/build.md` |
 | "Redesign screen X" / "what should this look like" / migrate to the design system | `references/design.md` (mock → approval), then `references/build.md` |
 | The app is OLD — a `webpack.config.js` at its root, hand-rolled UI, no `APP.md` | `references/upgrade.md` — ask about migrating before changing it; a design-system migration goes mock-first, a build-only swap does not |
