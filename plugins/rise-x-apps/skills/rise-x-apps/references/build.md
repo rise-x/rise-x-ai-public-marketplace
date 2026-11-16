@@ -537,6 +537,7 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 | `vectorStores` | file-search corpora for `agents.run` / `chat.send` (SDK >= 0.14.0) | `create`, `get`, `addFiles`, `listFiles`, `renew`, `rename`, `rebuild`, `deleteFile`, `delete` |
 
 ```ts
+declare const movesStep: boolean | undefined; // the app's own flag, used in the submit check below
 // Connectors (generic) — flows discovery, work items, assets, configurable agents.
 // A flow the app knows at AUTHORING time is a dependency: declare it in
 // rise-x-app.json and use its bound surface (deps.<alias>.work.…, see App
@@ -560,7 +561,6 @@ await work.submit({ workId: created.id, actionName: chosen.eventName ?? chosen.n
 // set from the flow at design time: true for an action that leaves its step, false for one that
 // stays on it (a save, a send-back to the same step), which changes neither value. Leave it
 // undefined when the app can't know, as with a flow the user picks at runtime.
-declare const movesStep: boolean | undefined;
 const after = await work.get(created.id);
 if (!after) throw new Error('The item no longer exists'); // another user deleted it in between
 const events = (w: typeof before) => w?.actions.map((a) => a.eventName ?? a.name).join();

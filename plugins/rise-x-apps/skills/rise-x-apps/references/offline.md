@@ -646,11 +646,11 @@ ways. On API 3.80.0 and later, an event name the selected step doesn't offer, or
 condition fails against the saved data, answers 403 and leaves the work unchanged. When the
 server's can-execute check comes back false for another reason — no current action to execute, or
 a `PartyName` role mismatch — it may be a **silent no-op**: nothing aborts, the transaction
-commits, and the request answers `200` with the work unchanged. The trap bridging the two: the step resolver also accepts a
-step's **display name**, which resolves to the wrong node of the step tree. With the default
-`Submit` that lands in the silent `200`: the submit never advances, while the action set's name
-advances on the same event. With any other event it answers the 403 (API 3.80.0 and later). A 200
-therefore proves nothing; the re-read below is the only honest signal.
+commits, and the request answers `200` with the work unchanged. The trap bridging the two: the
+step resolver also accepts a step's **display name**, which resolves to the wrong node of the step
+tree. With the default `Submit` that lands in the silent `200`: the submit never advances, while
+the action set's name advances on the same event. With any other event it answers the 403 (API
+3.80.0 and later). A 200 therefore proves nothing; the re-read below is the only honest signal.
 
 **Queuing an action is not confirmation the workflow advanced.** `queueWorkAction` resolving means
 the item queued; `allSynced` means it replayed — neither means the step moved. An app that knows its
