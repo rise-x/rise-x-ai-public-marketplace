@@ -23,7 +23,10 @@ release an app end-to-end from an agent session, no manual zip upload through th
 
 ## Deploying a bundle (the three-step flow)
 
-A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is staged:
+A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is staged.
+When your runtime has an `upload_bundle` tool (a sandbox with no network access), it
+replaces steps 1 and 2: call it with the zip's path relative to the workspace root, and pass
+the `upload_id` it returns to step 3. Don't call `request_bundle_upload` or `curl` there.
 
 ```
 1. request_bundle_upload
@@ -58,7 +61,9 @@ A multi-MB zip can't travel through an MCP tool-call parameter, so the deploy is
 
 - **Single-use** and short-TTL (default 15 minutes) — one successful PUT consumes the *URL*; the
   staged bundle then waits for `deploy_app`. If the TTL lapses, call `request_bundle_upload`
-  again.
+  again. With `upload_bundle` the URL is used at once, so what can expire is the staged
+  upload: when `deploy_app` answers `upload_not_found`, call `upload_bundle` again for a fresh
+  `upload_id` (not `request_bundle_upload`, which its hint names).
 - The token in the URL is the credential (bound to your session); staged bytes are inert until
   `deploy_app` forwards them to the platform with *your* bearer token.
 - A `localhost_public_url` warning in the step-1 response means the server's `MCP_PUBLIC_URL` is
@@ -140,8 +145,8 @@ the declaration records it for the ecosystem and lets the app's own code call it
 
 ## Release workflow recipes
 
-**New app:** `request_bundle_upload` → PUT zip → `deploy_app` *without* `app_id` — a GUID is
-generated and returned. Record it; it's the handle for every later operation.
+**New app:** `request_bundle_upload` → PUT zip (or `upload_bundle`) → `deploy_app` *without*
+`app_id` — a GUID is generated and returned. Record it; it's the handle for every later operation.
 
 **New version of an existing app:** `list_apps` first — find the app's `id` and *current*
 `version`, pick a strictly newer semver (a duplicate of the currently live version is rejected
