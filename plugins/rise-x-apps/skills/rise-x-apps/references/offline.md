@@ -609,7 +609,9 @@ things up by `id`.
 ### Submitting: two shapes, plus a payload contract queued submits must get right
 
 Online, `work.submit({ workId, actionName })` where `actionName` is `action.eventName ?? action.name` —
-a label, not an id.
+a label, not an id. That call is complete from SDK 0.20.0, which picks the step itself. An older SDK
+sends no `stepName`, and the default `Submit` then answers `200` and moves nothing (see `stepName`
+at the end of this section).
 
 Queued, `offline.queueWorkAction({ workId, actionId })` — and that is the whole call. The shell
 resolves everything else off the cached work: event name, step name, the task node, the queue-row
@@ -630,14 +632,18 @@ your own just-completed create, where the id cannot be stale.)
   stops the server deriving recipients from flow config itself, so an empty list is never neutral.
 - `sectionId?` defaults to the task holding the action; pass one only to target a different task.
 
-`work.submit` also takes an optional `stepName` to disambiguate same-named actions — canonically the
-**leaf action-set step's name**, not its parent step's. Its online failure modes are split, and
-neither is a clean error. A `stepName` the flow does not have **fails on the server and surfaces as
-a 403 "Access Denied"** — the `startAt` path swallows the real message entirely, `submit` at least
-leaks it — so a mystifying 403 here can mean "bad step name", not "no permission". A bad **action**,
+`work.submit` also takes a `stepName`. From SDK 0.20.0 the SDK sends the right one when you pass
+none. Before that, and whenever you pass one yourself, it must be the **leaf action-set step's
+name**, not its parent step's and not the task's (`references/build.md`, "`stepName` on
+`work.submit`", lists what each other value does). Its online failure modes are split, and
+neither is a clean error. On `work.start`, a `stepName` the flow does not have **fails on the server
+and surfaces as a 403 "Access Denied"** with the real message swallowed, so a mystifying 403 there
+can mean "bad step name", not "no permission". On `work.submit` the same mistake does not fail: with
+the default `Submit` action it answers `200` with the work unchanged. A bad **action**,
 by contrast, is a **silent no-op**: when the server's can-execute check comes back false — wrong or
 mismatched event name, no current action to execute, or a `PartyName` role mismatch — nothing aborts,
-the transaction commits, and the request answers `200` with the work unchanged. The trap bridging the
+the transaction commits, and the request answers `200` with the work unchanged. On API 3.80.0 and
+later a wrong event name answers 403 instead. The trap bridging the
 two: the step resolver also accepts a step's **display name**, which resolves — to the wrong node of
 the step tree — and the action lookup under it then finds nothing, landing you in the silent `200`,
 not the 403: a submit passing the step's display name answers `200` and never advances, while the

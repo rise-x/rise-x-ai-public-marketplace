@@ -550,11 +550,17 @@ await work.patchData(created.id, { originId: created.flowOriginId!, path: '$.tit
 // Never guess a name or take actions[0] (see "Work item state" below).
 // work.get resolves null when the item doesn't exist. A missing action is normal
 // (another user moved the step): tell the user and refresh, never skip silently.
-const chosen = (await work.get(created.id))?.actions.find((a) => a.id === pickedActionId);
+const before = await work.get(created.id);
+const chosen = before?.actions.find((a) => a.id === pickedActionId);
 if (!chosen) throw new Error(`Action ${pickedActionId} is not available on this item`);
-// stepName is the action set's name, read from the flow config when you build the app
-// (see "Always pass the action set's name" below). Without it, a Submit returns 200 and does nothing.
-await work.submit({ workId: created.id, actionName: chosen.eventName ?? chosen.name!, stepName: ACTION_SET_NAME });
+// No stepName: from SDK 0.20.0 the SDK picks the step itself. On an older SDK this call
+// can return 200 and move nothing (see "stepName on work.submit" below).
+await work.submit({ workId: created.id, actionName: chosen.eventName ?? chosen.name! });
+// A 200 doesn't prove the step moved. For an action that moves the step, read the work
+// again: its state or its action list must differ.
+const after = await work.get(created.id);
+const events = (w: typeof before) => w?.actions.map((a) => a.eventName ?? a.name).join();
+if (after?.state === before?.state && events(after) === events(before)) throw new Error('The submit moved nothing');
 await work.delete(created.id); // soft delete: status becomes 'Deleted'; a second delete 404s
 
 // Listing filters STRICTLY by flowOriginId — pass the flow object (or a bare
@@ -667,16 +673,21 @@ const { data } = await apps.get('/api/v4/config/apps');
 
 Each change has one call:
 - **Change a field:** `work.patchData(id, { originId, path, value })`. It writes data and runs no action.
-- **Move to another step, or approve, reject, send back, finish:** `work.submit({ workId, actionName, stepName })`, with the action's `eventName` as `actionName` (its `name` only when it has no `eventName`, the shell's rule) and the action set's name as `stepName` (see the paragraph after this list). The server checks the name against the events of the node `stepName` selects and the action's condition against the saved data, so await `patchData` first. On API 3.80.0 and later, a wrong name or a failed condition returns 403 and leaves the work unchanged. Older builds skip both checks: a wrong name runs the step's first action, with no error.
+- **Move to another step, or approve, reject, send back, finish:** `work.submit({ workId, actionName })`, with the action's `eventName` as `actionName` (its `name` only when it has no `eventName`, the shell's rule). From SDK 0.20.0 the SDK adds the `stepName` the server needs (see the paragraph after this list). The server checks the name against the events of the node `stepName` selects and the action's condition against the saved data, so await `patchData` first. On API 3.80.0 and later, a wrong name or a failed condition returns 403 and leaves the work unchanged. Older builds skip both checks: a wrong name runs the step's first action, with no error.
 - **Delete:** `work.delete(id)` is a soft delete. It sets `status`, `flowState`, and every open step to `Deleted`; the record stays. `work.search` leaves it out unless the filter names `status`. A second delete returns 404 (`NOT_FOUND`). The SDK has no restore call.
 
-**Always pass the action set's name as `stepName` to `work.submit`.** It is the only value that runs the action in every case. Read it from the flow, never build it: it is `actionSetName` on the step's row in `get_flow_config(flow_id, path="steps")` (`value[i].actionSetName`), and its form varies (`ActionSet_1`, `review/check/Actionset`). `get_flow_steps` carries only its id, and the SDK doesn't return the name. Each step has its own action set, and the Rise-X MCP keeps event names unique across a flow, so keep a map from each action's event name to its action set's name in app config. The other values fail, and two of them fail without an error:
+**`stepName` on `work.submit`.** A submit with the wrong `stepName` often returns 200 and moves nothing. The only value that runs the action in every case is the name of the action set that holds the action.
+- **SDK 0.20.0 and later: pass none.** `work.submit` reads the action set from the work's own action and the flow config, and sends its name. That covers a flow the user picks at runtime, and it survives a flow rebuild, because the app stores no name.
+- **Before 0.20.0: upgrade the SDK** (`references/upgrade.md`). That SDK sends no `stepName` and returns no field that holds the name. If the app must stay on it, pass `actionSetName` from the step's row in `get_flow_config(flow_id, path="steps")` (`value[i].actionSetName`; `get_flow_steps` carries only its id). Read the name, never build it: its form varies (`ActionSet_1`, `review/check/Actionset`), and a flow rebuild can change it.
+
+What the API does with each value, tested on work flows:
 - **No `stepName`:** an action with its own event name runs, but the default `Submit` returns 200 and changes nothing. Every step and task has an automatic `<display name>/autosubmit` event, and `Submit` matches it first.
 - **The step's name or display name:** `Submit` returns 200 and changes nothing. Any other event returns 403 `Action not available (#3020)` (API 3.80.0 and later), and the message lists the automatic events, not your action.
 - **The task's name:** returns 200 and changes nothing, for every event.
+- **A name the flow doesn't have:** `Submit` returns 200 and changes nothing.
 - **Another step's action set:** returns 403 and lists that step's events.
 
-A 200 alone doesn't prove the step moved: read the work again and compare its `actions` or `state`. Event names match by suffix and ignore case (`Done` runs `MarkDone`), so send the full `eventName`.
+A 200 alone doesn't prove the step moved: read the work again and compare its `actions` or `state`. Event names match by suffix and ignore case (`Done` runs `MarkDone`), so send the full `eventName`. An asset draft save is a different path, and these tests don't cover it.
 
 "Done" means the flow reached its end: `flowState` is `Complete`, and a submit of the last step's action gets it there. Read done from `flowState`, never from `status`; for one item, that is `(await work.get(id))?.state === 'Complete'`. If the app needs a done flag that doesn't end the flow, make it a data field set with `patchData`, and decide which one at design time. Read the event names from the flow before writing app code: `get_flow_steps` on the Rise-X MCP gives each step's `id`, and `get_flow_step(flow_id, id)` or `get_flow_config(flow_id)` gives its actions with `eventName`. At runtime, `(await work.get(id))?.actions` lists the actions the work's active step offers.
 
@@ -707,7 +718,7 @@ import { useFlows, useWorkRows, useSubmitWork, dedupeRows } from '@rise-x/apps-s
 
 const { data: flows, error, isFetching } = useFlows();
 const rows = useWorkRows({ flow: FLOW_ORIGIN_ID, pageSize: 50 }); // infinite; flatten with dedupeRows(rows.data)
-const submit = useSubmitWork(); // submit.mutate({ workId, actionName, stepName }) — invalidates the right caches
+const submit = useSubmitWork(); // submit.mutate({ workId, actionName }) — invalidates the right caches
 ```
 
 Rules:
