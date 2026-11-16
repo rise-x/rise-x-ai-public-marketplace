@@ -557,12 +557,14 @@ if (!chosen) throw new Error(`Action ${pickedActionId} is not available on this 
 // can return 200 and move nothing (see "stepName on work.submit" below).
 await work.submit({ workId: created.id, actionName: chosen.eventName ?? chosen.name! });
 // A 200 doesn't prove the step moved, so read the work again. movesStep is the app's own flag,
-// set from the flow at design time: false for an action that stays on its step (a save, a
-// send-back to the same step), which changes neither value. If the app can't know, as with
-// a flow the user picks at runtime, don't throw: tell the user that nothing changed.
+// set from the flow at design time: true for an action that leaves its step, false for one that
+// stays on it (a save, a send-back to the same step), which changes neither value. Leave it
+// undefined when the app can't know, as with a flow the user picks at runtime.
 const after = await work.get(created.id);
 const events = (w: typeof before) => w?.actions.map((a) => a.eventName ?? a.name).join();
-if (movesStep && after?.state === before?.state && events(after) === events(before)) throw new Error('The submit moved nothing');
+const moved = after?.state !== before?.state || events(after) !== events(before);
+if (!moved && movesStep) throw new Error('The submit moved nothing');
+if (!moved && movesStep === undefined) notifyUser('The item did not change.'); // the app's own UI call
 await work.delete(created.id); // soft delete: status becomes 'Deleted'; a second delete 404s
 
 // Listing filters STRICTLY by flowOriginId — pass the flow object (or a bare
@@ -675,7 +677,7 @@ const { data } = await apps.get('/api/v4/config/apps');
 
 Each change has one call:
 - **Change a field:** `work.patchData(id, { originId, path, value })`. It writes data and runs no action.
-- **Move to another step, or approve, reject, send back, finish:** `work.submit({ workId, actionName })`, with the action's `eventName` as `actionName` (its `name` only when it has no `eventName`, the shell's rule). From SDK 0.20.0 the SDK adds the `stepName` the server needs (see the paragraph after this list). The server checks the name against the events of the node `stepName` selects and the action's condition against the saved data, so await `patchData` first. On API 3.80.0 and later, a wrong name or a failed condition returns 403 and leaves the work unchanged. Older builds skip both checks: a wrong name runs the step's first action, with no error.
+- **Move to another step, or approve, reject, send back, finish:** `work.submit({ workId, actionName })`, with the action's `eventName` as `actionName` (its `name` only when it has no `eventName`, the shell's rule). From SDK 0.20.0 the SDK adds the `stepName` the server needs (see the paragraph after this list). The server checks the name against the events of the node `stepName` selects and the action's condition against the saved data, so await `patchData` first. On API 3.80.0 and later, a wrong name or a failed condition returns 403 and leaves the work unchanged.
 - **Delete:** `work.delete(id)` is a soft delete. It sets `status`, `flowState`, and every open step to `Deleted`; the record stays. `work.search` leaves it out unless the filter names `status`. A second delete returns 404 (`NOT_FOUND`). The SDK has no restore call.
 
 **`stepName` on `work.submit`.** A submit with the wrong `stepName` often returns 200 and moves nothing. The only value that runs the action in every case is the name of the action set that holds the action.

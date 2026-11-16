@@ -64,7 +64,10 @@ habit.
    `agents.run` or `deps.<alias>.agent.run` — `useHistory: false` is what the
    old skill taught — delete the argument: 0.14.0 drops it, so the build fails
    on it, and the gateway ignores the flag anyway, so those runs are already
-   being logged.
+   being logged. If the app passes a `stepName` to `work.submit`, delete it
+   once the SDK is 0.20.0 or later: the SDK finds the name itself. A passed
+   value still wins, so a wrong one stays wrong (`references/build.md`,
+   "`stepName` on `work.submit`").
 2. **Move the build onto the preset.** Read the app's dev port out of
    `webpack.local.config.js` first (`devServer.port`) — that file goes in this
    step and is the only place the value lives. Then delete `webpack.config.js`
