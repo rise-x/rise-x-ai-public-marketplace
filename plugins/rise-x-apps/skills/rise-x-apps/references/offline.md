@@ -609,10 +609,11 @@ things up by `id`.
 ### Submitting: two shapes, plus a payload contract queued submits must get right
 
 Online, `work.submit({ workId, actionName })` where `actionName` is `action.eventName ?? action.name` —
-a label, not an id. From SDK 0.20.0 that call is enough when the SDK can read the flow config: it
-picks the step itself. When it can't, it sends no `stepName` and raises no error, and an older SDK
-never sends one. With no `stepName`, the default `Submit` answers `200` and moves nothing (see
-`stepName` at the end of this section, and `references/build.md`, "`stepName` on `work.submit`").
+a label, not an id. From SDK 0.20.0 that call is enough when the SDK can resolve the action set: it
+picks the step itself. When it can't (`references/build.md`, "`stepName` on `work.submit`", lists
+the cases), it sends no `stepName` and raises no error, and an older SDK never sends one. With no
+`stepName`, the default `Submit` answers `200` and moves nothing (see `stepName` at the end of this
+section).
 
 Queued, `offline.queueWorkAction({ workId, actionId })` — and that is the whole call. The shell
 resolves everything else off the cached work: event name, step name, the task node, the queue-row
@@ -641,11 +642,11 @@ neither is a clean error. On `work.start`, a `stepName` the flow does not have *
 and surfaces as a 403 "Access Denied"** with the real message swallowed, so a mystifying 403 there
 can mean "bad step name", not "no permission". On `work.submit` the same mistake does not fail: with
 the default `Submit` action it answers `200` with the work unchanged. A bad **action** fails in two
-ways. On API 3.80.0 and later, an event name the selected step doesn't offer answers 403
-and leaves the work unchanged. When the server's can-execute check
-comes back false for another reason — no current action to execute, or a `PartyName` role
-mismatch — it is a **silent no-op**: nothing aborts, the transaction commits, and the request
-answers `200` with the work unchanged. The trap bridging the two: the step resolver also accepts a
+ways. On API 3.80.0 and later, an event name the selected step doesn't offer, or an action whose
+condition fails against the saved data, answers 403 and leaves the work unchanged. When the
+server's can-execute check comes back false for another reason — no current action to execute, or
+a `PartyName` role mismatch — it may be a **silent no-op**: nothing aborts, the transaction
+commits, and the request answers `200` with the work unchanged. The trap bridging the two: the step resolver also accepts a
 step's **display name**, which resolves to the wrong node of the step tree. With the default
 `Submit` that lands in the silent `200`: the submit never advances, while the action set's name
 advances on the same event. With any other event it answers the 403 (API 3.80.0 and later). A 200

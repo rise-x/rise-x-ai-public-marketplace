@@ -560,11 +560,13 @@ await work.submit({ workId: created.id, actionName: chosen.eventName ?? chosen.n
 // set from the flow at design time: true for an action that leaves its step, false for one that
 // stays on it (a save, a send-back to the same step), which changes neither value. Leave it
 // undefined when the app can't know, as with a flow the user picks at runtime.
+declare const movesStep: boolean | undefined;
 const after = await work.get(created.id);
+if (!after) throw new Error('The item no longer exists'); // another user deleted it in between
 const events = (w: typeof before) => w?.actions.map((a) => a.eventName ?? a.name).join();
-const moved = after?.state !== before?.state || events(after) !== events(before);
+const moved = after.state !== before?.state || events(after) !== events(before);
 if (!moved && movesStep) throw new Error('The submit moved nothing');
-if (!moved && movesStep === undefined) notifyUser('The item did not change.'); // the app's own UI call
+if (!moved && movesStep === undefined) notifyUser("The step didn't move. Check the item."); // the app's own UI call
 await work.delete(created.id); // soft delete: status becomes 'Deleted'; a second delete 404s
 
 // Listing filters STRICTLY by flowOriginId — pass the flow object (or a bare
@@ -691,7 +693,7 @@ What the API does with each value, tested on work flows:
 - **A name the flow doesn't have:** `Submit` returns 200 and changes nothing.
 - **Another step's action set:** returns 403 and lists that step's events.
 
-A 200 alone doesn't prove the step moved: read the work again and compare its `actions` or `state`. An action that stays on its step changes neither, so make that check only for an action that moves the step. Event names match by suffix and ignore case (`Done` runs `MarkDone`), so send the full `eventName`. An asset draft save is a different path, and these tests don't cover it.
+A 200 alone doesn't prove the step moved: read the work again and compare its `actions` or `state`. An action that stays on its step changes neither, so make that check only for an action that moves the step. Two more cases may answer 200 with nothing moved: the step has no current action to execute, or the user's party doesn't match the action's `PartyName` (`references/offline.md`, "Submitting"). Event names match by suffix and ignore case (`Done` runs `MarkDone`), so send the full `eventName`. An asset draft save is a different path, and these tests don't cover it.
 
 "Done" means the flow reached its end: `flowState` is `Complete`, and a submit of the last step's action gets it there. Read done from `flowState`, never from `status`; for one item, that is `(await work.get(id))?.state === 'Complete'`. If the app needs a done flag that doesn't end the flow, make it a data field set with `patchData`, and decide which one at design time. Read the event names from the flow before writing app code: `get_flow_steps` on the Rise-X MCP gives each step's `id`, and `get_flow_step(flow_id, id)` or `get_flow_config(flow_id)` gives its actions with `eventName`. At runtime, `(await work.get(id))?.actions` lists the actions the work's active step offers.
 
