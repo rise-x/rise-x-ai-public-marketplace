@@ -1,15 +1,6 @@
 # CSV / Report Exports (`manage_export`)
 
-Flows can define one or more **export configurations** that turn work items into CSV/Excel rows. Manage them with `manage_export` — **never** pass `export`/`exports` to `update_flow_properties` (it rejects sub-resource keys up front and points you to the dedicated `manage_*` tool).
-
-```
-manage_export(flow_id, "list")
-manage_export(flow_id, "add",    export={...})
-manage_export(flow_id, "update", export_id=..., export={...})
-manage_export(flow_id, "delete", export_id=...)
-```
-
-The flow must be in **draft** mode (`create_flow_draft` first if published), and you must `publish_flow` afterwards for the export to go live. Discover the full config shape with `get_schema("flows", "export")` (`FlowPocoExport`).
+Flows can define one or more **export configurations** that turn work items into CSV/Excel rows. Manage them with `manage_export` on a draft, then `publish_flow` for the export to go live. The config shape is `get_schema("flows", "export")` (`FlowPocoExport`).
 
 ## The mental model (read this first)
 
@@ -42,14 +33,14 @@ Multiple shards produce the **cross-product** (one row per combination). Row ide
 
 Verified live 2026-06-18 (mirrored from a working production export). A data-grid needs **two** things — both required:
 
-**1. Register the grid as expandable work-grid column(s)** (`manage_columns add`). This is what exposes the grid to the export's row projection — **without it the export emits one flat row with blank per-element cells, no matter how correct the export paths are.** Each column:
+**1. Register the grid as expandable work-grid column(s)** (`manage_columns add`). This is what exposes the grid to the export's row projection — **without it the export emits one flat row with blank per-element cells, no matter how correct the export paths are.** This is the most common data-grid export failure. Each column:
 - `isExpandedProperty: true`
 - `valuePaths: ["$.<grid>[{$.index}].<sub>"]` — note the **`[{$.index}]`** index token (the work-grid's positional row index)
 - `componentId: <the data-grid component's id>` (from `get_layout`), an explicit `id` (pass a GUID — the first auto-assigned id can come back null and then collide on the next add), plus `key`, `displayName`, `type: "ENUM"`
 - For the **export** you don't need one column per sub-field — a couple exposes the whole element and the `fieldConfigs` then read *every* sub-field. (Add one per sub-field only if you also want them as expandable columns in the work-grid UI.)
 
 **2. The export config** (`manage_export`) — shard with `[*]`, per-element fields with a **bare** shard token in the filter:
-- **Shard:** `$.data.<grid>[*].id` (bracket-star — array index).
+- **Shard:** `$.data.<grid>[*].id` (bracket-star — array index). `..` and `.*` do **not** work here.
 - **Field:** `$.data.<grid>[?(@.id == $.shards.<key>)].<sub>` — the filter compares against the **bare** `$.shards.<key>`, **NOT** the quoted/braced `'{$.shards.<key>}'` (that never matches → blank cells + collapsed rows). Note the contrast: the path *prefix* uses the braced `{$.shards.workId}`, but the *filter expression* uses the bare `$.shards.<key>`.
 
 ```jsonc
@@ -93,17 +84,8 @@ Set the config-level `dateFormat` too (default `dd/MM/yyyy`) — `Date` fields a
 
 ## Other notes
 
-- **`dataType`** values: `String, Text, Number, Date, Boolean, Integer, Decimal, Object, Array, Comments`.
 - **MatchColumn fan-out:** a `fieldConfig` with `matchColumn` (regex) over an array `valuePath` emits **multiple dynamic columns** (one per matching child key) — for wide/dynamic columns, not row expansion.
 - **Empty cells render `-`.** Don't rely on truly blank cells. Values beginning `= + - @` are tab-prefixed to defuse Excel formula injection.
 - **`sortOrder > 0`** on shards/fields sorts rows by those columns and orders the columns.
 - **Server rewrites your paths on save** (the `$.root.{$.shards.workId}.…` form) and `get_schema`/`manage_export("list")` echoes the rewritten version — that's expected, not corruption.
 - **`manage_export("list")` on the *origin* id can read stale right after `publish_flow`** — for a moment it may echo the *previous* version's config (this once looked like publish had "reverted" a fix when it hadn't). To verify what actually published, `create_flow_draft` from the published flow and `list` the draft. **`publish_flow` is what commits the export to the live version.**
-
-## Common mistakes
-
-1. **Omitting `data.`** — `$.requestReason` instead of `$.data.requestReason`. Form fields silently export blank. The single most common scalar error.
-2. **Grid not registered as expandable column(s)** — without an `isExpandedProperty: true` column on the grid (`valuePaths: ["$.<grid>[{$.index}].<sub>"]`), the export omits the grid entirely → one flat row, blank per-element cells, no matter how correct the shard/fields are. **The most common data-grid export failure.**
-3. **Quoted/braced shard token in the filter** — `[?(@.id == '{$.shards.equipmentId}')]` never matches → blank cells + collapsed rows. Use the **bare** form: `[?(@.id == $.shards.equipmentId)]`.
-4. **Wrong grid shard wildcard** — the shard is `$.data.<grid>[*].id` (bracket-star). `..` / `.*` do **not** apply here; via the expandable-column projection the export sees the grid as an array.
-5. **Treating `shardConfigs` as entity joins** — they only unwind arrays; `entityType` does nothing for export.

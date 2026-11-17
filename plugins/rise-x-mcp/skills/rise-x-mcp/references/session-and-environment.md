@@ -1,85 +1,55 @@
 # Session, Ecosystem & Deployment
 
-## Two Distinct Concepts
+## Two distinct concepts
 
-1. **Deployment Environment** (dev/test/prod)
-   - Set at MCP server startup via `MCP_DEFAULT_ENV`
-   - Determines which Rise API URL is targeted
-   - **Not changeable at runtime** — fixed for the server's lifetime
-   - Check with `get_active_ecosystem()` which also returns deployment info
+1. **Deployment** (`test`, `staging`, `prod`, …)
+   - Fixed at MCP server startup (`MCP_DEFAULT_ENV`); it decides which Rise API the server calls.
+   - You cannot switch it at runtime. `get_active_ecosystem()` and `whoami()` report it.
+   - `compare` works only between ecosystems of this one deployment.
 
-2. **Ecosystem** (workspace / tenant name)
-   - Set via `set_active_ecosystem`; the server remembers the selection
-     **per user** (best-effort, in memory), so it can carry across sessions
-     or be lost on a server restart — check `get_active_ecosystem()` rather
-     than assuming either way
-   - All API calls include it as the `Environment` HTTP header (the backend
-     header name is unchanged — only the MCP-facing terminology is "ecosystem")
-   - Determines which workspace's data is accessed
-   - Switchable at any time — affects ALL subsequent tool calls immediately
+2. **Ecosystem** (workspace or tenant name)
+   - Chosen with `set_active_ecosystem`. Every tool except the 5 session tools
+     (`list_ecosystems`, `set_active_ecosystem`, `get_active_ecosystem`, `whoami`,
+     `resolve_ecosystem`) needs one.
+   - With OAuth sign-in the server stores the selection **per user**, so it carries across
+     sessions and server restarts. A server running on a single API key keeps it in memory
+     only, and a restart loses it. Call `get_active_ecosystem()` at the start either way.
+   - Switching takes effect for every later tool call at once.
+   - A client can pin the ecosystem for a single request with the `Ecosystem` HTTP header. The
+     pin overrides the stored selection for that request only.
+   - The backend receives it as the `Environment` HTTP header; only the MCP-facing name is
+     "ecosystem".
 
-## Tools
+`get_active_ecosystem()` returns:
 
-### `list_ecosystems(count=20, skip=0)`
-List all ecosystems (workspaces) available to the current user. Paginated.
-
-Returns: `[{"id": "guid", "name": "workspace-name", "displayName": "Display Name", "active": true}]`
-
-### `set_active_ecosystem(ecosystem_name: str)`
-Select the active ecosystem (workspace). Validates the name against the server before setting.
-All subsequent tool calls will target this ecosystem.
-
-Returns: confirmation message with ecosystem name, deployment, and API URL.
-
-### `get_active_ecosystem()`
-Get the currently active ecosystem (workspace) and deployment info.
-
-Returns:
 ```json
 {
-  "ecosystem": "workspace-name",    // null if not set
-  "deployment": {
-    "name": "test",
-    "displayName": "Test",
-    "apiUrl": "https://api-test.rise-x.io"
-  }
+  "ecosystem": "workspace-name",
+  "deployment": {"name": "test", "displayName": "Test", "apiUrl": "https://api.test.auxos.io"}
 }
 ```
 
-### `whoami()`
-Get the bound user, ecosystem, and deployment. Use it when visibility looks wrong.
+`ecosystem` is `null`, with a `message`, when none is selected.
 
-### `resolve_ecosystem(ecosystem_name: str)`
-Resolve an ecosystem name to its canonical `id` **without** switching the active ecosystem.
-It resolves any reachable ecosystem, including ones you are not a member of, so it succeeds
-where `list_ecosystems` returns nothing. Matching is case-insensitive on `name`, not `displayName`.
+## Session initialization
 
-Use it to get the `targetEcosystemId` for a `StartCrossEcosystemWork` activity. **Never** take
-that id from a flow's or work's `environmentId`: it can be stale seed data and fails at runtime
-with `ecosystem-not-found`.
+```
+1. get_active_ecosystem()
+2. If ecosystem is null:
+   a. list_ecosystems()
+   b. set_active_ecosystem("name")
+3. Proceed
+```
 
 ## Rise-X tools are deferred (client-side)
 
-In clients that lazy-load MCP tools, the Rise-X tools are **deferred**: only their names are known up front, and a tool cannot be invoked until the client's tool-search tool fetches its schema (select the tool by name first). Clients that load every MCP tool up front skip this step. If no Rise-X tools appear at all, the **connector is disabled** — enable/re-enable the Rise-X MCP connector for the session, then the tools attach. Two consequences worth knowing:
+In clients that lazy-load MCP tools, only the Rise-X tool names are known up front, and a tool
+cannot be called until the client's tool-search tool fetches its schema. Select the tool by
+name first. Clients that load every MCP tool up front skip this step. If no Rise-X tools
+appear at all, the connector is disabled: enable it for the session, then the tools attach.
 
-- A fresh session may need a tool-search pass (or a connector toggle) before the first `set_active_ecosystem` / `whoami` call resolves.
-- The tool-search tool's argument shape is **client-specific** — some builds take a single `query` string, others a `keywords` **list** (a list-expecting build returns `keywords: Input should be a valid list` for a bare string, so wrap single terms in a list there). If one form is rejected, try the other.
-
-## Session Initialization Recipe
-
-Always run this before any other operations:
-
-```
-1. get_active_ecosystem()              # check existing state
-2. If ecosystem is null:
-   a. list_ecosystems()                # discover available workspaces
-   b. set_active_ecosystem("name")     # select one
-3. Proceed with work
-```
-
-## Key Behaviors
-
-- **Switching ecosystem mid-session** is safe but changes the target for ALL tools immediately
-- **Deployment environment** is fixed — you cannot switch between dev/test/prod at runtime
-- **Every tool except the 5 session tools** requires an active ecosystem — calls will fail with an error message
-- `list_ecosystems` uses a "bare" API wrapper (no ecosystem header) since it lists across workspaces
+- A fresh session may need a tool-search pass, or a connector toggle, before the first
+  `set_active_ecosystem` or `whoami` call works.
+- The tool-search tool's argument shape depends on the client. Some builds take a single
+  `query` string, others a `keywords` **list**; a list-expecting build answers a bare string
+  with `keywords: Input should be a valid list`. If one form is rejected, try the other.

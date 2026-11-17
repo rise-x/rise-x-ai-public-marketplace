@@ -1,27 +1,5 @@
 # Configuring Relationships
 
-## Contents
-
-- [What are Relationships?](#what-are-relationships)
-- [The Bidirectional Rule](#the-bidirectional-rule)
-- [Relationship Types](#relationship-types)
-  - [Work ↔ Asset](#work--asset)
-  - [Work ↔ Work](#work--work)
-  - [Work ↔ Asset with Data Sync](#work--asset-with-data-sync)
-- [`relatedFlows` Schema Reference](#relatedflows-schema-reference)
-  - [`publishDataDirection` Values](#publishdatadirection-values)
-  - [`stepStatuses` Values](#stepstatuses-values)
-  - [`stepNames` Matching](#stepnames-matching)
-  - [`stepNames` and Step Delegation](#stepnames-and-step-delegation)
-  - [`workFilters` — Finding Target Work](#workfilters--finding-target-work)
-  - [`options` Object](#options-object)
-- [Data Operations (PublishDataOperation)](#data-operations-publishdataoperation)
-- [`relatedWork-select` Component](#relatedwork-select-component)
-- [Enabling the Related Work Panel](#enabling-the-related-work-panel)
-- [How to Read Relationships](#how-to-read-relationships)
-- [Complete Example: Configure Work ↔ Asset Relationship](#complete-example-configure-work--asset-relationship)
-- [Common Mistakes](#common-mistakes)
-
 ## What are Relationships?
 
 **Relationships** connect work items to other work items or to assets. They are configured in the `relatedFlows` array on each flow's configuration. When a work item is submitted, the flow engine evaluates the `relatedFlows` config and establishes links to matching target work items or assets.
@@ -32,7 +10,7 @@
 
 ## The Bidirectional Rule
 
-When Flow A needs to relate to Flow B via `relatedFlows`, configure **both sides** — not because one entry can't create the link (it can, on both items — see Key concept above), but so the link is established no matter which side submits, and so related-work lookups by relationship name resolve from either flow:
+When Flow A needs to relate to Flow B via `relatedFlows`, configure **both sides**, so the link is established no matter which side submits, and related-work lookups by relationship name resolve from either flow:
 
 ```
 Flow A relatedFlows:                     Flow B relatedFlows:
@@ -48,9 +26,7 @@ Flow A relatedFlows:                     Flow B relatedFlows:
 ```
 
 **Rules:**
-- Give both flows a `relatedFlows` entry pointing to each other (one side alone works only when that side submits, and only that side can query by name)
-- `sourceName` on Flow A corresponds to the relationship name stored on Flow A's work items
-- `targetName` on Flow A corresponds to the relationship name stored on Flow B's work items
+- `sourceName` on Flow A is the relationship name stored on Flow A's work items; `targetName` on Flow A is the name stored on Flow B's. So Flow A's `sourceName` is Flow B's `targetName`.
 - `workFilters` are mirrored — `targetPath` and `valuePath` swap between sides
 - Exception: if `isOneWayRelationship: true`, only one side is created
 
@@ -64,61 +40,12 @@ Flow A relatedFlows:                     Flow B relatedFlows:
 
 ### Work ↔ Asset
 
-The most common pattern — linking a workflow to an asset type (e.g. an invoice workflow to a contract/quote asset).
-
-**Example (anonymized from a real deployment): "Check Quotes (AI)" workflow ↔ "Quotes" asset**
-
-On the **workflow side** (Check Quotes):
-```json
-{
-  "name": "RelatedInvoices",
-  "flowName": "MyEcosystem/Logistics/CostManagement/Quotes",
-  "sourceName": "Check Quotes (AI)",
-  "targetName": "Quotes",
-  "workFilters": [
-    { "targetPath": "$.id", "valuePath": "$.invoice.quote.id" }
-  ],
-  "publishDataDirection": "ToRelatedEntity",
-  "options": {
-    "includeData": false,
-    "includeAttachments": false,
-    "addRelationship": true,
-    "isOneWayRelationship": false,
-    "inviteCurrentUserToTargetWork": false
-  }
-}
-```
-
-On the **asset side** (Quotes):
-```json
-{
-  "name": "RelatedQuoteInvoices",
-  "flowName": "MyEcosystem/Logistics/Work/MonthlyWorkFlow~copy001~copy002~copy002",
-  "sourceName": "Quotes",
-  "targetName": "Check Quotes (AI)",
-  "workFilters": [
-    { "targetPath": "$.invoice.quote.id", "valuePath": "$.id" }
-  ],
-  "publishDataDirection": "ToRelatedEntity",
-  "options": {
-    "includeData": false,
-    "includeAttachments": false,
-    "addRelationship": true,
-    "isOneWayRelationship": false,
-    "inviteCurrentUserToTargetWork": false
-  }
-}
-```
-
-Notice the `workFilters` are **mirrored** — `targetPath` and `valuePath` swap.
+The most common pattern — linking a workflow to an asset type (e.g. an invoice workflow to a contract asset). The worked example is [Complete Example: Configure Work ↔ Asset Relationship](#complete-example-configure-work--asset-relationship).
 
 ### Work ↔ Work
 
-Linking two workflow types — e.g. a monthly summary workflow to daily work items.
+Linking two workflow types — e.g. a monthly summary workflow to daily work items. This entry, on the monthly side, matches daily works still `InProgress`, copies data and attachments across, and invites the submitting user to the daily work:
 
-**Example (anonymized from a real deployment): Monthly workflow ↔ Daily workflow**
-
-On the **monthly side**:
 ```json
 {
   "name": "MonthlyToDailyWorkRelationship",
@@ -139,9 +66,7 @@ On the **monthly side**:
 
 ### Work ↔ Asset with Data Sync
 
-When a relationship also needs to push data to the related entity, use `operations` with `dataMapping`.
-
-**Example (anonymized from a real deployment): Quotes asset → Monthly workflow (with data mapping)**
+When a relationship also needs to push data to the related entity, add `operations` with `dataMapping`. This entry pushes selected fields from a Quotes asset into `$.contracts` on the monthly work item:
 
 ```json
 {
@@ -156,7 +81,6 @@ When a relationship also needs to push data to the related entity, use `operatio
       "sectionName": "creatework/startwork",
       "dataMapping": [
         { "fromPath": "$.displayName", "toProperty": "displayName" },
-        { "fromPath": "$.id", "toProperty": "id" },
         { "fromPath": "$.ratesTable", "toProperty": "rates" },
         { "fromPath": "$.contractAsset.contractor.displayName", "toProperty": "contractor.displayName" }
       ],
@@ -165,46 +89,37 @@ When a relationship also needs to push data to the related entity, use `operatio
       "dataType": "Object"
     }
   ],
-  "options": {
-    "includeData": true,
-    "includeAttachments": true,
-    "addRelationship": true,
-    "isOneWayRelationship": false,
-    "inviteCurrentUserToTargetWork": true
-  }
+  "options": { "includeData": true, "addRelationship": true }
 }
 ```
 
-This pushes selected fields from the asset into `$.contracts` on the target work item.
+`fromPath` reads the source work's data; `toProperty` names the property on the object written at `targetPath`.
 
 ## `relatedFlows` Schema Reference
 
-Each entry in the `relatedFlows` array has these properties:
+The full entry shape, including `options`: `get_schema("flows", "related-flow")`. The `operations` entry shape: `get_schema("flows", "publish-data-operation")`. The `attachmentOperations` entry shape: `get_schema("flows", "publish-attachment-operation")`; each entry copies attachments from `sourceFolder` to `destinationFolder`. The rules below are the ones the schema does not explain.
 
-| Property | Type | Description |
+### `options` Object
+
+The schema types every option as a nullable boolean and gives no default or meaning:
+
+| Property | Default | Effect |
 |---|---|---|
-| `name` | string | Unique name for this relationship config |
-| `flowName` | string | Full path of the target flow (e.g. `"Ecosystem/Category/FlowName"`) |
-| `sourceName` | string | Relationship name stored on **this** flow's work items |
-| `targetName` | string | Relationship name stored on the **target** flow's work items |
-| `publishDataDirection` | enum | Direction data flows (see below) |
-| `workFilters` | array | Matching rules to find target work items |
-| `stepStatuses` | array | Step states the target work must be in (see below) |
-| `stepNames` | array | The target step to match, plus optional delegation entries (see below) |
-| `exactStepNameMatch` | bool | Compare the whole step name instead of a suffix (default `false`; see below) |
-| `createWorkIfNotFound` | bool | Create a new work item if no match found |
-| `operations` | array | Data mapping operations (see Data Operations) |
-| `attachmentOperations` | array | Attachment sync rules (`sourceFolder` → `destinationFolder`) |
-| `options` | object | Relationship behavior options (see below) |
+| `addRelationship` | true | Create the relationship link |
+| `isOneWayRelationship` | false | Create source→target only (skip the reverse record) |
+| `includeData` | false | Include work data when publishing |
+| `includeAttachments` | false | Sync attachments between the related items |
+| `includeAcl` | false | Sync access control lists |
+| `removeExisting` | false | Remove previous relationships before creating the new one |
+| `closePrevious` | false | Close previously related work items |
+| `inviteCurrentUserToTargetWork` | false | Invite the submitting user to the target work |
 
 ### `publishDataDirection` Values
 
-| Value | Behavior |
-|---|---|
-| `ToRelatedEntity` | Push data from source to target (most common) |
-| `FromRelatedEntity` | Pull data from target back to source |
-| `ToSelf` | Apply data within the same work item |
-| `BetweenRelatedEntities` | Bidirectional data sync between already-related entities |
+- `ToRelatedEntity`: push data from source to target (most common)
+- `FromRelatedEntity`: pull data from target back to source
+- `ToSelf`: apply data within the same work item
+- `BetweenRelatedEntities`: sync data both ways between already-related entities
 
 ### `stepStatuses` Values
 
@@ -226,78 +141,15 @@ Every entry, the first included, also grants the target flow access on the sourc
 | `["supplierOffer", "buyerReview"]` | same as above, not `buyerReview` | steps ending `supplierOffer` or `buyerReview` |
 | `["supplierOffer", "*"]` | same as above | every step of this flow |
 
-Neither example in this file passes `stepNames`; both rely on `workFilters` alone.
+Neither example in this file passes `stepNames`; both rely on `workFilters` or `stepStatuses` alone.
 
 ### `workFilters` — Finding Target Work
 
-Each filter is a `{ targetPath, valuePath }` pair:
-- `targetPath` — JSON path on the **target** work item's data to match against
-- `valuePath` — JSON path on the **source** work item's data to get the match value
-
-```json
-{ "targetPath": "$.id", "valuePath": "$.invoice.quote.id" }
-```
-Means: find a target work item where its `$.id` equals the source's `$.invoice.quote.id`.
-
-### `options` Object
-
-| Property | Type | Default | Description |
-|---|---|---|---|
-| `addRelationship` | bool | true | Create the relationship link |
-| `isOneWayRelationship` | bool | false | Only create source→target (skip reverse) |
-| `includeData` | bool | false | Include work data when publishing |
-| `includeAttachments` | bool | false | Sync attachments between related items |
-| `includeAcl` | bool | false | Sync access control lists |
-| `removeExisting` | bool | false | Remove previous relationships before creating new |
-| `closePrevious` | bool | false | Close previous related work items |
-| `inviteCurrentUserToTargetWork` | bool | false | Auto-invite the submitting user to the target work |
-
-## Data Operations (PublishDataOperation)
-
-When `operations` are configured, data is mapped from source to target during relationship establishment.
-
-| Property | Type | Description |
-|---|---|---|
-| `dataMapping` | array | Field mappings: `{ fromPath, toProperty }` |
-| `targetPath` | string | JSON path on target where mapped data is written |
-| `updateType` | enum | How to write: `Set`, `Push`, `Merge`, `Replace`, `Pull`, `Unset`, `AddToSet`, `Increment`, `Decrement` |
-| `dataType` | enum | Type of data being written: `Object`, `Array`, `String`, `Integer`, etc. |
-| `sectionName` | string | Optional: task section name for the update |
-| `excludeProperties` | array | Fields to exclude from mapping |
-
-**`dataMapping` entries:**
-- `fromPath` — JSON path on source work data (e.g. `"$.displayName"`)
-- `toProperty` — property name on the target object (e.g. `"displayName"`)
-
-## `relatedWork-select` Component
-
-The `relatedWork-select` component renders a UI widget that lets users manually select related work items from within a form.
-
-**Component name:** `relatedWork-select` (camelCase W — NOT `related-work-select`)
-
-### Key Properties
-
-| Property | Type | Description |
-|---|---|---|
-| `flowName` | string | Target flow path to search for related work |
-| `targetName` | string | Relationship target name |
-| `sourceName` | string | Relationship source name |
-| `targetPath` | string | Path to match on target work data |
-| `valuePath` | string | Path to match on current work data |
-| `targetStoragePath` | string | Where source work data is stored on target |
-| `targetStorageKey` | string | Key for matching within the storage path |
-| `numberOfDays` | int | Days to look back for related work (default: 1) |
-| `multiSelect` | string | `"single"` (default) or `"multi"` |
-| `extendedRelatedWork` | bool | Show additional columns in the selector |
-| `extendedRelatedWorkProperties` | array | Column definitions: `[{ label, value }]` |
+Each filter is a `{ targetPath, valuePath }` pair: `targetPath` is read on the **target** work item, `valuePath` on the **source** work item. `{ "targetPath": "$.id", "valuePath": "$.invoice.quote.id" }` finds the target work whose `$.id` equals the source's `$.invoice.quote.id`.
 
 ## Enabling the Related Work Panel
 
-For the "Related Work" tab to appear in the work item side panel, the flow's `flowFeatures.leftPanel.tabs` must include `{"tab": "relatedWork"}`. Without the tab, configured relationships still function at the data level (links, data sync, invitations) — only the side-panel browsing UI is missing. `relatedWork` is work-item-only: for a Work↔Asset relationship, put the browsing tab on the work flow and keep the asset flow's `contents` tab. The canonical reference for `leftPanel` (all five tab values, `defaultTab`, per-tab `label`, publish-mode caveat) is `references/managing-flows.md` § Left Panel — three traps from there apply directly here:
-
-- **`tabs` REPLACES the default set** (`workflow` + `activities`) — sending only `{"tab": "relatedWork"}` silently removes the Workflow and Activities tabs. Always list every tab you want visible.
-- **`flowFeatures` writes need the draft→publish cycle** — a write to a published flow id returns 200 but persists nothing.
-- **`flowFeatures` is a whole-object write** — read-modify-write or you clobber sibling features.
+For the "Related Work" tab to appear in the work item side panel, the flow's `flowFeatures.leftPanel.tabs` must include `{"tab": "relatedWork"}`. Without the tab, configured relationships still function at the data level (links, data sync, invitations) — only the side-panel browsing UI is missing. `relatedWork` is work-item-only: for a Work↔Asset relationship, put the browsing tab on the work flow and keep the asset flow's `contents` tab. `references/managing-flows.md` § Left Panel is the reference for `leftPanel`; its traps apply here: `tabs` replaces the default set, so list every tab you want; `flowFeatures` writes need a draft; and `flowFeatures` is a whole-object write, so read it first.
 
 ```
 draft_id = create_flow_draft(flow_id)
@@ -314,14 +166,16 @@ update_flow_properties(draft_id, {
     }
   }
 })                                                                    # expect changed: [flowFeatures]
-publish_flow(draft_id)                       # re-resolve the new published id via list_flows
+publish_flow(draft_id)                       # the envelope carries the new published id
 ```
 
 **If the tab doesn't appear after publishing:** work flows default to `publishMode: "DoNotUpdateOpenItems"`, so already-open works stay pinned to their creation-time flow version — the new tab shows only on works created **after** the publish. Verify with a fresh work item.
 
+The `relatedWork-select` form component lets users pick related work items by hand. Its schema is `get_schema("components", "relatedWork-select")`; `multiSelect` takes the string `"single"` (default) or `"multi"`, not a boolean; the component name to add is in `references/layouts-and-components.md`.
+
 ## How to Read Relationships
 
-Use `get_flow_config(flow_id)` — the response includes a `relatedFlows` array with all configured relationships. Each entry shows the target flow, filter rules, data operations, and options.
+`manage_related_flow(flow_id, "list")` or `get_flow_config(flow_id)` returns the configured `relatedFlows` entries.
 
 The `relationships` array (separate from `relatedFlows`) contains runtime relationship instances on work items — these are populated by the engine (from `relatedFlows` evaluation at submit, or directly by runtime activities such as `StartCrossEcosystemWork`), not configured manually. The Related Work tab renders from this per-work array, which is why it can be populated even on flows with no `relatedFlows` entries.
 
@@ -329,27 +183,16 @@ The `relationships` array (separate from `relatedFlows`) contains runtime relati
 
 Goal: Link an "Invoice" workflow to a "Contracts" asset type so each invoice references its contract.
 
-**Step 1: Identify the flows**
 ```
-# Get the Invoice workflow config
-get_flow_config(invoice_flow_id)
-# Note the flow name: "MyEcosystem/Finance/Invoices"
+# 1. Read both flows' full names (flowName needs the path, not the display name)
+get_flow_config(invoice_flow_id)       # "MyEcosystem/Finance/Invoices"
+get_flow_config(contracts_asset_id)    # "MyEcosystem/Finance/Contracts"
 
-# Get the Contracts asset type config
-get_flow_config(contracts_asset_id)
-# Note the flow name: "MyEcosystem/Finance/Contracts"
-```
-
-**Step 2: Draft both flows**
-```
+# 2. Draft both flows
 invoice_draft = create_flow_draft(invoice_flow_id)
 contracts_draft = create_flow_draft(contracts_asset_id)
-```
 
-> The writes in Steps 3–4 are shown against flows with **no existing config**. On real flows, **read-modify-write `flowFeatures`** (§ Enabling the Related Work Panel above) so sibling features are preserved. Add or update each relationship with `manage_related_flow`; its updates are partial PATCHes, so omit fields you are not changing.
-
-**Step 3: Configure the Invoice side**
-```
+# 3. Invoice side
 manage_related_flow(invoice_draft, action="add", related_flow={
       "name": "InvoiceToContract",
       "flowName": "MyEcosystem/Finance/Contracts",
@@ -367,22 +210,9 @@ manage_related_flow(invoice_draft, action="add", related_flow={
         "inviteCurrentUserToTargetWork": false
       }
 })
+# Then add the relatedWork tab to the invoice flow (§ Enabling the Related Work Panel).
 
-update_flow_properties(invoice_draft, {
-  "flowFeatures": {
-    "leftPanel": {
-      "tabs": [
-        {"tab": "workflow"},
-        {"tab": "activities"},
-        {"tab": "relatedWork"}
-      ]
-    }
-  }
-})
-```
-
-**Step 4: Configure the Contracts side (mirror)**
-```
+# 4. Contracts side (mirror: names swapped, workFilters swapped)
 manage_related_flow(contracts_draft, action="add", related_flow={
       "name": "ContractToInvoice",
       "flowName": "MyEcosystem/Finance/Invoices",
@@ -392,29 +222,21 @@ manage_related_flow(contracts_draft, action="add", related_flow={
       "workFilters": [
         { "targetPath": "$.invoice.contractId", "valuePath": "$.id" }
       ],
-      "options": {
-        "addRelationship": true,
-        "isOneWayRelationship": false,
-        "includeData": false,
-        "includeAttachments": false,
-        "inviteCurrentUserToTargetWork": false
-      }
+      "options": { "addRelationship": true, "isOneWayRelationship": false }
 })
-```
 
-**Step 5: Publish both**
-```
+# 5. Publish both
 publish_flow(invoice_draft)
 publish_flow(contracts_draft)
 ```
+
+To change an entry later, call `manage_related_flow(draft, "update", related_flow_id, related_flow={...})` with only the keys you change. The tool merges them into the stored entry; a list you send (`workFilters`, `operations`) replaces the stored list.
 
 ## Common Mistakes
 
 1. **Configuring only one side** (`relatedFlows` mechanism) — a single entry does create both ends of the link, but only when the **configured** side's work is submitted, and related-work lookups by relationship name return empty on a flow without its own matching entry. Mirror the config on both flows unless one-sided establishment is intentional. (Relationships created at runtime by activities such as `StartCrossEcosystemWork` are exempt — they need no `relatedFlows` entries at all.)
 2. **Mismatched `sourceName`/`targetName`** — the `sourceName` on Flow A should correspond to the `targetName` on Flow B. Swapping them breaks the bidirectional link.
-3. **Forgetting to mirror `workFilters`** — `targetPath` and `valuePath` must be swapped between the two sides. If Flow A filters `targetPath: $.id, valuePath: $.ref.id`, Flow B must filter `targetPath: $.ref.id, valuePath: $.id`.
+3. **Forgetting to mirror `workFilters`** — if Flow A filters `targetPath: $.id, valuePath: $.ref.id`, Flow B must filter `targetPath: $.ref.id, valuePath: $.id`.
 4. **Missing `relatedWork` tab** — the Related Work panel won't appear unless `flowFeatures.leftPanel.tabs` includes `{"tab": "relatedWork"}` on the flow.
 5. **Wrong `flowName`** — must be the full flow path (e.g. `"Ecosystem/Category/FlowName"`), not the display name.
-6. **Using `update_flow_properties` for `relatedFlows`** — it rejects that key before sending the request. Use `manage_related_flow` instead; its updates are partial PATCHes, so omitted fields are preserved.
-7. **Forgetting to publish both flows** — both flows must be published after configuration changes.
-8. **Using `related-work-select` instead of `relatedWork-select`** — the component name uses camelCase W.
+6. **Forgetting to publish both flows** — both flows must be published after configuration changes.

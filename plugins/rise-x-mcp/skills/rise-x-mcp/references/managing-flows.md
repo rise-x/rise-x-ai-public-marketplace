@@ -4,175 +4,64 @@
 
 A **flow** is a workflow template defining a business process. It contains steps, tasks, actions, activities, and rules. Work items are instances of flows. Flows with `FlowResourceType = Entity` define **asset types** (ThingTypes).
 
-For building a new flow from scratch, see `references/building-workflows.md`.
-For creating asset types, see `references/managing-asset-types.md`.
+This file covers finding and changing an existing flow. To build a new flow from scratch, see `references/building-workflows.md`. For asset types, see `references/managing-asset-types.md`.
 
 ## Discovering Flows
 
-> **Filtering or sorting flows?** Use **`search_flows`** (filter tree, sort, projection, paging — see `references/advanced-search.md`). `list_flows` is only for the simple "list everything, maybe scoped to Work or Entity" case. Do NOT call `list_flows` and iterate the result client-side to find matches.
+> **Filtering or sorting flows?** Use **`search_flows`** (filter tree, sort, projection, paging — see `references/advanced-search.md`). Do NOT call `list_flows` and iterate the result client-side to find matches.
 
-### `search_flows(filter, sort, fields, page, page_size, enforce_fields, include_total_count)`
-**Advanced flow search.** Use whenever the user describes a filter (e.g. "flows modified this month", "asset types with name starting with X", "flows where publishStatus is Published"), a sort, or wants only specific fields. Full reference in `references/advanced-search.md`.
+`list_flows` returns published **Work** flows only. To find asset types, use `search_flows` with `flowResourceType` equals `"Entity"`.
 
-### `list_flows(flow_resource_type: str | None = None)`
-List published flows in the active ecosystem. Use this to discover workflows and asset types you can operate on (e.g. for `create_work`, `list_work`, `create_asset`).
+Which id to use:
+- Use `id` for `create_flow_draft`, `get_flow_config`, `get_flow_steps`, `create_work`.
+- Use `flowOriginId` for `list_work`, `create_asset`, and asset-related tools. Works span flow versions, so `list_work` filters by the stable `flowOriginId`, not the per-version `id`.
 
-- `flow_resource_type` — optional filter, one of: `"Work"` (workflows), `"Entity"` (asset types), `"User"` (system user flows — rare), `"Company"` (system company flows — rare). Omit for all four. Values are PascalCase from the `FlowResourceType` enum.
-
-Each flow in the response includes: `id`, `flowOriginId`, `displayName`, `flowResourceType`, `entityType`, `status`, `description`, `resourceVersion`.
-
-- Use `id` for `create_flow_draft`, `get_flow_config`, `get_flow_steps`, `create_work`
-- Use `flowOriginId` for `list_work`, `create_asset`, and asset-related tools (works span flow versions, so `list_work` filters by the stable `flowOriginId`, not the per-version `id`)
-- `flowResourceType` enum: `"Work"` | `"Entity"` | `"User"` | `"Company"`. `"Work"` = workflow; `"Entity"` = asset type. `"User"` / `"Company"` are rare system flows.
-- Flow lifecycle enum (mapped from `DianaFlowStatus`, values `"Open"` | `"Active"` | `"Archived"` | `"Deleted"`). ⚠️ Field name differs by endpoint: `list_flows` returns the value under `status` (shown above); `search_flows` exposes the SAME enum under the key `state` — when composing a filter tree for `search_flows`, write `{"field": "state", ...}`, not `"status"`. Distinct from a Work item's `status`. `search_flows` excludes `Deleted` and `Archived` by default — see `references/advanced-search.md` § Default status exclusion.
-
-## Creating a New Flow
-
-### `create_flow(flow_resource_type, update_flow_flags)`
-Create a brand new empty draft flow. This is the entry point for creating both workflows and asset types.
-
-- `flow_resource_type` — `"Work"` (default, workflow), `"Entity"` (asset type), `"User"`, `"Company"`
-- `update_flow_flags` — `"AddAll"` (default, scaffolds step + layout + section + columns), `"None"`, `"AddSteps"`, `"AddLayouts"`, `"AddDefaultColumns"`, `"AddDefaultLayoutSection"`
-
-Returns the new draft flow. **No need to call `create_flow_draft` after this** — the flow is already in draft mode.
-
-**NOTE:** `create_flow` creates a **new** flow. `create_flow_draft` creates an editable draft of an **existing published** flow. Don't confuse the two.
+The flow lifecycle enum (`"Open"` | `"Active"` | `"Archived"` | `"Deleted"`) has a different field name per tool: `list_flows` returns it as `status`, and `search_flows` filters it as `state`. Write `{"field": "state", ...}` in a `search_flows` filter, not `"status"`. It is distinct from a Work item's `status`.
 
 ## Reading Flow Data
 
-### `get_flow_config(id: str)`
-Full configuration — steps, actions, activities, properties, pipelines. Use when you need everything.
-
-### `get_flow_config(id, format="model")`
-Structured object model representation. Pass `format="model"` to `get_flow_config`.
-
-### `get_flow_config(id, path="…")` — targeted read
-Pass `path` to return just one subtree instead of the whole payload — the cheap way to **verify a single nested key landed** without dumping the entire config. Dotted key path from the config root; a leading `$.`/`$` is tolerated; list indices are integers.
-
-```
-get_flow_config(flow_id, path="properties.flowFeatures")                        # just the feature flags
-get_flow_config(flow_id, path="properties.flowFeatures.createAndDuplicateWork")  # just the duplicate config
-```
-
-Returns `{path, value}`. A missing segment returns a typed `path_not_found` error **listing the keys that *are* available at that level** — so a wrong guess self-corrects in one call. `path` takes precedence over `format="summary"` (the summary projection applies only when `path` is omitted).
+**Targeted read.** `get_flow_config(id, path="…")` returns `{path, value}`. A missing segment returns a `path_not_found` error that lists the keys available at that level, so a wrong guess self-corrects in one call.
 
 > **Config nesting gotcha:** the flow's own properties (name, `flowFeatures`, …) live under a top-level **`properties`** object in the config payload, so the read path is `properties.flowFeatures` — even though `update_flow_properties` *writes* them with a bare `{"flowFeatures": …}` body. Root-level keys are `actions, cardLayout, chains, columns, customViews, dataPipelines, export, properties, relatedFlows, relationships, steps, tasks, workGridProperty`.
 
-### `get_flow_steps(flow_id: str)`
-Lightweight projected list — **best starting point** for understanding flow structure.
+**`stepName` from `get_flow_steps`** is the internal camelCase name used for `ByStepName` routing. It can be bare (`orderRequest`) or slash form (`orderRequest/submitRequest`); route by the part before the `/`.
 
-Returns: `[{id, stepName, stepDisplayName, taskDisplayName, stepId, taskId, layoutId, actionSetId}]`
-
-- `id` — composite step identifier. Required by `get_flow_step`; also accepted by `manage_action`, `manage_task_invites`, `delete_step`, `rename_step` (see the ID mapping table in `building-workflows.md`).
-- `stepName` — internal camelCase name used for `ByStepName` action routing. For v3-style flows (asset types, legacy workflows) this is slash form like `UntitledStep/Generated-<guid>`; for v4 native flows it is bare like `Step_1`.
-- `stepDisplayName` / `taskDisplayName` — human-readable labels.
-- `stepId` / `taskId` / `actionSetId` / `layoutId` — internal GUIDs.
-
-**Not projected:** `taskName` is omitted from this response. `update_work_data` needs it as `section_name`, so call `get_flow_step(flow_id, step_id)` with the `id` field from this list. (`update_work_data_bulk` does **not** need the round-trip — it also accepts the `taskDisplayName` this response already gives you — see `references/managing-work-items.md`.)
-
-### `get_flow_step(flow_id: str, step_id: str)`
-Full details of a single step/task.
-
-### `get_flow_versions(id: str)`
-Version history with dates. Use before `restore_flow_version`.
+**`taskName` is not projected** by `get_flow_steps`. `update_work_data` needs it as `section_name`, so call `get_flow_step(flow_id, step_id)` with the `id` field from that list. (`update_work_data_bulk` does **not** need the round-trip — it also accepts the `taskDisplayName` that `get_flow_steps` already gives you — see `references/managing-work-items.md`.)
 
 ## Draft/Edit/Publish Sequence
 
-All structural and property changes require draft mode.
-
-**`publishStatus` enum** (the flow's publication lifecycle, mapped from `DianaPublishStatus`): `"Draft"` | `"Published"` | `"Revised"` | `"Deleted"`. A draft becomes `"Published"` on `publish_flow`. The previous published version transitions to `"Revised"`. A fifth value `"Publishing"` exists as a transient internal state during the publish flip — callers don't normally see it. `search_flows` returns only the current, non-draft version of each flow, so filtering on `publishStatus = "Draft"` or `"Revised"` always returns an empty page.
-
-**`publishMode` enum** (PascalCase; filterable via `search_flows` — see `references/advanced-search.md`): `"Default"` | `"UpdateOpenItems"` | `"DoNotUpdateOpenItems"`. Controls how a publish propagates to already-open items — and it gates **every** published config change (layouts, features, relationships, …), not just UI tabs. Work flows default to `"DoNotUpdateOpenItems"`: open works stay pinned to the flow version they were created on, so a published change is visible **only on works created after the publish** — always verify a published change against a fresh work item, never an existing one. Entity flows default to `"UpdateOpenItems"` (open items migrate to the new version on publish). Read it with `get_flow_config(id, path="properties.publishMode")`; change it with `update_flow_properties(draftId, {"publishMode": "UpdateOpenItems"})` **on a draft** (expect `changed: [publishMode]`), then publish. This applies to card-layout fixes too: for an immediate repair on existing work items, publish with `"UpdateOpenItems"` or correct the affected works separately.
-
-**CRITICAL — Draft ID Rule:** `create_flow_draft` returns a **new draft ID**. All subsequent operations MUST use this draft ID, not the original. Editing the original published flow returns 403 Forbidden.
-
-**Stale-id trap after re-publish:** once a draft is published, the previously published id is superseded. Calls against the stale id are inconsistent: some 403 with "is in 'Deleted' mode", but property edits can **silently succeed (200 + `changed`)** — the write lands on the dead version and never appears in the live flow. Always take the current id from the publish envelope or re-resolve via `list_flows` (the `flowOriginId` is the only id stable across republishes).
+All structural and property changes require draft mode. To change a published flow:
 
 ```
-1. draft_result = create_flow_draft(original_id)  # returns NEW draft flow ID
-2. [make changes using draft_flow_id — properties, steps, etc.]
-3. publish_flow(draft_flow_id)                     # required last — publishes flow + all layouts
+1. draft = create_flow_draft(published_id)         # NEW draft id; the published id is now read-only
+2. get_flow_steps(draft_id)                        # layoutIds
+3. get_layout(layoutId, format="summary")          # check publishStatus
+   - "Published" → create_layout_draft(layoutId, draft_id), then edit the NEW layout id
+   - "Draft"     → edit layoutId as-is
+4. [edit properties, steps, actions, components using the draft ids]
+5. publish_flow(draft_id)                          # publishes the flow + all linked layouts
 ```
 
-### `create_flow_draft(id: str)`
-Create an editable draft of an **existing published** flow. Returns a new draft ID.
+**`publishStatus` enum** (`DianaPublishStatus`): `"Draft"` | `"Published"` | `"Revised"` | `"Deleted"`. A draft becomes `"Published"` on `publish_flow`, and the previous published version becomes `"Revised"`. A fifth value, `"Publishing"`, is a transient internal state during the publish flip.
 
-To create a brand-new flow, use `create_flow(...)` instead (see above). Passing a fresh/unknown UUID to `create_flow_draft` returns a 404 — the underlying flow must already exist.
+**`publishMode` enum** (PascalCase; filterable via `search_flows`): `"Default"` | `"UpdateOpenItems"` | `"DoNotUpdateOpenItems"`. Controls how a publish propagates to already-open items — and it gates **every** published config change (layouts, features, relationships, …), not just UI tabs. Work flows default to `"DoNotUpdateOpenItems"`: open works stay pinned to the flow version they were created on, so a published change is visible **only on works created after the publish** — always verify a published change against a fresh work item, never an existing one. Entity flows default to `"UpdateOpenItems"` (open items migrate to the new version on publish). Read it with `get_flow_config(id, path="properties.publishMode")`; change it with `update_flow_properties(draftId, {"publishMode": "UpdateOpenItems"})` **on a draft** (expect `changed: [publishMode]`), then publish.
 
-### `publish_flow(id: str)`
-Publish draft and all associated layouts. Must use the **draft flow ID**, not the original.
+**Stale-id trap after re-publish:** once a draft is published, the previously published id is superseded. Calls against the stale id are inconsistent: some 403 with "is in 'Deleted' mode", but property edits can **silently succeed (200 + `changed`)** — the write lands on the dead version and never appears in the live flow. Always take the current id from the `publish_flow` result, or re-resolve it with `search_flows` filtered on `flowOriginId`, the only id stable across republishes.
 
 ## Editing Flow Properties
 
-### `update_flow_properties(id: str, properties: dict)`
-PATCH semantics — only include changed fields.
+The `update_flow_properties` description lists the keys. It does not say:
 
-**Supported keys:**
-- `displayName` / `name` — flow name
-- `description` — flow description
-- `icon` — icon config: `{"shape": "CheckCircleOutlined", "color": "#4CAF50"}`
-- `entityType` — ThingType identifier for Entity flows (e.g. `"vessel"`)
-- `displayNameTemplate` — JSONPath-based template for instance display names (e.g. `"{$.vessel.displayName} - {$.inquiry.deliveryWindow.from.date:yyyy-MM-dd}"`). Tokens are `{$.path}` or `{$.path:format}`. See `managing-asset-types.md` for details.
-- `featureFlags` — feature toggles (e.g. `{"OnlyAssetTypeOwnersCanCreateAsset": true}`; the
-  offline write flag `isOfflineModeEnabled` lives here too). ⚠️ Draft-only like every properties
-  write — target a draft id or the update is silently stripped. ⚠️ A passed `featureFlags` replaces
-  the whole bag: read it back first and send it complete, or seeded keys are dropped.
-- `allowedStartSources` — consent allow-list for the `StartCrossEcosystemWork` activity: a list of `{"ecosystemId": "<id>", "flowOriginId": "<id>"}` objects naming the source flows permitted to start THIS flow from another ecosystem. Default-deny (absent/empty ⇒ no cross-ecosystem starts). Set this on the **target** flow. See `actions-and-statuses.md` § Start Cross Ecosystem Work.
+- `displayNameTemplate` builds instance display names from tokens `{$.path}` or `{$.path:format}`, for example `"{$.vessel.displayName} - {$.inquiry.deliveryWindow.from.date:yyyy-MM-dd}"`. See `managing-asset-types.md` for details.
+- The offline write flag `isOfflineModeEnabled` lives in `featureFlags`. `featureFlags` is an object `{name: bool}`, and a sent object replaces the stored one: read it back first and send it complete.
+- `allowedStartSources` is set on the **target** flow. See `actions-and-statuses.md` § Start Cross Ecosystem Work.
 
-Example:
-```json
-{
-  "displayName": "Vessel Inspection",
-  "description": "Standard vessel inspection workflow",
-  "icon": {"shape": "SearchOutlined", "color": "#2196F3"}
-}
-```
-
-## Structure Modification (all require draft mode)
-
-### `add_step(flow_id, position, step_name, task_name)`
-Add a new step with a task at the specified position.
-
-- `position` — 0-based index. Use `-1` to add at end (before End Step).
-- `step_name` — display name for the step (e.g. `"Quality Review"`)
-- `task_name` — display name for the task (e.g. `"Review Task"`)
-- Returns updated step list with IDs for the new step
-
-**Naming convention:** The server auto-derives camelCase internal names from display names. E.g., `"Quality Review"` becomes step name `qualityReview`, task name `qualityReview/reviewTask`.
-
-### `delete_step(flow_id, step_id)`
-Delete a step and all its tasks. Accepts any of the row's GUIDs from `get_flow_steps` (`id` / `stepId` / `taskId`) — resolved server-side.
-
-### `rename_step(flow_id, step_id, new_name)`
-Rename a step. Keeps the task name unchanged. Accepts any of the row's GUIDs from `get_flow_steps`.
-
-### `rename_step(flow_id, task_id, new_name, target="task")`
-Rename a task. Pass `target="task"` to rename the task instead of the step. Keeps step name unchanged.
-
-**Which ID to use:** any of the row's GUIDs from `get_flow_steps` (`id` / `stepId` / `taskId`) — resolved server-side since 1.2.0. One caveat: in a step with several tasks, `target="task"` needs the specific row's `id` or `taskId` (the shared `stepId` is ambiguous and is rejected with the row list). See the ID mapping table in `building-workflows.md`.
-
-### `move_step(flow_id, step_id, after_step_id)`
-Reorder a step. Use `"00000000-0000-0000-0000-000000000000"` to move to front. **Move is the ONE tool keyed on the `stepId` field** (not the record `id`) — pass `stepId` for steps, `taskId` for tasks.
-
-### `move_step(flow_id, task_id, after_task_id, item_type="task", target_step_id=step_id)`
-Move task within or between steps. Pass `item_type="task"` and `target_step_id` for the target step (accepts the target's `stepId`, `taskId`, or `actionSetId`). Use null GUID for `after_id` to move to front of step.
-
-## Versioning
-
-### `restore_flow_version(id: str)`
-Restore the previous published version as current. Use `get_flow_versions` first to see history.
-
-## Deletion
-
-### `delete_flow(id: str)`
-Marks the flow as deleted.
+**Naming convention:** `add_step` and `rename_step` derive camelCase internal names from display names. `"Quality Review"` becomes step name `qualityReview`; its task `"Review Task"` becomes `qualityReview/reviewTask`. `rename_step` recomputes both internal names.
 
 ## Flow Features (`flowFeatures`)
 
-The `flowFeatures` property on a flow controls UI features and panel configuration. Set it via `update_flow_properties` — **but only on a draft** (see the two warnings below).
+The `flowFeatures` property on a flow controls UI features and panel configuration. Set it with `update_flow_properties` **on a draft**, then publish; a write to a published flow is dropped and reported under `warnings`.
 
-> **⚠️ `flowFeatures` edits need the draft→publish cycle — a write to a *published* flow is silently dropped.** `update_flow_properties(publishedId, {"flowFeatures": …})` against a published flow id returns 200 but persists nothing (`update_flow_properties` surfaces this as `changed: []` + a `dropped_property` warning — trust that signal, don't assume it landed). You must: `create_flow_draft(publishedId)` → `update_flow_properties(draftId, {"flowFeatures": …})` (now `changed: [flowFeatures]`) → `publish_flow(draftId)` → re-resolve the new published id via `list_flows`.
->
 > **⚠️ `flowFeatures` is a whole-object write — no deep-merge.** Unlike the `manage_*` sub-resource tools, `update_flow_properties` replaces the entire `flowFeatures` object. Sending `{"flowFeatures": {"createAndDuplicateWork": {...}}}` **clobbers** any sibling feature already there (`leftPanel`, `calendarBoard`, `isSingleScreenWorkUpdate`, …). Always **read-modify-write**: `get_flow_config(draftId, path="properties.flowFeatures")` → merge your key into the returned object → send the whole merged object back → `publish_flow`. Confirm with `get_flow_config(newPublishedId, path="properties.flowFeatures")`.
 
 ### Duplicate & Create Work (`createAndDuplicateWork`)
@@ -195,7 +84,7 @@ update_flow_properties(draftId, {
     }
   }
 })                                                  # expect changed: [flowFeatures]
-publish_flow(draftId)                               # commit; re-resolve new published id via list_flows
+publish_flow(draftId)                               # commit; the result carries the new published id
 ```
 
 **Action block shape** — `{enabled, includePaths, excludePaths}`:
@@ -213,7 +102,7 @@ publish_flow(draftId)                               # commit; re-resolve new pub
 
 **Do NOT confuse with `copyData` / `cloneData`.** Those are component-level flags whose names *suggest* duplicate control but do **not** drive the Duplicate button at all — see `references/layouts-and-components.md` § copyData / cloneData. Only `flowFeatures.createAndDuplicateWork.duplicate` affects what a duplicate carries.
 
-**Verifying the exclusion:** duplicate a real work with `duplicate_work(sourceWorkId)`, then `get_work(newWorkId)` and confirm the `excludePaths` fields are absent. (Before the `duplicate_work` tool existed this could only be checked in-app.) See `references/managing-work-items.md` § duplicate_work.
+**Verifying the exclusion:** duplicate a real work with `duplicate_work(sourceWorkId)`, then `get_work(newWorkId)` and confirm the `excludePaths` fields are absent.
 
 `get_schema` does **not** surface `createAndDuplicateWork` — it's a `flowFeatures` sub-key, not a schema-registered resource. This doc is the source of truth for its shape.
 
@@ -247,7 +136,7 @@ update_flow_properties(draftId, {
     }
   }
 })                                                  # expect changed: [flowFeatures]
-publish_flow(draftId)                               # commit; re-resolve new published id via list_flows
+publish_flow(draftId)                               # commit; the result carries the new published id
 ```
 
 **Available tabs** (the `FlowTab` enum — exactly five values, camelCase):
@@ -266,7 +155,8 @@ publish_flow(draftId)                               # commit; re-resolve new pub
 
 **`defaultTab`** selects which tab opens first. Resolution order: `leftPanel.defaultTab` if set → else the first entry of `tabs` → else the page default (`workflow` for work items, `contents` for assets). `defaultTab` is **not** validated against `tabs` — pointing it at a tab that isn't listed leaves the panel with no visible selection.
 
-> **⚠️ Publish-mode caveat — "configured the tab but it doesn't show".** Work flows default to `publishMode: "DoNotUpdateOpenItems"` (see § Draft/Edit/Publish Sequence above — this gates every published config change, not just tabs): works already open stay pinned to the flow version they were created on, so a published `leftPanel` change appears **only on works created after the publish**. The config is not broken. Confirm persistence from MCP with `get_flow_config(newPublishedId, path="properties.flowFeatures")`; whether the tab *renders* can only be checked in the app — on a work created **after** the publish, never an existing one. Asset pages always read the latest flow version, so asset-side changes show on existing assets immediately.
+> **⚠️ "Configured the tab but it doesn't show."** On a Work flow with the default `publishMode` (see § Draft/Edit/Publish Sequence), a published `leftPanel` change appears **only on works created after the publish**; the config is not broken. `get_flow_config(newPublishedId, path="properties.flowFeatures")` confirms it persisted; whether the tab *renders* can only be checked in the app. Asset pages always read the latest flow version, so asset-side changes show on existing assets immediately.
+
 ### Layout Panel Config
 
 Each step/task can have panel-level settings controlling submission behavior. These are part of the step configuration (visible in `get_flow_config`) rather than `flowFeatures`, but control related UI behavior:
@@ -282,19 +172,12 @@ Each step/task can have panel-level settings controlling submission behavior. Th
 
 ## Common Patterns
 
-**Rename a step and its task together:**
+**Rename or reorder steps:**
 ```
-1. get_flow_steps(flow_id)                        # get current structure with IDs
-2. draft = create_flow_draft(flow_id)              # returns NEW draft_flow_id
-3. rename_step(draft_flow_id, step_id, "New Step Name")
-4. rename_step(draft_flow_id, task_id, "New Task Name", target="task")
-5. publish_flow(draft_flow_id)                     # use draft ID, not original
-```
-
-**Reorder steps:**
-```
-1. get_flow_steps(flow_id)                        # get current order with IDs
-2. draft = create_flow_draft(flow_id)              # returns NEW draft_flow_id
-3. move_step(draft_flow_id, step_to_move, after_this_step)
+1. draft = create_flow_draft(flow_id)              # returns NEW draft_flow_id
+2. get_flow_steps(draft_flow_id)                   # IDs from the draft
+3. rename_step(draft_flow_id, row_id, "New Step Name")
+   rename_step(draft_flow_id, row_id, "New Task Name", target="task")
+   move_step(draft_flow_id, step_to_move_stepId, after_this_stepId)   # move takes stepId, not id
 4. publish_flow(draft_flow_id)                     # use draft ID, not original
 ```

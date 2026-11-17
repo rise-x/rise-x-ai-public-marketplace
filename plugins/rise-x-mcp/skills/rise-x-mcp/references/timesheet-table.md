@@ -71,30 +71,12 @@ Each row stores:
 
 ## Layout Properties
 
-### Basic
+For every property and its type, call `get_schema("components", "timesheet-table")`. The schema does not say:
 
-| Property | Type | Description |
-|---|---|---|
-| `currencyCode` | string | ISO currency code (default: `"USD"`) |
-| `decimals` | number | Display decimal precision |
-| `decimalsToInputAndSave` | number | Storage decimal precision |
-| `helpText` | string | Help text displayed below component |
-
-### Timesheet-Specific
-
-| Property | Type | Description |
-|---|---|---|
-| `timesheetShowTax` | boolean | Show tax rate and total tax columns |
-| `timesheetCreateButtonLabel` | string | Custom label for "Create" button |
-| `timesheetTotalDataPath` | string | Where to save the grand total (auto: `{dataPath}_Total`) |
-| `timesheetServiceOptions` | array | Static service option definitions |
-| `timesheetServiceOptionsDataPath` | string | Data path to load dynamic service options |
-| `timesheetServiceOptionsDataPathMapping` | object | Maps data fields to service option fields |
-| `timesheetAddServiceOptions` | string[] | Which service type buttons to show in Create menu |
-| `timesheetAddServiceOptionsLabels` | object | Custom labels for service type buttons |
-| `timesheetServiceOptionsFilter` | object | Filter rules for service options |
-| `minRange` | number | Minimum hours per day for WorkingHours (default: 1) |
-| `maxRange` | number | Maximum hours per day for WorkingHours (default: 31) |
+- `currencyCode` defaults to `"USD"` on a new component.
+- `timesheetTotalDataPath` defaults to `{dataPath}_Total` when unset.
+- `minRange` / `maxRange` bound the hours per day on a `WorkingHours` entry (defaults 1 and 31).
+- `timesheetAddServiceOptions` picks which service types the **Create** menu offers.
 
 ### Service Options
 
@@ -164,39 +146,10 @@ Limit which service types appear in the "Create" button dropdown:
 
 ## AI Import
 
-Enable AI-powered data import from files (PDF, CSV, Excel, images):
+To enable AI import, add `{"name": "aiImport"}` to `toolbarActions`; the modes and file types are in `references/layouts-and-components.md` § AI Import. On a timesheet table, the import:
 
-```json
-{
-  "component": "timesheet-table",
-  "label": "Time & Expenses",
-  "properties": {
-    "width": "col-12",
-    "currencyCode": "USD",
-    "toolbarActions": [{"name": "aiImport"}]
-  }
-}
-```
-
-When AI import is enabled:
-- Users see an "Import with AI" button in the toolbar
-- Three import modes: **Set Data** (replace), **Append Data** (add), **Fill Data** (fill gaps)
-- Accepted files: `.pdf, .csv, .xls, .xlsx, .jpg, .jpeg, .png, .webp`
-- Auto-maps columns: Name, Type, Rate, Quantity, Total (+ Tax Rate if `timesheetShowTax=true`)
-- Can match imported items against configured service options
-
-For service option matching during import, configure:
-```json
-{
-  "timesheetServiceOptionsDataPath": "$.services",
-  "timesheetServiceOptionsFilter": {"type": "equals(Billable)"},
-  "timesheetServiceOptionsDataPathMapping": {
-    "name": "serviceName",
-    "type": "category",
-    "rate": "price"
-  }
-}
-```
+- Auto-maps the columns Name, Type, Rate, Quantity, Total (+ Tax Rate if `timesheetShowTax=true`).
+- Matches imported items against the service options configured with `timesheetServiceOptionsDataPath`, `timesheetServiceOptionsFilter`, and `timesheetServiceOptionsDataPathMapping`.
 
 ## Complete Example
 
@@ -233,8 +186,4 @@ For service option matching during import, configure:
 
 ## Footer
 
-The table footer displays:
-- Tax total (if `timesheetShowTax=true`)
-- Grand total with currency formatting
-
-The total is automatically saved to `timesheetTotalDataPath` (defaults to `{dataPath}_Total`).
+The table footer displays the tax total (if `timesheetShowTax=true`) and the grand total with currency formatting. The grand total is saved to `timesheetTotalDataPath`.
