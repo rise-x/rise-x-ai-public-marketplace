@@ -14,91 +14,9 @@
 
 **Rule of thumb:** If you're defining *what fields exist*, use flow tools. If you're filling *values into those fields*, use asset + work tools.
 
-## Creating a New Flow
+`create_flow` creates both workflows (`"Work"`) and asset types (`"Entity"`); see `references/building-workflows.md` for building a workflow. The flow it returns is already a draft, so do not call `create_flow_draft` on it. Set the asset type's properties (`entityType`, `displayName`, `description`, `icon`, `displayNameTemplate`) with `update_flow_properties`; the full key list is `get_schema("flows", "properties")`.
 
-### `create_flow(flow_resource_type, update_flow_flags)`
-
-Creates a new empty draft flow from scratch. This is the entry point for creating both workflows and asset types.
-
-**Args:**
-- `flow_resource_type` (str, default `"Work"`) — Type of flow:
-  - `"Work"` — standard multi-step workflow
-  - `"Entity"` — asset type (ThingType)
-  - `"User"` — user-related flow
-  - `"Company"` — company-related flow
-- `update_flow_flags` (str, default `"AddAll"`) — What scaffolding to auto-create:
-  - `"AddAll"` — creates a step + layout + default section + default columns (recommended)
-  - `"None"` — empty flow, no scaffolding
-  - `"AddSteps"` — adds a default step only
-  - `"AddLayouts"` — adds layouts to existing steps
-  - `"AddDefaultColumns"` — adds default data-grid columns
-  - `"AddDefaultLayoutSection"` — adds a default section to layouts
-
-**Returns:** The new draft flow object with its ID, properties, and steps.
-
-**NOTE:** The returned flow is already in draft mode. You do NOT need to call `create_flow_draft` after `create_flow`. Use `create_flow_draft` only when editing an already-published flow.
-
-## Creating an Asset Type — End-to-End Sequence
-
-```
-Phase 1: Create the Entity Flow
-  flow = create_flow(flow_resource_type="Entity", update_flow_flags="AddAll")
-  # Extract: flow ID from response
-
-Phase 2: Set Properties
-  update_flow_properties(id=flowId, properties={
-    "entityType": "vessel",
-    "displayName": "Vessel",
-    "description": "Maritime vessel registry"
-  })
-
-Phase 3: Configure the Layout
-  # Get the auto-created step and layout IDs
-  steps = get_flow_steps(flow_id=flowId)
-  # Extract: layoutId from the first step
-
-  # Add components to the layout's default section
-  # (get_flow_steps returns layoutId; get_layout(..., format="components") returns sections)
-  layout = get_layout(layout_id=layoutId, format="components")
-  # Find the default section ID
-
-  add_components(layout_id=layoutId, parent_section_id=sectionId, components=[
-    {"component": "input-text", "label": "Vessel Name"},
-    {"component": "input-text", "label": "IMO Number"},
-    {"component": "input-select", "label": "Flag State", "properties": {
-      "options": ["Panama", "Liberia", "Marshall Islands"]
-    }},
-    {"component": "input-text", "label": "Tonnage"}
-  ])
-
-Phase 4: Publish
-  publish_flow(id=flowId)
-```
-
-After publishing, the asset type appears in `search_flows` (flowResourceType=Entity) and `list_asset_types()`, and users can create asset instances with `create_asset(flow_origin_id)`.
-
-## Creating a Workflow — Same Tool
-
-```
-flow = create_flow(flow_resource_type="Work", update_flow_flags="AddAll")
-# Then: update_flow_properties, add steps/tasks, configure layouts, publish
-```
-
-See `references/building-workflows.md` for full workflow construction guide.
-
-## Key Entity Flow Properties
-
-Set these with `update_flow_properties(id, properties)`:
-
-| Property | Type | Description |
-|---|---|---|
-| `entityType` | string | The ThingType identifier (e.g. `"vessel"`, `"contract"`). This is how the asset type is referenced in search-things components and API calls. |
-| `displayName` | string | Human-readable name shown in the UI (e.g. `"Vessel"`) |
-| `description` | string | Description of the asset type |
-| `icon` | object | Icon configuration: `{"shape": "DirectionsBoatOutlined", "color": "#2196F3"}` |
-| `displayNameTemplate` | string | Template for asset instance display names (see below) |
-
-### `displayNameTemplate` — Asset Instance Naming
+## `displayNameTemplate` — Asset Instance Naming
 
 Controls how each asset instance's display name is generated. Uses **JSONPath expressions** that are resolved against the asset's data at runtime.
 
@@ -111,20 +29,9 @@ Controls how each asset instance's display name is generated. Uses **JSONPath ex
 
 "{$.vessel.displayName} - {$.inquiry.deliveryWindow.from.date:yyyy-MM-dd}"
     → "Pacific Explorer - 2026-04-15"
-```
 
-Other valid shapes:
-```
-"{$.companyName}"                                        → "Acme Corp"
-"{$.firstName} {$.lastName} ({$.email})"                 → "Jane Doe (jane@acme.com)"
-"{$.product.name} ({$.product.grade})"                   → "Iron Ore (62% Fe)"
-```
-
-**Setting it:**
-```
-update_flow_properties(flow_id, {
-  "displayNameTemplate": "{$.vessel.displayName} - {$.imoNumber}"
-})
+"{$.firstName} {$.lastName} ({$.email})"
+    → "Jane Doe (jane@acme.com)"
 ```
 
 **How to find paths:** The path must resolve against the asset's stored data shape, not the component label. Check `get_flow_config` / `get_layout` and any linked `search-things` `dataPaths` to see where values actually land. For example, a `search-things` component for a vessel typically stores data under `$.vessel.displayName`, not `$.vesselName`.
@@ -133,29 +40,11 @@ update_flow_properties(flow_id, {
 
 ## Modifying an Existing Asset Type
 
-Published asset types are modified using the standard draft/publish lifecycle:
-
-```
-# 1. Create a draft of the existing flow
-draft = create_flow_draft(id=publishedFlowId)
-# CRITICAL: use the returned draft ID for all subsequent operations
-
-# 2. Make changes (add/remove/update components, rename steps, etc.)
-# Use the draft flow ID and draft layout IDs
-
-# 3. Publish
-publish_flow(id=draftFlowId)
-```
-
-See `references/managing-flows.md` for the full draft/edit/publish sequence and the Draft ID Rule.
+Published asset types follow the standard draft/publish lifecycle: `create_flow_draft(id=publishedFlowId)`, make every change against the returned draft id and its draft layout ids, then `publish_flow(id=draftFlowId)`. See `references/managing-flows.md` for the full sequence and `SKILL.md` § Draft/Publish Lifecycle for the Draft ID Rule.
 
 ## Deleting an Asset Type
 
-```
-delete_flow(id=flowId)
-```
-
-**WARNING:** This deletes the asset type definition. Existing asset instances may become orphaned. Use with caution.
+`delete_flow(id=flowId)` deletes the asset type definition. Existing asset instances may become orphaned. Use with caution.
 
 ## Complete Example: Create a "Customer" Asset Type
 
@@ -174,14 +63,14 @@ update_flow_properties("abc-123", {
 
 # 3. Get auto-created step/layout structure
 get_flow_steps("abc-123")
-# Returns: [{"stepDisplayName": "Step", "layoutId": "layout-456", ...}]
+# Returns: [{"id": "step-row-id", "stepDisplayName": "Step", "layoutId": "layout-456", ...}]
 
 # 4. Get layout to find default section
 get_layout("layout-456", format="components")
 # Find the section ID from the components list
 
 # 5. Rename the step to something meaningful
-rename_step(flow_id="abc-123", step_id="step-id", new_name="Customer Details")
+rename_step(flow_id="abc-123", id="step-row-id", new_name="Customer Details")
 
 # 6. Add form fields
 add_components(layout_id="layout-456", parent_section_id="section-id", components=[
@@ -198,7 +87,7 @@ add_components(layout_id="layout-456", parent_section_id="section-id", component
 # 7. Publish — this issues a NEW flow id; "abc-123" is now superseded
 publish_flow("abc-123")
 #   Re-resolve both ids before using them. A superseded id can still ACCEPT writes,
-#   which then land on the dead version (troubleshooting.md). search_flows with
+#   which then land on the dead version (managing-flows.md, the stale-id trap). search_flows with
 #   flowResourceType == Entity gives the live row: `id` for step reads,
 #   `flowOriginId` for create_asset.
 # liveFlowId, flowOriginId = <the live row's id and flowOriginId>
@@ -208,24 +97,22 @@ publish_flow("abc-123")
 #                                              eventName / invitation — use those verbatim
 # sectionName = get_flow_steps(liveFlowId)[0]["taskDisplayName"]
 #   update_work_data_bulk resolves the task's displayName as well as its internal
-#   taskName, so get_flow_steps alone is enough. (update_work_data would need the
-#   internal taskName, which is projected out — that one needs get_flow_step.)
+#   taskName, so get_flow_steps alone is enough.
 # update_work_data_bulk(workId, {
 #     "$.displayName": "Acme Corp",          # ALWAYS set this — the list/grid
-#                                            # shows the asset by it (pitfall #20)
+#                                            # shows the asset by it
 #     "$.customerDetails.companyName": "Acme Corp",
 # }, section_name=sectionName)
 # submit_work(workId, event_name=response["eventName"], step_name=response["stepName"],
 #             invitation=response.get("invitation"))
 #   never guess "Submit" — it is a display label (pitfall #21). Pass the returned
-#   invitation verbatim; dropping it can leave the asset in Draft (pitfall #8 in
-#   references/managing-assets.md)
+#   invitation verbatim; dropping it can leave the asset in Draft (Common Mistakes #6
+#   in references/managing-assets.md)
 ```
 
 ## Common Mistakes
 
-1. **Calling `create_flow_draft` instead of `create_flow`** — `create_flow` creates a brand new flow; `create_flow_draft` creates an editable draft of an *existing* published flow
-2. **Forgetting to set `entityType`** — without it, the flow won't appear in `list_asset_types()` and can't be used to create assets
-3. **Calling `create_flow_draft` after `create_flow`** — the flow from `create_flow` is already in draft mode; double-drafting creates orphan drafts
-4. **Using `create_asset` to create an asset type** — `create_asset` creates an instance (record), not a type (template). Use `create_flow(flow_resource_type="Entity")` for types.
-5. **Forgetting to publish** — the asset type won't appear in `search_flows` (flowResourceType=Entity) or `list_asset_types()` until published
+1. **Calling `create_flow_draft` after `create_flow`**: the flow from `create_flow` is already in draft mode; double-drafting creates orphan drafts. Use `create_flow_draft` only to edit an existing published flow.
+2. **Forgetting to set `entityType`**: without it, the flow won't appear in `list_asset_types()` and can't be used to create assets
+3. **Using `create_asset` to create an asset type**: `create_asset` creates an instance (record), not a type (template). Use `create_flow(flow_resource_type="Entity")` for types.
+4. **Forgetting to publish**: the asset type won't appear in `search_flows` (flowResourceType=Entity) or `list_asset_types()` until published

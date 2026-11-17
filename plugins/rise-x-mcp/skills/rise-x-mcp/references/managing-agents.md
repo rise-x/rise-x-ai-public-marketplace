@@ -1,221 +1,74 @@
 # Managing Agent Configurations
 
-An **agent** on the Rise-X platform is a stored configuration, not a running process. It bundles a
-display name, description, system prompt, model, a list of MCP servers it's allowed to call as
-tools, and a list of hosted OpenAI tools (`file_search`, `web_search`, …). The **platform agent
-runtime** loads this configuration and executes it on every run. The `id` returned by
-`create_agent` **is** the `agent_id` — the same handle used to run the agent (`POST
-/api/v1/agent/run`) and to wire it into federated apps that embed it. Treat it as stable from the
-moment it's created.
+An **agent** on the Rise-X platform is a stored configuration, not a running process: a name,
+description, system prompt, model tier, the MCP servers it may call, and hosted OpenAI tools
+(`file_search`, `web_search`, …). The platform agent runtime loads the configuration on every
+run. The `id` that `create_agent` returns **is** the `agent_id` used to run the agent
+(`POST /api/v1/agent/run`) and to wire it into federated apps, so treat it as stable from
+creation.
 
-> **Scope:** these 5 tools manage the agent's **stored configuration** only — they never run an
-> agent. What saves through this API is not always what the runtime will accept at run time; see
-> §Config API vs. Runtime Capability Matrix below before assuming a saved config actually works.
+The five agent tools manage the stored configuration only; none of them runs an agent. Their
+descriptions give every argument, the field shapes, the PATCH rules, and the secret redaction.
+This file covers what a saved configuration does at run time.
 
-## Tool Inventory
+## Choosing a model
 
-| Tool | What it does |
-|---|---|
-| `list_agents(page=1, page_size=20, search?)` | Paginated listing in the active ecosystem; `page_size` caps at 100 server-side; `search` is a case-insensitive substring match on `name` |
-| `get_agent(agent_id)` | Full config (`RiseAgentPoco`) by id — 404 for an unknown id, one from another environment, or a soft-deleted agent |
-| `create_agent(name, model, description?, system_prompt?, mcp_servers?, default_open_ai_tools?)` | Creates a new agent; the server assigns the `id` |
-| `update_agent(agent_id, name?, description?, system_prompt?, model?, mcp_servers?, default_open_ai_tools?)` | PATCH — only the parameters you pass are sent; see §PATCH Semantics |
-| `delete_agent(agent_id)` | Soft-delete; the id 404s on further `get_agent`/`update_agent` calls |
-
-`agent_id` is UUID-validated client-side on every tool that takes one — a malformed id fails fast
-with a `validation` error and no network call is made.
-
-## Wire Schema (`RiseAgentPoco`)
-
-Fields are camelCase on the wire:
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | GUID | server-assigned; also the `agent_id` for `POST /api/v1/agent/run` |
-| `name` | string | required, non-blank |
-| `description` | string \| null | free text |
-| `systemPrompt` | string \| null | free text; runtime caps it at 65,536 characters — see §Writing the System Prompt |
-| `model` | string | a model tier: `"fast"`, `"balanced"`, or `"advanced"`. `create_agent`/`update_agent` reject any other value client-side. See §Choosing a Model |
-| `mcpServers` | list of `McpServerConfig` | max 50 entries |
-| `defaultOpenAiTools` | list of `OpenAiToolConfig` | max 50 entries |
-| `lastModified` / `lastModifiedBy` | — | server-managed, read-only |
-
-`McpServerConfig` (one entry of `mcpServers`):
-
-| Field | Type | Notes |
-|---|---|---|
-| `name` | string | required, unique per agent |
-| `url` | string | required, absolute `http(s)://` |
-| `transport` | `"Http"` \| `"Sse"` \| `"Stdio"` | default `"Http"`. **`"Stdio"` is rejected client-side** — see Pitfalls |
-| `authType` | `"None"` \| `"Bearer"` \| `"ApiKey"` \| `"CallerToken"` | default `"None"`. `Bearer`/`ApiKey` require a non-blank `apiKey` |
-| `apiKey` | string \| null | required when `authType` is `Bearer`/`ApiKey`; always redacted to `"***"` on read |
-| `headers` | dict[str, str] \| null | any header whose **name** matches `auth\|token\|key\|secret\|password\|cookie\|credential\|signature` (case-insensitive) is redacted to `"***"` on read |
-
-`OpenAiToolConfig` (one entry of `defaultOpenAiTools`):
-
-| Field | Type | Notes |
-|---|---|---|
-| `name` | string | required; the tool name as understood by the OpenAI Responses API (e.g. `file_search`) |
-| `config` | dict \| null | tool-specific config, passed through **verbatim** — keys are NOT camelCased (e.g. `vector_store_ids` stays snake_case) |
-
-## Choosing a Model
-
-An agent names a **model tier**, not an OpenAI model. The runtime maps each tier to a model and
-a reasoning effort on every run, so the platform can move a tier to a different model without
-anyone editing the stored agents.
-
-| tier | good for |
-|---|---|
-| `fast` | simple, high-volume agents: summarizing documents, extracting fields, answering quick questions |
-| `balanced` | everyday agents that need more capability; pick this one when unsure |
-| `advanced` | demanding agents where quality matters most, such as multi-step reasoning over many tools |
-
-`create_agent` and `update_agent` accept only these three values. An OpenAI model name such as
-`gpt-6-sol` is rejected before any network call.
+An agent names a **model tier**, not an OpenAI model; the runtime maps each tier to a model and
+reasoning effort on every run. Pick `balanced` when unsure.
 
 Agents saved before tiers existed can still carry `gpt-5.6-luna`, `gpt-5.6-terra`, or
-`gpt-5.6-sol`. They keep running: `gpt-5.6-luna` runs as `fast`, and the other two run as
-`balanced`. `update_agent` doesn't accept those names, so to change such an agent's model, pass
-a tier.
+`gpt-5.6-sol`. They keep running: `gpt-5.6-luna` runs as `fast`, the other two as `balanced`.
+`update_agent` rejects those names, so never copy one from `get_agent` into an update; pass a
+tier.
 
-## Writing the System Prompt
+## Writing the system prompt
 
-`systemPrompt` is the agent's standing instructions, applied on every run. Follow prompt
-best practices when authoring one:
+`systemPrompt` is the agent's standing instructions on every run.
 
-- **Open with role and job** in one or two sentences ("You are X. You help users do Y.").
-- **Scope it explicitly** — what's in bounds, what's out, and what to refuse or hand off to a
-  human.
-- **Name the agent's tools and when to reach for each** — the runtime wires in the `mcpServers`
-  and `defaultOpenAiTools`, but it's the prompt that makes the agent pick the right one at the
-  right moment.
-- **Specify the output contract** — format, tone, and language the consuming app or user expects.
-- **Make behaviors concrete** ("always confirm with the user before creating or deleting
-  records"), not vague ("be careful").
-- **Keep it as short as clarity allows** — quality beats length, and the runtime rejects a run
-  outright when `systemPrompt` exceeds 65,536 characters.
+- Open with the role and the job in one or two sentences.
+- State the scope: what is in bounds, what is out, and what to refuse or hand to a human.
+- Name each tool and when to use it. The runtime wires in `mcpServers` and
+  `defaultOpenAiTools`; the prompt is what makes the agent pick the right one.
+- Specify the output contract: format, tone, and language.
+- Make behaviours concrete ("confirm with the user before creating or deleting records"), not
+  vague ("be careful").
+- Keep it as short as clarity allows. The runtime rejects a run when `systemPrompt` exceeds
+  65,536 characters; saving a longer one succeeds.
 
-## Lifecycle: Create → Verify → Update → Delete
+## Editing MCP servers with stored secrets
 
-```yaml
-# 1. Create
-create_agent(
-  name: "Support Bot"
-  model: "balanced"
-  system_prompt: "You help customers track their shipments."
-  mcp_servers:
-    - {name: "kb", url: "https://mcp.example.com/kb", transport: "Http",
-       authType: "CallerToken"}
-  default_open_ai_tools:
-    - {name: "web_search"}
-)
-# → ok: true, id: "11111111-1111-1111-1111-111111111111", changed: [...]
+Stored `apiKey` values and secret-looking headers read back as `"***"`. To change an agent
+that has them:
 
-# 2. Verify
-get_agent(agent_id: "11111111-1111-1111-1111-111111111111")
-# → full RiseAgentPoco — confirm name/model/systemPrompt/mcpServers landed as sent
+1. `get_agent(agent_id)`.
+2. Edit only what changes, and leave unchanged secrets as `"***"`.
+3. Send the **complete** `mcp_servers` list to `update_agent`. A non-empty list replaces the
+   whole list, so a server you leave out is dropped.
 
-# 3. Update (partial)
-update_agent(
-  agent_id: "11111111-1111-1111-1111-111111111111"
-  description: "Now covers returns too"
-)
-# → ok: true, changed: ["description"]
+`"***"` resolves to the stored secret only for a server with the same `name` **and** the same
+`url` it was read from. Renaming a server or pointing it at a new URL needs the real secret
+again.
 
-# 4. Delete
-delete_agent(agent_id: "11111111-1111-1111-1111-111111111111")
-# → ok: true, id: "11111111-1111-1111-1111-111111111111"
-# get_agent on this id now 404s (error.code: http_404)
-```
+## What saves but fails at run time
 
-`list_agents(search="Support Bot")` finds it by name at any point in the lifecycle. Its response
-uses the shared list envelope plus the API's full match count:
-`{items, returned, skip, limit, hasMore, nextSkip?, total}`. `nextSkip` is present only when
-`hasMore` is true. The *input* parameters are `page`/`page_size`, not `skip`/`limit`; to page
-forward, increment `page` rather than feeding `nextSkip` back in as `page`.
+`create_agent` and `update_agent` validate shape only. A configuration can save cleanly and
+still fail every run. A runtime check failure rejects the **whole** `POST /api/v1/agent/run`
+call up front; it never drops only the offending server or tool.
 
-**Always check `warnings[]`** after `create_agent`/`update_agent` — same rule as every other
-mutation tool in this skill (see main SKILL.md § Response Envelopes & Verification).
-
-## PATCH Semantics (`update_agent`)
-
-| Value passed | Effect |
-|---|---|
-| omitted / not passed | field left unchanged (FastMCP can't distinguish "omitted" from "explicit null", and the API treats both the same) |
-| `""` on `description` / `system_prompt` | clears the stored value |
-| `[]` on `mcp_servers` / `default_open_ai_tools` | clears the whole list |
-| non-empty list on `mcp_servers` / `default_open_ai_tools` | **replaces the whole list** — no per-item merge or append; include every server/tool you want to keep |
-| non-blank `name` | overwrites; a blank value is rejected client-side |
-| `model` tier | overwrites; anything other than `"fast"`/`"balanced"`/`"advanced"` is rejected client-side |
-
-## Secret Redaction & Round-Trips
-
-- `apiKey` and any header **value** whose header **name** matches
-  `auth|token|key|secret|password|cookie|credential|signature` (case-insensitive) come back as the
-  literal string `"***"` from `get_agent`, `list_agents`, `create_agent`, and `update_agent` — there
-  is no way to read a stored secret back through these tools.
-- `create_agent` **rejects** a literal `"***"` for `apiKey` or a redacted header value outright —
-  there's nothing to round-trip on create.
-- `update_agent` **accepts** `"***"` — the API resolves it back to the currently-stored secret, but
-  only for an MCP server with the **same `name`** it was read from. Renaming a server, or sending
-  `"***"` for a brand-new server, is rejected.
-- Practical pattern: `get_agent` → edit only the fields that change → send the full `mcpServers`
-  list back with unchanged secrets left as `"***"` → `update_agent`.
-
-## Config API vs. Runtime Capability Matrix
-
-`create_agent`/`update_agent` validate shape — required fields, enums, URL format, list caps — but
-do **not** enforce everything the agent runtime needs to actually execute a run. A config can save
-cleanly and still fail when it's run.
-
-| Capability | Config API (`create_agent`/`update_agent`) | Agent runtime (`POST /api/v1/agent/run`) |
+| Setting | Saves | Runs |
 |---|---|---|
-| `transport` | `"Http"` / `"Sse"` accepted; **`"Stdio"` rejected client-side** by the MCP tools (the runtime can't run Stdio servers yet) | same restriction |
-| `authType` | `"None"` / `"Bearer"` / `"ApiKey"` / `"CallerToken"` all accepted and saved | **only `"None"` and `"CallerToken"` are honored.** A saved `"Bearer"`/`"ApiKey"` MCP server fails the **entire run** — stored secrets are always redacted on read, so the runtime has no way to resolve them yet |
-| `CallerToken` reach | not checked | forwards the signed-in user's own token to the MCP server's host; the runtime only allows this to a server-configured allowlist of vetted hosts, and blocks private/loopback/link-local URLs outright |
-| `model` | only `"fast"` / `"balanced"` / `"advanced"`; anything else is rejected client-side | the three tiers, plus the legacy `gpt-5.6-luna`/`gpt-5.6-terra`/`gpt-5.6-sol` on agents saved before tiers existed. Any other value, including a current OpenAI model name, is rejected at validation and fails the run |
-| `systemPrompt` length | any length accepted and saved | rejected at run time above 65,536 characters |
-| `defaultOpenAiTools[].name` | any non-blank string | must be one of `file_search`, `web_search`, `code_interpreter`, `image_generation` — anything else fails the run |
-| `file_search` config | `config` dict accepted as-is, no shape check | requires a non-empty `config.vector_store_ids` list (snake_case key, passed through verbatim); get real ids from `create_vector_store` (`references/managing-vector-stores.md`). Missing the list fails the run. Put ids here only for a corpus every user of this agent should search; a per-conversation or per-work-item corpus goes on `vector_store_ids` in the run call instead, not on the agent config |
-| `mcpServers` count | up to 50 | server-configured cap (default 5) |
-| `defaultOpenAiTools` count | up to 50 | server-configured cap (default 8) |
+| `authType` | `None`, `Bearer`, `ApiKey`, `CallerToken` | only `None` and `CallerToken`. A saved `Bearer` or `ApiKey` server fails the entire run, because the runtime cannot read the redacted secret |
+| `CallerToken` reach | not checked | forwards the signed-in user's own token, only to hosts on a server-configured allowlist; private, loopback, and link-local URLs are blocked |
+| `model` | the three tiers | the three tiers plus the legacy `gpt-5.6-*` names on old agents |
+| `systemPrompt` length | any | up to 65,536 characters |
+| `defaultOpenAiTools[].name` | any non-blank string | `file_search`, `web_search`, `code_interpreter`, `image_generation` only |
+| `file_search` `config` | any dict | needs a non-empty `config.vector_store_ids` (snake_case, passed through verbatim) |
+| `mcpServers` count | up to 50 | a server-configured cap, 5 by default |
+| `defaultOpenAiTools` count | up to 50 | a server-configured cap, 8 by default |
 
-A runtime validation failure rejects the **whole** `POST /api/v1/agent/run` call up front — it is
-not a partial or best-effort degradation of just the offending server or tool.
+## Where a vector store id goes
 
-## Pitfalls
-
-1. **`"Stdio"` transport is always rejected** — client-side, before any network call, on both
-   `create_agent` and `update_agent`. The agent runtime can't run Stdio MCP servers yet; use
-   `"Http"` or `"Sse"`.
-2. **`"***"` on `create_agent` is rejected** — the redacted-secret sentinel only round-trips
-   through `update_agent`, and only for an MCP server with the same `name` it was read from.
-3. **A non-empty `mcp_servers` / `default_open_ai_tools` list on `update_agent` REPLACES the whole
-   list** — there is no merge. `get_agent` first, edit in memory, and send the complete list back
-   (with unchanged secrets left as `"***"`), or you'll silently drop servers/tools you meant to
-   keep.
-4. **`Bearer`/`ApiKey` MCP servers save fine but fail the agent at run time** — the config API
-   happily persists them; `POST /api/v1/agent/run` rejects the whole run the moment it loads a
-   server with either auth type, because the runtime can never see the redacted secret. Use
-   `"CallerToken"` (forwards the caller's own token) or `"None"` for a server the agent must
-   actually reach today.
-5. **`file_search` needs `config.vector_store_ids`** — a `defaultOpenAiTools` entry named
-   `file_search` with no `vector_store_ids` (or an empty list) in its `config` saves fine and fails
-   at run time. The key is snake_case inside `config` — the dict passes through verbatim, not
-   camelCased like the rest of the wire format. Get real ids from `create_vector_store`
-   (`references/managing-vector-stores.md`); every user of this agent searches the same store
-   through this config, so reserve it for a genuinely shared corpus. A per-conversation or
-   per-work-item corpus belongs on `vector_store_ids` in the run call, not here.
-6. **`model` takes a tier, not a model name.** `create_agent`/`update_agent` reject
-   `"gpt-6-sol"`-style names outright. Don't copy a `gpt-5.6-*` value from `get_agent` into
-   `update_agent`: those legacy names still run, but they can't be written back. Pass a tier
-   instead.
-7. **Always check `warnings[]`** — same rule as every other mutation tool in this skill. A
-   `dropped_property`/`dropped_item` warning means part of your `mcpServers`/`defaultOpenAiTools`
-   request did not persist.
-8. **`list_agents` takes `page`/`page_size`, not `skip`/`limit`** — its response is
-   `{items, returned, skip, limit, hasMore, nextSkip?, total}`, with `nextSkip` only when another
-   page exists. Increment `page` to move forward; don't recompute `skip` yourself.
-9. **`agent_id` must be a real UUID** — `get_agent`/`update_agent`/`delete_agent` validate the
-   format client-side and fail fast (`validation` error, no network call) on anything else, so a
-   copy-paste mistake is caught immediately instead of surfacing as a confusing 404.
+Put a store id in the agent's `file_search` `config.vector_store_ids` only for a corpus every
+user of the agent should search. A corpus for one conversation or one work item goes on
+`vector_store_ids` in the run call instead. Create stores with `create_vector_store`; see
+`references/managing-vector-stores.md`.

@@ -34,7 +34,7 @@ Flow (workflow template)
 
 Rise-X workflows are **multi-party permissioned forms** — each task is a handover between parties. The golden rule: **never create consecutive tasks for the same party** — use sections within one task instead. After each task, the next party is automatically notified.
 
-For the full design guide with examples, component selection strategy, and asset flow patterns, see `references/building-workflows.md`.
+For the full design guide with examples and asset flow patterns, see `references/building-workflows.md`. To pick a component type, see `references/layouts-and-components.md` § Component Types Reference.
 
 ## Pre-Flight Checklist
 
@@ -101,9 +101,9 @@ error: {code, message, hint}      # failures (code like http_403, validation)
 4. Error envelopes carry a `code` (`http_403`, `validation`, `transient`, …)
    and usually a `hint` with the fix. A **request-side** `validation` error
    (caught before sending) means nothing was sent — fix and retry. An
-   **API-side** 4xx can still *partially* persist (pitfall #16, the
-   `add_components` partial-failure case, in `references/common-pitfalls.md`;
-   likewise the attachments-column "400 that commits"): when
+   **API-side** 4xx can still *partially* persist (the `add_components`
+   partial-failure case, in `references/layouts-and-components.md`;
+   likewise `update_component`, which can return 400 after committing): when
    a write error is ambiguous, follow the hint and verify the target entity
    (`get_layout` / `get_work`) before assuming nothing changed.
 5. Paginated lists (`list_work`, `list_assets`) return
@@ -134,8 +134,8 @@ keys on update) and verifies the saved item in its response.
 5. `publish_flow(draft_flow_id)` → publishes flow AND all linked layouts; returns the new published id + `ids.flowOriginId`
 
 ### Creating a new flow:
-1. `create_flow(...)` → flow + layouts already in draft mode; response carries the steps with layout ids
-2. `add_step(...)` → response includes `newStep.defaultSectionId` — pass it straight to `add_components` as `parent_section_id` (no `get_layout` round-trip)
+1. `create_flow(...)` → flow + one scaffolded step with its layout, already in draft mode; response carries the steps with layout ids
+2. `rename_step(...)` the scaffolded step for the first phase; `add_step(...)` for each further step → response includes `newStep.defaultSectionId` — pass it straight to `add_components` as `parent_section_id` (no `get_layout` round-trip)
 3. Edit components directly
 4. `publish_flow(flow_id)`
 
@@ -182,44 +182,32 @@ warning. Canonical names you'll use most: `input-text`, `input-select`,
 | Configure timesheet-table components | `references/timesheet-table.md` |
 | Configure relationships between work items or assets | `references/relationships.md` |
 | Look up schemas or compare across ecosystems | `references/schemas-and-compare.md` |
-| Create, edit, or delete performance dashboards (sections, containers, charts, metric-cards, aggregated `reportData`) | `references/dashboards.md` |
-| **Find / filter / search / sort works, flows, companies, or assets by ANY condition** (status, date, assignee, `data.*` field value, etc.) — never use `list_*` + client-side filtering | `references/advanced-search.md` |
-| Discover a flow's / asset type's `data.*` paths before composing a Work or Asset search | `references/advanced-search.md` |
+| Create, edit, or delete performance dashboards (draft and id rules, build order, filters, sections, containers, grid columns) | `references/dashboards.md` |
+| Build or fix an aggregated dashboard: a tile has `reportData`, the dashboard has a `dataSource`, or a chart sums inside a sub-array | `references/dashboards-aggregated.md` (after `references/dashboards.md`) |
+| Configure a chart or metric card beyond `label` and `width`, or fix a tile that shows blank, `NO DATA`, `0`, `Unknown`, or `undefined` | `references/dashboards-charts.md` (after `references/dashboards.md`) |
+| **Find / filter / search / sort works, flows, companies, or assets by ANY condition** (status, date, assignee, `data.*` field value, etc.) — never use `list_*` + client-side filtering | No reference needed for a plain search: the `search_works` / `search_assets` / `search_flows` / `search_companies` descriptions carry the field keys, operators, and projection rules, and `get_flow_data_schema` gives the `data.*` paths |
+| Compose a search that takes several calls (paging, counting by a field, date ranges, substring match, several flows at once), or explain a search that returned surprising rows | `references/advanced-search.md` |
 | Configure CSV / report exports of work data (incl. expanding data-grid rows into one row each) | `references/exports.md` |
 | Configure data pipelines / flow rules (auto data operations on watched-data change — set/copy/map paths, alerts, dates) | `references/pipelines.md` |
 | Deploy a federated-app bundle, release a new app version, list/update/delete apps in the registry, or inspect an app's dependencies (the flows, asset types, and agents it uses) (`request_bundle_upload` → PUT zip, or `upload_bundle` where the runtime has it, → `deploy_app`; `list_apps`, `get_app`, `update_app`, `delete_app`) | `references/managing-apps.md` |
-| Configure, import, inspect, or test an integration (external API + endpoints called from `JsonEndPoint` activities) | `references/integrations.md` for read-only inspection (domain shape, lifecycle, pitfalls). For any *mutating* integration call (`update_integration`, `update_integration_endpoint`, `import_integrations`, `delete_integration`, `delete_integration_endpoint`, `test_integration_endpoint`, `test_integration_endpoint_in_flow`), load `references/integration-authoring.md` BEFORE calling the tool — it enforces the slot-filling + secrets protocol. Vendor/auth worked recipes (API key, Bearer, OAuth2 client credentials, webhooks, Postman imports) live in `references/integration-patterns.md`. |
+| Configure, import, inspect, or test an integration (external API + endpoints called from `JsonEndPoint` activities) | `references/integrations.md`. Load it BEFORE any *mutating* integration call (`update_integration`, `update_integration_endpoint`, `import_integrations`, `delete_integration`, `delete_integration_endpoint`, `test_integration_endpoint`, `test_integration_endpoint_in_flow`): it holds the authoring, secrets, import-repair, and delete protocol. Vendor/auth worked recipes (API key, Bearer, OAuth2 client credentials, webhooks) live in `references/integration-patterns.md`. |
 | Create, list, update, or delete AI agent configurations (name, system prompt, model, MCP servers, hosted OpenAI tools) | `references/managing-agents.md` |
 | Create, upload files to, check, renew, rename, rebuild, or delete a vector store; wire a corpus into `file_search` or an agent run (vector store, file search, upload documents for an agent, corpus) | `references/managing-vector-stores.md` |
-| Look up a tool's exact name, signature, or per-tool caveats | `references/tool-inventory.md` |
-| Diagnose an error, a warning, or an edit that didn't take effect | `references/troubleshooting.md` |
-| Check the numbered pitfall list before a first write, or after a surprising result | `references/common-pitfalls.md` |
+| Upload, list, update, or delete attachments; create or manage routines; create or delete inbound email addresses | No reference file: the tool descriptions carry the rules (`request_attachment_upload`, `upload_attachment`, `list_attachments`; `create_routine`, `update_routine`; `create_email_address`) |
+| Look up a tool's exact name, arguments, or per-tool caveats | The tool's own description |
+| Diagnose an error, a warning, or an edit that didn't take effect; check the cross-call traps before a first write | `references/common-pitfalls.md` |
 
 ## Common Pitfalls
 
-61 traps with the fix for each, in 68 numbered slots (7 are retired stubs kept so
-the numbering stays stable — other references cite these entries by number) —
-draft/publish lifecycle, ID confusion, component and dashboard authoring,
-search/filter semantics, exports, card layouts:
-`references/common-pitfalls.md`. Read it before the first write of a session;
-re-check the cited entry whenever a mutation warns or a tile renders empty.
+`references/common-pitfalls.md` holds the traps that take more than one tool to
+explain (id kinds, drafting a layout that is already a draft, concurrent
+work-data writes, guessing `Submit`, works that keep their creation-time flow
+version, date field names, writes to an unmodeled path) and a symptom index
+that routes an error, a warning, or an empty result to the file that owns the
+fix. Read it before the first write of a session, and go there the moment a
+call fails or a change doesn't show up in the UI. A trap that one tool's
+description states is not repeated there.
 
-**Irreversible — read the entry before you call either:**
-`replace_section_components` permanently deletes every component you omit, so
-send the full keep-set (pitfall #6); `delete_integration` is a physical delete
-with no undo.
-
-## Troubleshooting
-
-Symptom → cause → fix table for every known error (403 after drafting, "Step not
-found", `no_ecosystem`, empty `list_work`, `NO DATA` charts, blank workboard):
-`references/troubleshooting.md`. Go there the moment a call fails or a change
-doesn't show up in the UI.
-
-## Tool Inventory
-
-All 97 tools grouped by category (Session, Flow, Flow Structure, Flow Config,
-Columns, Layout, Component, Schema, Compare, Work, Search, Asset, Apps,
-Dashboard, Integration, Agent, Vector Store), with signatures and per-tool caveats:
-`references/tool-inventory.md`. Load it when you need an exact tool name or
-argument shape.
+**Irreversible:** `replace_section_components` permanently deletes every
+component you omit, so send the full keep-set; `delete_integration` is a
+physical delete with no undo.

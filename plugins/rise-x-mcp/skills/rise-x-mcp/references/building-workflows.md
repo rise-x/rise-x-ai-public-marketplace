@@ -1,32 +1,24 @@
 # Building Workflows
 
-This is the comprehensive guide for constructing a flow from scratch, including orchestrated agent workflow for building from user requirements.
+The guide for building a flow from scratch: the build order, the design rules, and the traps between calls. To change an existing flow, see `references/managing-flows.md`.
 
 ## Contents
 
 - [Orchestration Flow](#orchestration-flow)
 - [Two Flow Types](#two-flow-types)
-  - [Work Flow (multi-step process)](#work-flow-multi-step-process)
-  - [Asset Flow (single-step entity)](#asset-flow-single-step-entity)
 - [Multi-Party Workflow Design Principles](#multi-party-workflow-design-principles)
   - [Task = Party Handover](#task--party-handover)
   - [Step = Process Phase](#step--process-phase)
   - [Section = Logical Grouping](#section--logical-grouping)
   - [Auto-Notifications](#auto-notifications)
   - [Example — Marine Bunkering (3-party workflow)](#example--marine-bunkering-3-party-workflow)
-  - [Example — Asset Type: Vessel](#example--asset-type-vessel)
-  - [Component Selection Strategy](#component-selection-strategy)
 - [End-to-End Construction Sequence](#end-to-end-construction-sequence)
   - [Phase 1: Flow Structure](#phase-1-flow-structure)
   - [Phase 2: Layout & Components (for each task)](#phase-2-layout--components-for-each-task)
   - [Phase 3: Actions (for multi-party or branching flows)](#phase-3-actions-for-multi-party-or-branching-flows)
   - [Phase 4: Grid Columns (optional but recommended)](#phase-4-grid-columns-optional-but-recommended)
   - [Phase 5: Publish](#phase-5-publish)
-- [Component Hierarchy Rule (Critical)](#component-hierarchy-rule-critical)
-- [Minimum Component Dict](#minimum-component-dict)
 - [Building an Asset Flow](#building-an-asset-flow)
-- [Discovering Component Properties](#discovering-component-properties)
-- [Tips](#tips)
 
 ## Orchestration Flow
 
@@ -49,45 +41,32 @@ User: "build a new inspection workflow" or "create an asset flow for vessels"
         +-- Phase 2: BUILD STRUCTURE
         |     1. create_flow(flow_resource_type, update_flow_flags)  -- new flow, already in draft mode
         |     2. update_flow_properties(flow_id, {displayName, description, icon})
-        |     3. add_step(flow_id, position, step_name, task_name)  -- repeat per step
-        |     4. get_flow_steps(flow_id)  -- capture stepIds, taskIds, layoutIds
+        |     3. rename_step the scaffolded first step, add_step for the rest
+        |     4. get_flow_steps(flow_id)  -- capture ids, layoutIds
         |
         +-- Phase 3: BUILD LAYOUTS
         |     For each task (using layoutId from get_flow_steps in Phase 2):
         |     5. update_component(layoutId, sectionId, {label, properties})  -- label the section
         |     6. add_components(layoutId, [{fields...}], parent_section_id)  -- add fields
-        |     Repeat for each task's layout.
-        |     NOTE: DO NOT call create_layout_draft here. create_flow already
-        |     created layout drafts for all tasks. The layoutIds from get_flow_steps
-        |     ARE the draft layout IDs. Calling create_layout_draft creates orphan
-        |     drafts that won't be published by publish_flow.
+        |     DO NOT call create_layout_draft here (see "Phase 2: Layout & Components" under End-to-End Construction Sequence).
         |
         +-- Phase 4: CONFIGURE ACTIONS (if multi-party or branching)
-        |     For steps that need more than a simple "Submit":
-        |     7. get_flow_step(flow_id, step_id)  -- find default action ID
-        |     8. manage_action(flow_id, step_id, "update", action_id=..., action_data={...})  -- customize Submit
-        |     9. manage_action(flow_id, step_id, "add", action_data={...})  -- add Reject/Send Back/etc.
-        |     See "Designing Actions for Multi-Party Steps" below.
+        |     7. get_flow_step(flow_id, id)  -- find default action ID
+        |     8. manage_action(..., "update", ...)  -- customize Submit
+        |     9. manage_action(..., "add", ...)  -- add Reject/Send Back/etc.
         |
         +-- Phase 5: CONFIGURE GRID COLUMNS (optional)
-        |     Expose key data fields in the work grid/kanban view:
-        |     10. manage_columns(flow_id, "add", column={displayName, key, valuePaths, ...})
-        |     See "Configuring Grid Columns" below.
+        |     10. manage_columns(flow_id, "list"), then adjust
         |
         +-- Phase 6: PUBLISH
         |     11. publish_flow(flow_id)  -- publishes flow + all layouts
-        |     12. get_flow_config(flow_id)  -- verify published state
+        |     12. get_flow_config(<new id from publish_flow>)  -- verify published state
 ```
 
 ## Two Flow Types
 
-### Work Flow (multi-step process)
-Standard business process with multiple steps, each representing a phase.
-Example: Inspection -> Review -> Approval -> Closure
-
-### Asset Flow (single-step entity)
-Single step for creating/editing master data entities (companies, vessels, products).
-After building and publishing, the flow appears in `search_flows` (flowResourceType=Entity) and `list_asset_types()`.
+- **Work flow (multi-step process):** a business process with several steps, each a phase. Example: Inspection -> Review -> Approval -> Closure.
+- **Asset flow (single-step entity):** one step for creating/editing master data entities (companies, vessels, products). After publishing, it appears in `search_flows` (flowResourceType=Entity) and `list_asset_types()`.
 
 ## Multi-Party Workflow Design Principles
 
@@ -118,7 +97,7 @@ Steps are Kanban columns that represent distinct phases. Tasks within a step mus
 
 ### Section = Logical Grouping
 
-Sections group related components within a task (e.g. "Order Details", "Shipping Details"). Use sections instead of extra tasks when the same party fills in logically distinct groups of fields.
+Sections group related components within a task (e.g. "Order Details", "Shipping Details"). Use sections instead of extra tasks when the same party fills in logically distinct groups of fields. To pick component types, see `references/layouts-and-components.md` § Component Types Reference.
 
 ### Auto-Notifications
 
@@ -166,81 +145,35 @@ Grid Columns (key data to surface):
 
 **Action design rationale:** Port Authority's Approve/Reject on documentation inspection is the critical gate — rejection routes all the way back to planning. The Ship Owner's "Report Issue" during bunkering uses `Self` routing so the step stays active while the issue is handled. Cancel Order is available early to abort before resources are committed.
 
-### Example — Asset Type: Vessel
-
-```
-Asset: Vessel
-Purpose: Represents a ship or marine vessel in operational workflows.
-
-Sections:
-  1. Identification
-     - Vessel Name (text, required)
-     - IMO Number (text, required)
-     - Call Sign (text)
-     - Flag State (select, required)
-  2. Vessel Characteristics
-     - Vessel Type (select: tanker, bulk carrier, container ship)
-     - Deadweight Tonnage (number)
-     - Length Overall (number, meters)
-  3. Ownership & Contacts
-     - Owner Company Name (text, required)
-     - Technical Manager (text)
-     - Primary Contact Email (email, required)
-```
-
-### Component Selection Strategy
-
-Always choose the best-fit component type for each field:
-
-| Component | Use for |
-|---|---|
-| `input-text` | Short text or numeric inputs (set `inputType: "number"` for numbers) |
-| `input-select` | Single/multi-select from predefined options |
-| `date-picker` | Date, date-range, or date-time inputs |
-| `user-invitation` | Selecting users or groups (use `defaultValue: "initiator"` for current user) |
-| `search-things` | Searching and selecting assets/entities |
-| `attachments` | File uploads and documents |
-| `data-grid` | Tabular data with multiple rows and columns |
-| `richtext-input` | Long-form text with formatting |
-| `signature` | Handwritten signature capture |
-| `finance-section` | Financial data with automatic calculations |
-| `banner` | Informational/instructional content (should not be sole component in section) |
-| `product-toggle-switch` | Boolean on/off inputs |
-
-See `references/layouts-and-components.md` for full components list
-
-**Prefer data-grid over repeated fields.** Instead of "Name 1", "Address 1", "Name 2", "Address 2", use a single data-grid with "Name" and "Address" columns.
-
 ## End-to-End Construction Sequence
 
 ### Phase 1: Flow Structure
 
-**New flow:** Use `create_flow()` to create from scratch — it returns a draft flow already in draft mode.
-**Existing flow:** Use `create_flow_draft(published_flow_id)` — it returns a **new draft flow ID**.
+`create_flow()` returns a flow already in draft mode; do not call `create_flow_draft` on it. All later calls use the id `create_flow` returned.
 
-**CRITICAL:** All subsequent operations MUST use the draft flow ID returned by `create_flow` or `create_flow_draft`.
+With `update_flow_flags="AddAll"` (the default), `create_flow` already creates one step with a task, a layout, and a default section. Rename that step for the first phase and add the others with `add_step`:
 
 ```
-1. flow = create_flow("Work", "AddAll")                # new flow — already in draft mode
-   # OR: draft = create_flow_draft(existing_id)         # existing flow — capture draft ID
+1. flow = create_flow("Work", "AddAll", display_name="Vessel Inspection")
 2. update_flow_properties(flow_id, {
-     "displayName": "Vessel Inspection",
      "description": "Standard vessel inspection workflow",
      "icon": {"shape": "SearchOutlined", "color": "#2196F3"}
    })
-3. add_step(flow_id, 0, "Inspection", "Inspection Details")
-4. add_step(flow_id, 1, "Review", "Review Task")
-5. add_step(flow_id, 2, "Approval", "Approval Task")
+3. steps = get_flow_steps(flow_id)
+   rename_step(flow_id, steps[0]["id"], "Inspection")
+   rename_step(flow_id, steps[0]["id"], "Inspection Details", target="task")
+4. add_step(flow_id, -1, "Review", "Review Task")
+5. add_step(flow_id, -1, "Approval", "Approval Task")
 6. get_flow_steps(flow_id)   # capture layoutIds for each task
 ```
 
-Response from `get_flow_steps` provides the layoutId for each task — you need these for Phase 2.
+Display names derive camelCase internal names: `"Quality Review"` becomes `qualityReview`. `ByStepName` routing and column `valuePaths` use these names.
 
 **ID Mapping Table — Which ID to use for each tool:**
 
 Every `get_flow_steps` row carries several GUIDs (`id`, `stepId`, `taskId`,
-`actionSetId`, `layoutId`). As of server 1.2.0 most step tools accept ANY of
-the row's GUIDs and resolve it for you:
+`actionSetId`, `layoutId`). Most step tools accept ANY of the row's GUIDs and
+resolve it for you:
 
 | Tool | ID parameter | Where to find it |
 |---|---|---|
@@ -250,38 +183,36 @@ the row's GUIDs and resolve it for you:
 | `move_step` | `stepId` field (steps) / `taskId` field (tasks) — move is the ONE endpoint keyed on these | `get_flow_steps` |
 | Layout operations | `layoutId` | `get_flow_steps` → `layoutId` |
 
-If a step tool can't match the GUID you passed, the error now lists the
+If a step tool can't match the GUID you passed, the error lists the
 flow's steps (`steps: [{id, stepName, stepDisplayName}]`) — pick from there
 instead of re-fetching.
 
 ### Phase 2: Layout & Components (for each task)
 
-**CRITICAL — Do NOT call `create_layout_draft` here.** When `create_flow` (new flow) or `create_flow_draft` (existing flow) runs, it automatically creates draft copies of all associated layouts. The `layoutId` values from `get_flow_steps` ARE already draft IDs. Calling `create_layout_draft` on them creates **orphan drafts** that are NOT linked to the flow — `publish_flow` will publish the flow's own (empty) layout drafts, not your orphans.
+**CRITICAL — Do NOT call `create_layout_draft` here.** `create_flow` (new flow) creates its layouts as drafts, so the `layoutId` values from `get_flow_steps` ARE already draft IDs. Calling `create_layout_draft` on a layout that is already a draft creates an **orphan draft** that is NOT linked to the flow — `publish_flow` will publish the flow's own (empty) layout draft, not your orphan. For an existing flow, after `create_flow_draft`, check each layout's `publishStatus` first: see `references/managing-flows.md`.
 
 ```
-# Each layout already has a default empty section. Get its ID from the response
-# of get_flow_steps or get_layout(layoutId, format="components").
+# Each layout already has a default empty section. Get its ID from
+# get_layout(layoutId, format="summary"); add_step returns it as defaultSectionId.
 
-# Update the existing section label:
-7.  update_component(layoutId_from_step1, sectionId, {
-      "label": "Vessel Information",
-      "properties": {"showTitle": true}
-    })
+# Label the existing section:
+update_component(layoutId, sectionId, {
+  "label": "Vessel Information",
+  "properties": {"showTitle": true}
+})
 
-# Add field components into the section (use appropriate col widths for a presentable layout):
-8.  add_components(layoutId_from_step1, [
-      {"component": "input-text", "label": "Vessel Name", "properties": {"width": "col-6"}},
-      {"component": "input-text", "label": "IMO Number", "properties": {"width": "col-6"}},
-      {"component": "date-picker", "label": "Inspection Date", "properties": {"width": "col-6"}},
-      {"component": "input-select", "label": "Vessel Type", "properties": {"width": "col-6"}},
-      {"component": "richtext-input", "label": "Findings"},
-      {"component": "attachments", "label": "Photos"}
-    ], parent_section_id=section_id)
-
-# Repeat steps 7-8 for each task's layout
+# Add fields into the section (use col widths for a presentable layout):
+add_components(layoutId, [
+  {"component": "input-text", "label": "Vessel Name", "properties": {"width": "col-6"}},
+  {"component": "input-text", "label": "IMO Number", "properties": {"width": "col-6"}},
+  {"component": "date-picker", "label": "Inspection Date", "properties": {"width": "col-6"}},
+  {"component": "input-select", "label": "Vessel Type", "properties": {"width": "col-6", "options": ["Tanker", "Bulk Carrier"]}},
+  {"component": "richtext-input", "label": "Findings"},
+  {"component": "attachments", "label": "Photos"}
+], parent_section_id=sectionId)
 ```
 
-**NOTE:** The dropdown component is `input-select`, NOT `select`. Using `select` creates a component with null properties. Always use `"options": ["A", "B"]` (string array only). Do NOT use `selectOptions` or put objects in `options` — see `references/layouts-and-components.md` for details.
+Repeat for each task's layout. Widths, visibility rules, and component traps are in `references/layouts-and-components.md`.
 
 ### Phase 3: Actions (for multi-party or branching flows)
 
@@ -293,33 +224,6 @@ Steps with decision points need more than the default "Submit" button. Think abo
 - Any step where work can be cancelled → add Cancel action with `TerminateFlow`
 - You want distinct status labels in the grid → set `completedName`/`completedColor` on actions
 
-**How to configure:**
-
-```
-# 1. Get the step details to find the default Submit action ID
-step_details = get_flow_step(draft_flow_id, step_id)
-submit_action_id = step_details["actions"][0]["id"]
-
-# 2. Customize the default Submit to show "Approve" with a green status
-manage_action(draft_flow_id, step_id, "update", action_id=submit_action_id, action_data={
-  "displayName": "Approve",
-  "completedName": "Approved",
-  "completedColor": "success"
-})
-
-# 3. Add a Reject action that routes back to the requester step
-manage_action(draft_flow_id, step_id, "add", action_data={
-  "name": "Reject",
-  "displayName": "Reject",
-  "eventName": "reject",
-  "actionTypeName": "Submit",
-  "color": "error",
-  "completedName": "Rejected",
-  "completedColor": "error",
-  "next": [{"nextStep": "orderRequest", "nextStepType": "ByStepName"}]
-})
-```
-
 **Action design guidelines for multi-party workflows:**
 
 | Step pattern | Recommended actions |
@@ -330,126 +234,37 @@ manage_action(draft_flow_id, step_id, "add", action_data={
 | Final sign-off / closure | Complete (`Next`) only |
 | Any step where the initiator might abort | Add Cancel with `skipValidation: true` and `color: "error"` |
 
-See `references/actions-and-statuses.md` for full action property reference and routing types.
+The calls, a worked approval example, and the routing types are in `references/actions-and-statuses.md`.
 
 ### Phase 4: Grid Columns (optional but recommended)
 
-**IMPORTANT — Auto-generated columns:** When components are added to layouts, columns are **automatically generated** for most field types. Before manually adding columns:
-1. Call `manage_columns(flow_id, "list")` to see what already exists
-2. Check for your field's `key` — it's likely already there
-3. Only use `manage_columns(flow_id, "add", column={...})` for columns not auto-generated, or to customize `valuePaths`
-4. Use `manage_columns(flow_id, "update", ...)` to adjust visibility (`defaultOn: false`) or position on existing columns
-5. Adding a column with a duplicate `key` will fail with a 400 error
-
-In practice, the main column work is **hiding secondary columns** (rich text, notes, attachments) and **reordering** the important ones — not creating new ones.
-
-The work grid is the primary view where users track all active work items. By default it shows Status, Display Name, Work Code, Created By, Last Modified, and Assigned Users. Adding **custom columns** that surface key business data makes the grid immediately useful.
-
-**What makes a good column:** data that users need to scan across many work items without opening each one — identifiers, amounts, dates, statuses, names.
-
-```
-# Add columns that surface key data from the form fields
-manage_columns(draft_flow_id, "add", column={
-  "displayName": "Vessel Name",
-  "key": "vesselName",
-  "valuePaths": ["$.inspectionDetails.vesselName"],
-  "defaultOn": true,
-  "colPosition": 2
-})
-
-manage_columns(draft_flow_id, "add", column={
-  "displayName": "Inspection Date",
-  "key": "inspectionDate",
-  "valuePaths": ["$.inspectionDetails.inspectionDate"],
-  "defaultOn": true,
-  "colPosition": 3
-})
-```
-
-**Column design guidelines:**
-
-| Data type | Column tip |
-|---|---|
-| Key identifiers (order #, vessel name, ref code) | `defaultOn: true`, pin left if critical |
-| Dates (due date, inspection date) | `defaultOn: true`, helps users sort by urgency |
-| Amounts / totals | `defaultOn: true`, consider pinning right |
-| Party names (supplier, buyer) | Useful for filtering in multi-party flows |
-| Secondary details (notes, descriptions) | `defaultOn: false` — available but not shown by default |
-
-**`valuePaths` format:** JSON paths starting with `$` that match the form field's `dataPath`. The path follows the pattern `$.{stepCamelCase}.{fieldCamelCase}`. For example, a field "Vessel Name" in step "Inspection Details" has path `$.inspectionDetails.vesselName`.
+Adding components auto-generates most columns, so list them before adding any. The main column work is hiding secondary columns and reordering the important ones. See `references/actions-and-statuses.md` § Grid Columns.
 
 ### Phase 5: Publish
 
-```
-10. publish_flow(draft_flow_id)    # publishes flow + all layouts — use DRAFT ID
-```
-
-## Component Hierarchy Rule (Critical)
-
-```
-Layout
-  -> Section  (parentId = "00000000-0000-0000-0000-000000000000")
-     -> Fields (parentId = section's ID)
-```
-
-- Every non-section component **MUST** have a `parentId` pointing to a section
-- Sections use the null GUID as their parentId
-- Two ways to handle parenting:
-  1. Add section first, then fields with `parent_section_id` parameter
-  2. Include section + fields in one `add_components` call (fields auto-parent to first section in batch)
-
-## Minimum Component Dict
-
-```json
-{"component": "input-text", "label": "Field Name"}
-```
-IDs are auto-generated. Use `get_schema("components", "input-text")` to discover all available properties.
+`publish_flow(draft_flow_id)` publishes the flow and all its layouts. Use the draft id; the result carries the new published id.
 
 ## Building an Asset Flow
 
 Asset flows are single-step. After publishing, they appear in `search_flows` (flowResourceType=Entity) and `list_asset_types()`:
 
 ```
-1. flow = create_flow("Entity", "AddAll")        # already in draft mode
+1. flow = create_flow("Entity", "AddAll", display_name="Vessel")   # already in draft mode
 2. update_flow_properties(flow_id, {
-     "displayName": "Vessel",
      "description": "Vessel master data",
      "icon": {"shape": "DirectionsBoatOutlined", "color": "#00BCD4"}
    })
-3. add_step(draft_flow_id, 0, "Vessel Details", "Vessel Form")
-4. get_flow_steps(draft_flow_id)                 # get layoutId (already a draft)
-5. update_component(layoutId, sectionId, {"label": "General Information", "properties": {"showTitle": true}})
-6. add_components(layoutId, [
+3. steps = get_flow_steps(flow_id)               # the scaffolded step; its layoutId is already a draft
+   rename_step(flow_id, steps[0]["id"], "Vessel Details")
+4. update_component(layoutId, sectionId, {"label": "General Information", "properties": {"showTitle": true}})
+5. add_components(layoutId, [
      # Use layoutId directly — do NOT call create_layout_draft
      {"component": "input-text", "label": "Vessel Name", "properties": {"width": "col-6"}},
      {"component": "input-text", "label": "IMO Number", "properties": {"width": "col-6"}},
-     {"component": "input-select", "label": "Flag State", "properties": {"width": "col-6"}},
+     {"component": "input-select", "label": "Flag State", "properties": {"width": "col-6", "options": ["Panama", "Liberia"]}},
      {"component": "date-picker", "label": "Built Date", "properties": {"width": "col-6"}}
    ], parent_section_id=sectionId)
-7. publish_flow(draft_flow_id)                   # use DRAFT ID
+6. publish_flow(flow_id)                         # use the draft id
 ```
 
 Assets can then be managed via `create_asset`, `edit_asset`, etc. See `references/managing-assets.md`.
-
-## Discovering Component Properties
-
-Before adding complex components, check their schemas:
-
-```
-get_schema("components")                       # list all available types
-get_schema("components", "search-things")      # see all properties for search-things
-get_schema("components", "data-grid")          # see all properties for data-grid
-```
-
-See `references/schemas-and-compare.md` for full schema tool details.
-
-## Tips
-
-- **Naming convention:** Display names like `"Quality Review"` auto-derive camelCase names: `qualityReview`
-- **Position for add_step:** 0 = first, -1 = last (before End Step)
-- **Multiple sections per task:** You can add multiple sections to create logical groupings
-- **After building:** Use `get_flow_config(flow_id)` to verify the complete published structure
-- **User-invitation default:** Use `"initiator"` (NOT `"@me"`) to auto-populate with the current user. See `references/layouts-and-components.md` for details.
-- **Conditional fields:** Use `isHiddenDataPath` with expressions like `"='{$.field}' !== 'Value'"` to show/hide fields based on other field values. See `references/layouts-and-components.md` for the full conditional rendering guide.
-- **Actions beyond Submit:** For review, approval, or any branching step, add Reject/Send Back actions. Set `completedName` for distinct status labels in the grid. See `references/actions-and-statuses.md`.
-- **Grid columns:** Always add columns for the most-queried fields (identifiers, dates, amounts, party names). Use `valuePaths` matching the form field `dataPath` pattern `$.{stepCamelCase}.{fieldCamelCase}`. See `references/actions-and-statuses.md`.

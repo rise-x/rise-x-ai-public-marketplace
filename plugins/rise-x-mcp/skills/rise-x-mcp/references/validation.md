@@ -8,7 +8,6 @@
   - [Parameter Types](#parameter-types)
   - [Conditional Suffixes](#conditional-suffixes)
 - [`required` Property vs. `required` Rule](#required-property-vs-required-rule)
-- [`alwaysTrigger` Explained](#alwaystrigger-explained)
 - [Rule Reference](#rule-reference)
   - [Required & Conditional Required](#required--conditional-required)
   - [Disabled (Conditional)](#disabled-conditional)
@@ -26,7 +25,7 @@
 
 ## Overview
 
-Rise-X supports declarative validation rules on layout components and data-grid columns. Rules are defined in the `properties.validation` array on a component and evaluated at runtime against work data. Validation errors block task submission; warnings are advisory.
+Rise-X supports declarative validation rules on layout components and data-grid columns. Rules are defined in the `properties.validation` array on a component and evaluated at runtime against work data. Validation errors block task submission; warnings are advisory. A component schema from `get_schema` shows only the rule object's four fields, not the rule names, so use this file for the rule strings.
 
 ## Validation Rule Structure
 
@@ -46,7 +45,7 @@ Each rule in the `properties.validation` array is an object:
 | `type` | `"error"` \| `"warning"` \| `"success"` | **error** blocks submission, **warning** is advisory, **success** shows positive feedback |
 | `rules` | `string` | Pipe-separated rule definitions (see rule reference below) |
 | `message` | `string` | Message displayed when validation fails |
-| `alwaysTrigger` | `boolean` | If `true`, message shows even when validation passes. Useful for persistent warnings or info. Default `false`. |
+| `alwaysTrigger` | `boolean` | If `true`, the message shows even when the field is valid and is not cleared on success. Use it with `type: "warning"` for persistent notes (e.g. "Prices over $1000/MT may require additional approval"). Default `false`. |
 
 ### Rule String Syntax
 
@@ -94,14 +93,6 @@ Two ways to mark a field as required:
    ```
 
 For simple required fields, just use `required: true` on the component. For custom messages or combined rules, use the validation array.
-
-## `alwaysTrigger` Explained
-
-When `alwaysTrigger: true`:
-- The validation message displays **even when the field is valid**
-- Useful for persistent informational warnings (e.g. "Prices over $1000/MT may require additional approval")
-- The validation result stays in the UI and is not cleared on successful validation
-- Typically used with `type: "warning"`, not `type: "error"`
 
 ## Rule Reference
 
@@ -218,37 +209,13 @@ Data-grid columns support the same validation rules as regular components. Defin
 
 ```json
 {
-  "component": "data-grid",
-  "label": "Line Items",
-  "properties": {
-    "columns": [
-      {
-        "name": "sku",
-        "type": "string",
-        "displayName": "SKU",
-        "validation": [
-          {"type": "error", "rules": "required|regExp:^[A-Z]{3}-\\d{4}$", "message": "SKU must be format AAA-0000"}
-        ]
-      },
-      {
-        "name": "quantity",
-        "type": "number",
-        "displayName": "Quantity",
-        "validation": [
-          {"type": "error", "rules": "required|numeric|min:1", "message": "Quantity must be at least 1"}
-        ]
-      },
-      {
-        "name": "unitPrice",
-        "type": "currency",
-        "displayName": "Unit Price",
-        "validation": [
-          {"type": "error", "rules": "required|numeric|min:0.01", "message": "Price must be positive"},
-          {"type": "warning", "rules": "max:10000", "message": "High unit price — verify before submitting", "alwaysTrigger": false}
-        ]
-      }
-    ]
-  }
+  "name": "unitPrice",
+  "type": "currency",
+  "displayName": "Unit Price",
+  "validation": [
+    {"type": "error", "rules": "required|numeric|min:0.01", "message": "Price must be positive"},
+    {"type": "warning", "rules": "max:10000", "message": "High unit price — verify before submitting"}
+  ]
 }
 ```
 
@@ -256,34 +223,24 @@ Use `@row`, `@rowPrev`, `@rowNext` to reference row-level data in grid rules.
 
 ## Practical Examples
 
-### Simple required with custom message
-```json
-{
-  "component": "input-text",
-  "label": "Vessel Name",
-  "properties": {
-    "width": "col-6",
-    "validation": [
-      {"type": "error", "rules": "required", "message": "Vessel name is required"}
-    ]
-  }
-}
-```
+Each object goes in a component's `properties.validation` array.
 
-### Numeric range with unit
-```json
-{
-  "component": "input-text",
-  "label": "Volume",
-  "properties": {
-    "width": "col-6",
-    "inputType": "number",
-    "unitOfMeasure": "MT",
-    "validation": [
-      {"type": "error", "rules": "required|numeric|min:1|max:100000", "message": "Volume must be between 1 and 100,000 MT"}
-    ]
-  }
-}
+```jsonc
+// Numeric range with custom message
+{"type": "error", "rules": "required|numeric|min:1|max:100000", "message": "Volume must be between 1 and 100,000 MT"}
+
+// Regex pattern
+{"type": "error", "rules": "required|regExp:^\\d{7}$", "message": "IMO number must be exactly 7 digits"}
+
+// Compare against another field
+{"type": "error", "rules": "required|numeric|min:1|lessThanOrEqual:$.requirement.volume", "message": "Offered volume must not exceed requested volume"}
+
+// Advisory warning next to a blocking rule (both in the same array)
+{"type": "error", "rules": "required|numeric|min:0.01", "message": "Price is required"}
+{"type": "warning", "rules": "max:5000", "message": "Price exceeds $5,000/MT — please verify before submitting"}
+
+// Custom expression: error when the expression returns false
+{"type": "error", "rules": "expression:=$.order.totalValue < 1000000", "message": "Order value cannot exceed $1,000,000 without executive approval"}
 ```
 
 ### Date range validation (start before end)
@@ -294,7 +251,6 @@ Use `@row`, `@rowPrev`, `@rowNext` to reference row-level data in grid rules.
   "label": "Delivery Window From",
   "dataPath": "$.requirement.deliveryFrom",
   "properties": {
-    "width": "col-6",
     "validation": [
       {"type": "error", "rules": "required|beforeOrEqual:$.requirement.deliveryTo", "message": "Start date must be before or equal to end date"}
     ]
@@ -307,7 +263,6 @@ Use `@row`, `@rowPrev`, `@rowNext` to reference row-level data in grid rules.
   "label": "Delivery Window To",
   "dataPath": "$.requirement.deliveryTo",
   "properties": {
-    "width": "col-6",
     "validation": [
       {"type": "error", "rules": "required|afterOrEqual:$.requirement.deliveryFrom|afterToday", "message": "End date must be after start date and in the future"}
     ]
@@ -322,78 +277,10 @@ Use `@row`, `@rowPrev`, `@rowNext` to reference row-level data in grid rules.
   "label": "Counter-Offer Price",
   "dataPath": "$.review.counterPrice",
   "properties": {
-    "width": "col-6",
     "inputType": "number",
     "isHiddenDataPath": "='{$.review.decision}' !== 'Counter-Offer'",
     "validation": [
       {"type": "error", "rules": "requiredIf:$.review.decision|numeric|min:0.01", "message": "Price is required for counter-offers"}
-    ]
-  }
-}
-```
-
-### Warning (advisory, non-blocking)
-```json
-{
-  "component": "input-text",
-  "label": "Price Per Ton",
-  "dataPath": "$.offer.pricePerTon",
-  "properties": {
-    "width": "col-6",
-    "inputType": "number",
-    "unitOfMeasure": "USD/MT",
-    "validation": [
-      {"type": "error", "rules": "required|numeric|min:0.01", "message": "Price is required"},
-      {"type": "warning", "rules": "max:5000", "message": "Price exceeds $5,000/MT — please verify before submitting"}
-    ]
-  }
-}
-```
-
-### Regex pattern validation
-```json
-{
-  "component": "input-text",
-  "label": "IMO Number",
-  "properties": {
-    "width": "col-6",
-    "validation": [
-      {"type": "error", "rules": "required|regExp:^\\d{7}$", "message": "IMO number must be exactly 7 digits"}
-    ]
-  }
-}
-```
-
-### Multiple rules with conditional required and comparison
-```json
-{
-  "component": "input-text",
-  "label": "Offered Volume",
-  "dataPath": "$.offer.volume",
-  "properties": {
-    "width": "col-6",
-    "inputType": "number",
-    "unitOfMeasure": "MT",
-    "validation": [
-      {"type": "error", "rules": "required|numeric|min:1|lessThanOrEqual:$.requirement.volume", "message": "Offered volume must be positive and not exceed requested volume"}
-    ]
-  }
-}
-```
-
-### Custom expression validation
-```json
-{
-  "component": "input-text",
-  "label": "Total Value",
-  "dataPath": "$.order.totalValue",
-  "readOnly": true,
-  "defaultValue": "={$.order.quantity} * {$.order.unitPrice}",
-  "properties": {
-    "width": "col-6",
-    "inputType": "number",
-    "validation": [
-      {"type": "error", "rules": "expression:=$.order.totalValue < 1000000", "message": "Order value cannot exceed $1,000,000 without executive approval"}
     ]
   }
 }
