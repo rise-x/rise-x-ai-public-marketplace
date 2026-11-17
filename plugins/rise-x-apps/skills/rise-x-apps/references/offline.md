@@ -609,7 +609,11 @@ things up by `id`.
 ### Submitting: two shapes, plus a payload contract queued submits must get right
 
 Online, `work.submit({ workId, actionName })` where `actionName` is `action.eventName ?? action.name` —
-a label, not an id.
+a label, not an id. From SDK 0.20.0 that call is enough when the SDK can resolve the action set: it
+picks the step itself. When it can't (`references/build.md`, "`stepName` on `work.submit`", lists
+the cases), it sends no `stepName` and raises no error, and an older SDK never sends one. With no
+`stepName`, the default `Submit` answers `200` and moves nothing (see `stepName` at the end of this
+section).
 
 Queued, `offline.queueWorkAction({ workId, actionId })` — and that is the whole call. The shell
 resolves everything else off the cached work: event name, step name, the task node, the queue-row
@@ -630,19 +634,23 @@ your own just-completed create, where the id cannot be stale.)
   stops the server deriving recipients from flow config itself, so an empty list is never neutral.
 - `sectionId?` defaults to the task holding the action; pass one only to target a different task.
 
-`work.submit` also takes an optional `stepName` to disambiguate same-named actions — canonically the
-**leaf action-set step's name**, not its parent step's. Its online failure modes are split, and
-neither is a clean error. A `stepName` the flow does not have **fails on the server and surfaces as
-a 403 "Access Denied"** — the `startAt` path swallows the real message entirely, `submit` at least
-leaks it — so a mystifying 403 here can mean "bad step name", not "no permission". A bad **action**,
-by contrast, is a **silent no-op**: when the server's can-execute check comes back false — wrong or
-mismatched event name, no current action to execute, or a `PartyName` role mismatch — nothing aborts,
-the transaction commits, and the request answers `200` with the work unchanged. The trap bridging the
-two: the step resolver also accepts a step's **display name**, which resolves — to the wrong node of
-the step tree — and the action lookup under it then finds nothing, landing you in the silent `200`,
-not the 403: a submit passing the step's display name answers `200` and never advances, while the
-canonical leaf name advances on the same event. A 200 therefore proves nothing; the
-re-read below is the only honest signal.
+`work.submit` also takes a `stepName`. From SDK 0.20.0 the SDK sends the right one when you pass
+none. Before that, and whenever you pass one yourself, it must be the **name of the action set
+that holds the action**, not its step's and not its task's (`references/build.md`, "`stepName` on
+`work.submit`", lists what each other value does). Its online failure modes are split, and
+neither is a clean error. On `work.start`, a `stepName` the flow does not have **fails on the server
+and surfaces as a 403 "Access Denied"** with the real message swallowed, so a mystifying 403 there
+can mean "bad step name", not "no permission". On `work.submit` the same mistake does not fail: with
+the default `Submit` action it answers `200` with the work unchanged. A bad **action** fails in two
+ways. On API 3.80.0 and later, an event name the selected step doesn't offer, or an action whose
+condition fails against the saved data, answers 403 and leaves the work unchanged. When the
+server's can-execute check comes back false for another reason — no current action to execute, or
+a `PartyName` role mismatch — it may be a **silent no-op**: nothing aborts, the transaction
+commits, and the request answers `200` with the work unchanged. The trap bridging the two: the
+step resolver also accepts a step's **display name**, which resolves to the wrong node of the step
+tree. With the default `Submit` that lands in the silent `200`: the submit never advances, while
+the action set's name advances on the same event. With any other event it answers the 403 (API
+3.80.0 and later). A 200 therefore proves nothing; the re-read below is the only honest signal.
 
 **Queuing an action is not confirmation the workflow advanced.** `queueWorkAction` resolving means
 the item queued; `allSynced` means it replayed — neither means the step moved. An app that knows its
@@ -651,8 +659,8 @@ once `allSynced` flips (§6).
 
 **And `allSynced` still isn't proof the workflow moved.** The server can answer a submit with `200`
 without transitioning the work at all — its can-execute check comes back false without erroring when
-the action is gated by `PartyName` role permissions, when the event name doesn't match, or when no
-current action resolves — so the queue drains clean and the step is exactly where it was. Nothing
+the action is gated by `PartyName` role permissions or when no current action resolves — so the
+queue drains clean and the step is exactly where it was. Nothing
 an app sends changes this, and no client-side check detects it: the only honest signal is the
 re-read. Surface the work's actual state rather than reporting success from a drained queue, and if
 you see a submit that syncs but never advances, suspect the flow's action permissions before your
