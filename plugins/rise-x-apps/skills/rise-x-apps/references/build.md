@@ -28,9 +28,10 @@ pnpm start
 
 In-repo apps are pnpm workspace members (`apps/*` in `pnpm-workspace.yaml`).
 The scaffolder writes a registry version for `@rise-x/apps-sdk` — change it to
-`"workspace:*"` in the new app's `package.json` and run `pnpm install` at the
-repo root so the app links to `packages/apps-sdk` directly. The repo's own
-git conventions apply — commit only when the user asks.
+`"workspace:*"` in the new app's `package.json` and run
+`pnpm install --prefer-offline` at the repo root so the app links to
+`packages/apps-sdk` directly. The repo's own git conventions apply — commit
+only when the user asks.
 
 **Move the approved mock in.** The design phase leaves it wherever the user
 was working; put it at `design/<app>.v<n>.html` inside the new app now. §Build
@@ -46,6 +47,12 @@ npx @rise-x/apps-sdk init <name> --pm=pnpm   # drop --pm if pnpm isn't installed
 cd <name>
 git init && git add -A && git commit -m "chore: scaffold <name> Rise-X app"
 ```
+
+On either path, whenever you run the install yourself, for example after
+`--skip-install` or a hand edit to `package.json`, use
+`pnpm install --prefer-offline`, never `--offline`: pnpm can't resolve versions
+offline for an app that has no lockfile yet. Add a new dependency with a plain
+`pnpm add <pkg>`, which resolves through the configured registry.
 
 Initialize git right after scaffolding (the template ships a `.gitignore`)
 and maintain the app's history with **conventional commits** from the first
@@ -78,7 +85,7 @@ What the scaffolder creates (**SDK >= 0.11.0** — earlier versions emit webpack
 ```
 <name>/
 ├── AGENTS.md              # agent guide: architecture in the Rise host, stack, commands, APP.md discipline
-├── CLAUDE.md              # one-line @AGENTS.md import so Claude Code loads the same guide — edit AGENTS.md
+├── CLAUDE.md              # one-line @AGENTS.md import for agents that read CLAUDE.md — edit AGENTS.md
 ├── README.md              # app readme; points at APP.md and AGENTS.md
 ├── package.json           # private; `start` = standalone dev, `start:federated` = MF dev, `build` = prod, plus `validate`, `build:staging`, `build:prod` (SDK >= 0.12.0)
 ├── rise-x-app.json        # app dependency manifest (SDK >= 0.12.0): alias → per-environment ids; the build preset resolves it (no dependencies yet)
@@ -530,6 +537,7 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 | `vectorStores` | file-search corpora for `agents.run` / `chat.send` (SDK >= 0.14.0) | `create`, `get`, `addFiles`, `listFiles`, `renew`, `rename`, `rebuild`, `deleteFile`, `delete` |
 
 ```ts
+declare const movesStep: boolean | undefined; // the app's own flag, used in the submit check below
 // Connectors (generic) — flows discovery, work items, assets, configurable agents.
 // A flow the app knows at AUTHORING time is a dependency: declare it in
 // rise-x-app.json and use its bound surface (deps.<alias>.work.…, see App
@@ -539,9 +547,27 @@ const flow = await flows.get(pickedRef); // origin or concrete id — resolves t
 
 const created = await work.start({ flowId: flow.id, data: { title: 'New' } });
 await work.patchData(created.id, { originId: created.flowOriginId!, path: '$.title', value: 'Renamed' });
-const action = (await work.get(created.id)).actions[0];
-await work.submit({ workId: created.id, actionName: action.eventName ?? action.name! });
-await work.delete(created.id); // permanent, no server-side undo
+// Submit the action the user chose from the work's own list, by its eventName.
+// Never guess a name or take actions[0] (see "Work item state" below).
+// work.get resolves null when the item doesn't exist. A missing action is normal
+// (another user moved the step): tell the user and refresh, never skip silently.
+const before = await work.get(created.id);
+const chosen = before?.actions.find((a) => a.id === pickedActionId);
+if (!chosen) throw new Error(`Action ${pickedActionId} is not available on this item`);
+// No stepName: from SDK 0.20.0 the SDK picks the step itself. On an older SDK this call
+// can return 200 and move nothing (see "stepName on work.submit" below).
+await work.submit({ workId: created.id, actionName: chosen.eventName ?? chosen.name! });
+// A 200 doesn't prove the step moved, so read the work again. movesStep is the app's own flag,
+// set from the flow at design time: true for an action that leaves its step, false for one that
+// stays on it (a save, a send-back to the same step), which changes neither value. Leave it
+// undefined when the app can't know, as with a flow the user picks at runtime.
+const after = await work.get(created.id);
+if (!after) throw new Error('The item no longer exists'); // another user deleted it in between
+const events = (w: typeof before) => w?.actions.map((a) => a.eventName ?? a.name).join();
+const moved = after.state !== before?.state || events(after) !== events(before);
+if (!moved && movesStep) throw new Error('The submit moved nothing');
+if (!moved && movesStep === undefined) notifyUser("The step didn't move. Check the item."); // the app's own UI call
+await work.delete(created.id); // soft delete: status becomes 'Deleted'; a second delete 404s
 
 // Listing filters STRICTLY by flowOriginId — pass the flow object (or a bare
 // origin id string). A concrete flow id here silently returns an empty list.
@@ -565,7 +591,10 @@ const page = await work.search({
     { field: 'flowOriginId', operator: 'equals', values: [flow.flowOriginId] },
     // status values: Open/Closed/Completed/Deleted/Ok. Step-level values like
     // 'InProgress' live on flowState — a DIFFERENT field; filtering status by
-    // them matches nothing.
+    // them matches nothing. 'Open' also matches FINISHED items: for "not
+    // done", replace this leaf with { field: 'flowState', operator:
+    // 'notEquals', values: ['Complete'] }. With no status leaf, the server
+    // still leaves deleted items out.
     { field: 'status', operator: 'in', values: ['Open'] },
   ] },
   // Projection. A `data.*` path resolves against the PINNED flow's schema and
@@ -641,6 +670,30 @@ try {
 const apps = getShellApiV4('apps');
 const { data } = await apps.get('/api/v4/config/apps');
 ```
+
+**Work item state: which call does what.** Never guess an event name or which field means "done". A work item has two state fields:
+- `status` is the record's lifecycle: `Open` from `work.start`, `Deleted` after `work.delete` or when the flow is cancelled or declined. A finished item can still read `Open`, so `status` never tells you it's done.
+- `flowState` (on `work.search` rows; the same value is `state` on `work.get`) is the flow engine's position: `InProgress` while a step is open, `Complete` once the flow's last step is submitted, `Deleted` after a delete.
+
+Each change has one call:
+- **Change a field:** `work.patchData(id, { originId, path, value })`. It writes data and runs no action.
+- **Move to another step, or approve, reject, send back, finish:** `work.submit({ workId, actionName })`, with the action's `eventName` as `actionName` (its `name` only when it has no `eventName`, the shell's rule). From SDK 0.20.0 the SDK adds the `stepName` the server needs (see the paragraph after this list). The server checks the name against the events of the node `stepName` selects and the action's condition against the saved data, so await `patchData` first. On API 3.80.0 and later, a wrong name or a failed condition returns 403 and leaves the work unchanged.
+- **Delete:** `work.delete(id)` is a soft delete. It sets `status`, `flowState`, and every open step to `Deleted`; the record stays. `work.search` leaves it out unless the filter names `status`. A second delete returns 404 (`NOT_FOUND`). The SDK has no restore call.
+
+**`stepName` on `work.submit`.** A submit with the wrong `stepName` often returns 200 and moves nothing. The only value that runs the action in every case is the name of the action set that holds the action.
+- **SDK 0.20.0 and later: pass none.** `work.submit` reads the action set from the work's own action and the flow config, and sends its name. That covers a flow the user picks at runtime, and it survives a flow rebuild, because the app stores no name. If the SDK can't find the name (the user can't read the flow config, the read fails, or two action sets on the work offer the event), it raises no error and sends no `stepName`, so the default `Submit` can still return 200 and change nothing. Keep the re-read after the submit.
+- **Before 0.20.0: upgrade the SDK** (`references/upgrade.md`). The version is the `@rise-x/apps-sdk` entry in the app's `package.json`. That SDK sends no `stepName` and returns no field that holds the name. If the app must stay on it, pass `actionSetName` from the step's row in `get_flow_config(flow_id, path="steps")` (`value[i].actionSetName`; `get_flow_steps` carries only its id). Read the name, never build it: its form varies (`ActionSet_1`, `review/check/Actionset`), and a flow rebuild can change it.
+
+What the API does with each value, tested on work flows:
+- **No `stepName`:** an action with its own event name runs, but the default `Submit` returns 200 and changes nothing. Every step and task has an automatic `<display name>/autosubmit` event, and `Submit` matches it first.
+- **The step's name or display name:** `Submit` returns 200 and changes nothing. Any other event returns 403 `Action not available (#3020)` (API 3.80.0 and later), and the message lists the automatic events, not your action.
+- **The task's name:** returns 200 and changes nothing, for every event.
+- **A name the flow doesn't have:** `Submit` returns 200 and changes nothing.
+- **Another step's action set:** returns 403 and lists that step's events.
+
+A 200 alone doesn't prove the step moved: read the work again and compare its `actions` or `state`. An action that stays on its step changes neither, so make that check only for an action that moves the step. Two more cases may answer 200 with nothing moved: the step has no current action to execute, or the user's party doesn't match the action's `PartyName` (`references/offline.md`, "Submitting"). Event names match by suffix and ignore case (`Done` runs `MarkDone`), so send the full `eventName`. An asset draft save is a different path, and these tests don't cover it.
+
+"Done" means the flow reached its end: `flowState` is `Complete`, and a submit of the last step's action gets it there. Read done from `flowState`, never from `status`; for one item, that is `(await work.get(id))?.state === 'Complete'`. If the app needs a done flag that doesn't end the flow, make it a data field set with `patchData`, and decide which one at design time. Read the event names from the flow before writing app code: `get_flow_steps` on the Rise-X MCP gives each step's `id`, and `get_flow_step(flow_id, id)` or `get_flow_config(flow_id)` gives its actions with `eventName`. At runtime, `(await work.get(id))?.actions` lists the actions the work's active step offers.
 
 **Reference by id, not by name.** Users rename flows, steps, tasks, and asset types freely (`displayName`), and internal `name`s change when a flow is rebuilt — ids are the only rename-proof reference. Declare `flowOriginId`s in `rise-x-app.json` (task/step ids, which the manifest doesn't carry, stay in app config); never hardcode display names. `flows.findTask({ flow, task })` matches by id, exact name, or case-insensitive displayName — the name forms are for dev-time exploration, not shipped code. When the user's input *is* a name (a search box), go through `flows.list({ search })` and let them pick.
 
@@ -788,7 +841,7 @@ window.__DIANA_SHELL__ = createMockShell({
     // they reject an unpinned search exactly as the live endpoints do, so
     // standalone dev cannot pass where every host would 400.
     workSearch: [{ id: 'w1', workCode: 'PRC-2026-0184', status: 'Open', flowState: 'InProgress', created: '2026-01-31T09:14:00Z' }],
-    workDetail: { w1: { id: 'w1', displayName: 'Q3 pricing review — Northline Industrial', actions: [] } },
+    workDetail: { w1: { id: 'w1', displayName: 'Q3 pricing review — Northline Industrial', status: 'Open', state: 'InProgress', actions: [] } },
     workData: { w1: { pricing: { rate: 1.425, currency: 'AUD' } } },
     // assets.types() is its own key — seed it whenever the screen resolves an
     // asset type before listing (the documented path).
@@ -813,7 +866,8 @@ placeholder row renders a layout that live data will break. Specifically:
   the platform UI and copy its structure; invented shapes test the app against a
   fiction.
 - **The server's own enum values** — `status: 'Open'` (work: Open/Closed/
-  Completed/Deleted/Ok; assets: Open/Closed/Deleted), step state on `flowState`.
+  Completed/Deleted/Ok; assets: Open/Closed/Deleted), step state on `flowState`
+  (`state` on a work detail).
   A made-up `'active'` renders a badge that never appears in production.
 - **Plausible lengths and characters** — a name long enough to wrap or truncate,
   a code with its real format, non-ASCII where the domain has it. Uniformly
@@ -876,8 +930,18 @@ carrying another environment's ids deploys without complaint and fails in the
 running app.
 
 1. `request_bundle_upload` → returns a single-use, short-TTL `uploadUrl` plus an `uploadId`.
-2. `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
+   Skip this step when your runtime has an `upload_bundle` tool: that tool
+   requests the URL itself.
+2. Upload the zip. With an `upload_bundle` tool (a sandbox with no network
+   access), call it with the zip's path relative to the workspace root, for
+   example `upload_bundle(path="<name>/<name>-bundle.zip")`. It returns the
+   `upload_id` and the size. Otherwise, PUT the zip yourself from the app
+   directory: `curl -X PUT --data-binary @<name>-bundle.zip '<uploadUrl>'`
+   If the PUT can't reach the URL and there is no `upload_bundle` tool, stop
+   and tell the user the bundle is ready at `<name>/<name>-bundle.zip` to
+   deploy from the Apps UI (see the fallback below).
 3. `deploy_app(upload_id, name, version, app_scope, app_id?, description?, icon?, feature_flags?)` —
+   `upload_id` is the `uploadId` from step 1 or the one `upload_bundle` returned;
    omit `app_id` for a brand-new app (a GUID is generated and returned); pass
    the existing GUID to release a new version. `version` comes from the app's
    `package.json` and must be unique per app — bump it every release (the
@@ -939,10 +1003,10 @@ Whether you scaffolded a new app or modified an existing one, the user can't see
    screen — layout, spacing, states, dark mode, and the mobile frame if the
    UX level has one. Fix drift in the app (or get the user's OK for the
    deviation) before going further.
-3. **Run a code review.** Invoke the `code-review` skill with `--fix`
-   (`/code-review --fix`) over the new app code and apply the fixes it
-   confirms. If the skill isn't available, say so instead of skipping
-   silently.
+3. **Run a code review.** Run the `code-review` skill (or your runtime's
+   equivalent) with its fix option (`--fix`) over the new app code and apply
+   the fixes it confirms. If no code-review skill is available, say so instead
+   of skipping silently.
 4. **Validate the manifest, and read the scan warnings.** The manifest,
    `validate` and `scan` need `@rise-x/apps-sdk` >= 0.12.0. `pnpm validate` exits
    zero, meaning every environment in `rise-x-app.json` resolves — not just the

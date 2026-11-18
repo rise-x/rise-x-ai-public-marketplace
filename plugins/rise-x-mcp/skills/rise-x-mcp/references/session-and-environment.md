@@ -46,12 +46,24 @@ Returns:
 }
 ```
 
+### `whoami()`
+Get the bound user, ecosystem, and deployment. Use it when visibility looks wrong.
+
+### `resolve_ecosystem(ecosystem_name: str)`
+Resolve an ecosystem name to its canonical `id` **without** switching the active ecosystem.
+It resolves any reachable ecosystem, including ones you are not a member of, so it succeeds
+where `list_ecosystems` returns nothing. Matching is case-insensitive on `name`, not `displayName`.
+
+Use it to get the `targetEcosystemId` for a `StartCrossEcosystemWork` activity. **Never** take
+that id from a flow's or work's `environmentId`: it can be stale seed data and fails at runtime
+with `ecosystem-not-found`.
+
 ## Rise-X tools are deferred (client-side)
 
-In clients that lazy-load MCP tools (e.g. Claude Code), the Rise-X tools are **deferred**: only their names are known up front, and a tool cannot be invoked until its schema is fetched via **`tool_search`** (select the tool by name first). If no Rise-X tools appear at all, the **connector is disabled** — enable/re-enable the Rise-X MCP connector for the session, then the tools attach. Two consequences worth knowing:
+In clients that lazy-load MCP tools, the Rise-X tools are **deferred**: only their names are known up front, and a tool cannot be invoked until the client's tool-search tool fetches its schema (select the tool by name first). Clients that load every MCP tool up front skip this step. If no Rise-X tools appear at all, the **connector is disabled** — enable/re-enable the Rise-X MCP connector for the session, then the tools attach. Two consequences worth knowing:
 
-- A fresh session may need a `tool_search` pass (or a connector toggle) before the first `set_active_ecosystem` / `whoami` call resolves.
-- `tool_search`'s argument shape is **client-specific** — some builds take a single `query` string, others a `keywords` **list** (a list-expecting build returns `keywords: Input should be a valid list` for a bare string, so wrap single terms in a list there). If one form is rejected, try the other.
+- A fresh session may need a tool-search pass (or a connector toggle) before the first `set_active_ecosystem` / `whoami` call resolves.
+- The tool-search tool's argument shape is **client-specific** — some builds take a single `query` string, others a `keywords` **list** (a list-expecting build returns `keywords: Input should be a valid list` for a bare string, so wrap single terms in a list there). If one form is rejected, try the other.
 
 ## Session Initialization Recipe
 
@@ -69,5 +81,5 @@ Always run this before any other operations:
 
 - **Switching ecosystem mid-session** is safe but changes the target for ALL tools immediately
 - **Deployment environment** is fixed — you cannot switch between dev/test/prod at runtime
-- **Every tool except the 3 session tools** requires an active ecosystem — calls will fail with an error message
+- **Every tool except the 5 session tools** requires an active ecosystem — calls will fail with an error message
 - `list_ecosystems` uses a "bare" API wrapper (no ecosystem header) since it lists across workspaces

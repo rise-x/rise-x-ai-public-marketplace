@@ -4,7 +4,7 @@ This reference is the **elicitation + safety harness** for the Rise-X integratio
 
 ## Core principle
 
-> Authoring an integration with a wrong `baseUri`, a wrong `responseValuePath`, or a leaked / mis-typed secret silently corrupts every flow that uses it. **Never invent these values.** If a slot is missing, either (a) derive it from an existing integration in the same ecosystem, or (b) ask the user — in one batched `AskUserQuestion`, not turn-by-turn.
+> Authoring an integration with a wrong `baseUri`, a wrong `responseValuePath`, or a leaked / mis-typed secret silently corrupts every flow that uses it. **Never invent these values.** If a slot is missing, either (a) derive it from an existing integration in the same ecosystem, or (b) ask the user — with all questions in one message, not turn-by-turn.
 
 ## Mandatory authoring protocol
 
@@ -79,7 +79,7 @@ Every templated value has three possible binding modes. **Classify each one with
 | **Work-data-bound** | The value comes from the Rise-X work item at activity time (a project id the user selected, a location, etc.) | Put `{$.fieldName}` in the `endpointUri`/`request` and **do NOT** define a static parameter for that name — it then resolves from work data. Confirm the exact work-data field name with the user. |
 | **Caller / test-only** | Supplied per-invocation for a dry run | Same `{$.fieldName}` token; pass a sample via `test_integration_endpoint(data=…)`. Dry-run only — **never persist test samples as parameter defaults.** |
 
-Robust rule (independent of precedence subtleties): **define the parameter ⇒ constant; leave it undefined and rely on the `{$.field}` token ⇒ work-data-bound.** Any templated slot whose mode you don't yet know is a slot for the batched `AskUserQuestion` (§4): ask *"fixed value (what?) or from work data (which field)?"* per slot. The values you pass to `test_integration_endpoint` are sample data ONLY.
+Robust rule (independent of precedence subtleties): **define the parameter ⇒ constant; leave it undefined and rely on the `{$.field}` token ⇒ work-data-bound.** Any templated slot whose mode you don't yet know is a slot for the batched question (§4): ask *"fixed value (what?) or from work data (which field)?"* per slot. The values you pass to `test_integration_endpoint` are sample data ONLY.
 
 ### 3. Auth checklist (by `type`)
 
@@ -99,7 +99,7 @@ If the user picks a `type` and you're missing any field in its row, **stop and a
 
 ### 4. Batch the questions
 
-When you have one or more missing slots, ask everything you need in a **single** `AskUserQuestion` call with one sub-question per slot. Bad:
+When you have one or more missing slots, ask everything you need in a **single** message to the user with one sub-question per slot, or through your runtime's question tool, if it has one. Bad:
 
 > 🚫 "What's the baseUri?"
 > *(waits)*
@@ -111,7 +111,7 @@ Good:
 
 > ✅ One question with sub-questions: `baseUri`, `authentication.type` (with options), `tokenUrl` (conditional helper text), `clientId`, "secret value (will be stored encrypted)", **and one sub-question per templated parameter: "fixed value (what?) or from work data (which field)?" (§2a)**.
 
-Provide `multiSelect: false` and a short curated `options` array for any enum-ish slot (`method`, `authentication.type`, `error_handling`, etc.). Free-text only for URIs, JSONPaths, names, and descriptions.
+Offer a short list of options for any enum-ish slot (`method`, `authentication.type`, `error_handling`, etc.). Free-text only for URIs, JSONPaths, names, and descriptions.
 
 ### 5. Validate before commit
 
@@ -131,7 +131,7 @@ If the integration was an *update* to a known endpoint (i.e. the `endpoint_id` a
 
 1. The `statusCode` and `success` flag.
 2. The first 30 lines of `rawResponse`.
-3. The current `responseValuePath` and what it would extract from the sample (or an `AskUserQuestion` confirming the path is right).
+3. The current `responseValuePath` and what it would extract from the sample (or a question to the user confirming the path is right).
 
 For a *new* endpoint, `test_integration_endpoint` won't have an id yet — instead persist the integration first, capture the new `endpointId` from the response, then dry-run.
 
@@ -144,7 +144,7 @@ For a *new* endpoint, `test_integration_endpoint` won't have an id yet — inste
 1. **Verify each imported integration with `validate_integration`.** The import envelope lists them under `imported[]` (secret-free summaries). The validator flags an `OAuth2`/`Bearer`/`ClientCredentials`/`ApiKey` integration missing `tokenUrl`/`clientId`/`secret` as **errors** — this is the fast, reliable signal that auth did not come through. Also scan the envelope's `warnings[]` for `postman.auth.*` codes (`tokenUrlMissing`, `credentialMissing`, `apiKeyReview`) — the server lifts the importer's warnings up to the envelope root.
 2. **If auth is incomplete, repair before use:**
    - **Missing `tokenUrl`/`scope`/`grantType`** → set them via `update_integration` (derive from a sibling integration in the same ecosystem when possible — §1).
-   - **Blank secret params (`clientId`/`secret`)** → the collection used variables or omitted them. **Elicit the plaintext from the user** in one batched `AskUserQuestion` (§4) and re-save with `isSecret: true` (encrypted under the new integration's own key — never copy another integration's ciphertext, anti-pattern #10).
+   - **Blank secret params (`clientId`/`secret`)** → the collection used variables or omitted them. **Elicit the plaintext from the user** in one batched question (§4) and re-save with `isSecret: true` (encrypted under the new integration's own key — never copy another integration's ciphertext, anti-pattern #10).
    - **Endpoints showing `authentication.type: None` as an override** when they should inherit → clear the per-endpoint auth (leave it unset) so they fall back to the integration auth.
 3. **Confirm with a dry-run on one auth-bearing `GET` endpoint.** `authMode: ClientCredentials` + `statusCode: 200` proves the token exchange works; a `401` with `authMode: None` means the bearer token was never attached — go back to step 2. (Localizing trick from the Troubleshooting section: a `None`-auth endpoint succeeding while auth-bearing ones 401 points at the secret/auth path, not the network.)
 
@@ -177,7 +177,7 @@ These are belt-and-braces with the server-side fixes (`RiseIntegrationBuilder` d
 `delete_integration` and `delete_integration_endpoint` are both **physical deletes** in v4 — there is no soft-delete state, and no `undelete` route. The integration document (or endpoint entry) is removed from MongoDB immediately, the key-vault encryption secret is best-effort dropped, and flows that referenced the removed item start failing at runtime. Before calling either:
 
 1. Show the user the integration name, endpoint name(s), and any flow references you can find (no automated lookup exists today — say so).
-2. Ask one explicit `AskUserQuestion` with options `["Delete", "Cancel"]`. Do not infer consent from "yeah ok" / "go ahead" earlier in the chat — confirm at the moment of action.
+2. Ask the user one explicit question with the options `Delete` and `Cancel` (through your runtime's question tool, if it has one), and wait for the answer. Do not infer consent from "yeah ok" / "go ahead" earlier in the chat — confirm at the moment of action.
 3. If confirmed, call the delete and report the success/404 result.
 
 There is no draft / publish cycle for integrations (see `integrations.md` pitfall #6) and no recovery path once a delete returns success — recreating the integration requires a fresh `update_integration` with all configuration (and re-collecting any secrets). Treat each delete as final.
@@ -196,7 +196,7 @@ There is no draft / publish cycle for integrations (see `integrations.md` pitfal
 2. Slots in this file's checklist are filled.
 3. `validate_integration` has been called and returned zero errors.
 4. For new endpoints with a `POST` / `PUT` / `PATCH` / `DELETE` method: user has confirmed the target environment is safe to call.
-5. For destructive ops: explicit `AskUserQuestion` confirmation captured.
+5. For destructive ops: explicit confirmation from the user captured.
 
 ## Tool routing (when to read this file)
 
@@ -221,7 +221,7 @@ There is no draft / publish cycle for integrations (see `integrations.md` pitfal
 5. **Calling `publish_layout` or expecting a draft step** — integrations have no publish step; every `update_integration` is live.
 6. **Offering to "read the current value" of a secret** — v4 has no decrypt endpoint. The only path is rotate-via-`update_integration` with the new value.
 7. **Calling `delete_integration_endpoint(endpoint_id)` without the parent id** — v4 requires both ids; the v3 reverse lookup is gone. If the user only gave an endpoint id, fetch the parent via `list_integrations` and scan `endpoints[]`.
-8. **Skipping the destructive-action confirmation** — `delete_integration` and `delete_integration_endpoint` are physical, irreversible deletes. Always run the destructive-action protocol (explicit `AskUserQuestion`) at the moment of action, even if the user mentioned deletion earlier in the chat.
+8. **Skipping the destructive-action confirmation** — `delete_integration` and `delete_integration_endpoint` are physical, irreversible deletes. Always run the destructive-action protocol (an explicit question to the user) at the moment of action, even if the user mentioned deletion earlier in the chat.
 9. **Silently hardcoding a templated value** — baking a sample/constant into a parameter `value` just to make the call succeed. A constant ships forever and never reads flow data. Classify each `{$.x}` token's binding mode with the user first (§2a).
 10. **Copying a secret's encrypted blob from one integration into another** — secrets are AES-encrypted with a **per-integration** key (`DS-{integrationId}`). An encrypted `value` from integration A is **only decryptable by A**. If you copy A's ciphertext into a new integration B, the MCP layer sees ciphertext and "leaves it alone" (correct for same-integration re-POSTs), so B stores a blob its own `DS-{B}` key cannot decrypt → the auth secret resolves to garbage → runtime **401** at token exchange. When creating or seeding a *new* integration, always supply secrets as **plaintext** so they're encrypted under the new integration's own key. Never lift a `value` blob from another integration's `get_integration` output.
 
