@@ -81,7 +81,7 @@ A filter node is exactly **one** of: a leaf condition (`field` + `operator` + `v
 | `notEquals` | all types | 1 | |
 | `in` | all except boolean | 1+ | Set membership. Rejected on boolean (use `equals`/`notEquals`) — listing both values of a 2-valued type is a no-op → 400. |
 | `notIn` | all except boolean | 1+ | Rejected on boolean. |
-| `contains` | string only | 1 | Case-insensitive substring match. |
+| `contains` | string only | 1 | Case-insensitive substring match. Unanchored, so it can't use an index; prefer `startsWith` when a prefix will do. |
 | `startsWith` | string only | 1 | Leading-anchored, case-insensitive prefix match. |
 | `endsWith` | string only | 1 | Trailing-anchored, case-insensitive suffix match. |
 | `between` | number / date | exactly 2 | Inclusive range |
@@ -92,7 +92,7 @@ A filter node is exactly **one** of: a leaf condition (`field` + `operator` + `v
 | `exists` | all types | 0 | Field is present |
 | `notExists` | all types | 0 | Field is absent |
 
-There is no wildcard syntax. `equals` is an exact match, so a `*` in the value is a literal character: `{"operator": "equals", "values": ["*fire*"]}` returns an empty page, not a 400. For a prefix match use `startsWith`.
+There is no wildcard syntax. `equals` is an exact match, so a `*` in the value is a literal character: `{"operator": "equals", "values": ["*fire*"]}` returns an empty page, not a 400. For a substring match use `contains`, or `startsWith` for a prefix.
 
 > ⚠️ **Empty `contains` / `startsWith` / `endsWith` values are rejected.** Passing `{"operator": "endsWith", "values": [""]}` or `[" "]` (whitespace) — likewise for `contains` / `startsWith` — returns 400 from the validator — previously this silently produced a match-everything regex that scanned every document. If the caller's intent is "any/no value", use `exists` / `notExists` instead.
 
