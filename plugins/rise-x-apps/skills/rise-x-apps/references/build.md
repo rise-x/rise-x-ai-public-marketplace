@@ -529,8 +529,8 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 | Connector | Domain | Key methods |
 | --- | --- | --- |
 | `flows` | flow discovery (read-only) | `list` (**work flows only**), `get`, `findTask`/`findTaskIn`, `getConfig`, `getLayout`, `flattenLayoutFields` |
-| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `listRelated`, `getAudit`, `getMyAccess` |
-| `assets` | typed records ("entities"/"things") | `types` (**asset-type flows**), `get`, `search`, `quickSearch`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
+| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `aggregate` (SDK >= 0.22.0), `listRelated`, `getAudit`, `getMyAccess` |
+| `assets` | typed records ("entities"/"things") | `types` (**asset-type flows**), `get`, `search`, `aggregate` (SDK >= 0.22.0), `quickSearch`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
 | `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
 | `attachments` | work-attachment blobs (SDK >= 0.12) | `getBlob`, `upload`, `delete` |
 | `offline` | connectivity, the offline queue, and downloads (SDK >= 0.12) | see `references/offline.md` |
@@ -611,6 +611,13 @@ const page = await work.search({
 // row.created / row.lastModified are ISO strings, but DATE VALUES INSIDE
 // row.data arrive as {date, ticks, offset} objects — use the .date property,
 // never new Date(row.data.x) directly.
+// Opt-in row fields (SDK >= 0.22.0): assignedRoles, acl, stepEvents,
+// attachments and relationships are on a row ONLY when `fields` names them, or
+// a sub-path such as 'stepEvents.modifiedBy'; otherwise they stay undefined.
+// For "who completed this step", read row.stepEvents — each entry's stepName,
+// status, modifiedBy and modifiedDate — not a data field: assignees can edit
+// work data, but not the step history. Never fall back to a raw
+// getShellApiV4('work') search to get these.
 
 // Assets: prefer typeOriginId / the AssetType object over the type name.
 // (A type known at authoring time is a dependency — deps.<alias>.assets.…;
@@ -642,6 +649,32 @@ const assetPage = await assets.search({
 // row.code / row.entityType / row.status / row.created / row.data — same page
 // envelope as work.search. `id` and `status` come back on every row even when
 // `fields` omits them; other scalars drop out once `fields` is set.
+
+// Totals, counts and group-bys over everything a filter matches belong on
+// work.aggregate / assets.aggregate (SDK >= 0.22.0): one request, computed on
+// the server over every row the user may read. Never page through search rows
+// to sum them client-side. It reads NO rows — run it beside the list search
+// with the same filter (same mandatory flowOriginId pin; the bound
+// deps.<alias>.work.aggregate / .assets.aggregate add it). In components use
+// useWorkAggregations / useAssetAggregations.
+const totals = await work.aggregate({
+  filter: { and: [{ field: 'flowOriginId', operator: 'equals', values: [flow.flowOriginId] }] },
+  aggregations: [{
+    name: 'byBuyer', // the results key: letters, digits and _, unique in the request
+    groupBy: [{ sourcePath: '$.data.buyer', targetPath: 'buyer' }],
+    fields: [
+      { dataPaths: ['$.data.qty'], operations: ['sum'], targetPath: 'totalQty' },
+      { dataPaths: ['$.work.id'], operations: ['count'], targetPath: 'orders' },
+    ],
+  }],
+});
+// totals.aggregations.byBuyer → [{ buyer: 'Acme', totalQty: 24473.3, orders: 12 }, …]
+// Paths are ABSOLUTE: $.data.<field> plus $.work.* (work) or $.asset.* (asset);
+// a relative path or any other root 400s. Evaluation problems come back as
+// strings in totals.warnings next to partial figures — never a thrown error —
+// so surface them. An empty aggregations list rejects with INVALID_ARG. The
+// SDK README's "Aggregations" section has formulas, calculations, conditions
+// and the full path list.
 
 // Fuzzy type-ahead across display fields is the one thing search can't do —
 // that is assets.quickSearch (the v3 endpoint), and only for that.
@@ -731,7 +764,7 @@ Rules:
 - **Never mount a `QueryClientProvider` with a client of your own** — that shadows the per-app client the shell mounts and breaks shell-managed caching. The SDK hooks need no provider at all: they pass the resolved client explicitly (host client when federated, per-bundle fallback standalone).
 - **If the app calls react-query directly, wrap it in `<AppQueryProvider>`** (SDK >= 0.7.0, from `@rise-x/apps-sdk/query`; the scaffold's `App.tsx` already does). Plain APIs — `useQuery(flowQueries.list(args))`, `useQueryClient()`, devtools — read the client from context, and standalone dev has no provider, so they throw *"No QueryClient set"* the moment you leave the SDK hooks. `AppQueryProvider` publishes the *resolved* client, so it re-publishes the host's client when federated and the fallback when standalone.
 - **The `@tanstack/react-query` share — `{ singleton: true, requiredVersion: '^5.0.0' }`, WITHOUT `import: false`** — belongs to the preset on a preset-built app, and to the app's own `shared` block on a webpack one. The missing `import: false` is deliberate: the bundled fallback keeps the app working on a host that doesn't share it. Don't shadow or remove it either way, or shell-managed caching breaks.
-- Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useWorkSearch/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetQuickSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
+- Read hooks: `useFlows/useFlow/useFlowConfig/useFlowLayout/useFlowTask`, `useWork/useWorkData/useWorkRows/useWorkSearch/useWorkAggregations/useRelatedWork/useWorkAudit`, `useAssetTypes/useAsset/useAssetSearch/useAssetAggregations/useAssetQuickSearch/useAssetRows/useRelatedAssets`, `useAgents/useAgent/useAgentChats/useAgentChat/useAgentChatMessages`. All accept trailing `SdkQueryOptions` (`enabled`, `staleTime`, …); errors are `ConnectorError`.
 - Mutations with built-in invalidation: `useStartWork`, `usePatchWorkData`, `useSubmitWork`, `useDeleteWork`, `useCreateAsset`, `useStartEditAsset`, `useCloneAsset`, `useDeleteAsset`, `useCreateAgent`, `useUpdateAgent`, `useDeleteAgent`, `useRenameAgentChat`, `useDeleteAgentChat`. If you write via a raw connector instead, call `invalidateAppSdkQueries(useAppQueryClient())` after.
 - Keys are environment-scoped (`['rise-apps-sdk', envId, …]`) — ecosystem switches refetch automatically; `queryKeys` is exported for targeted invalidation. Advanced react-query features (select/suspense/prefetch) go through the factories: `useQuery(flowQueries.list(args))`.
 - SSE streams (`agents.run`, chat `send`) and the async iterators stay on the connectors — don't wrap them in queries.
