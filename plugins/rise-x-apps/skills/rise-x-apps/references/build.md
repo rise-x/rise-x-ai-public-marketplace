@@ -529,8 +529,8 @@ import { useFlows, useWorkRows, useSubmitWork, queryKeys } from '@rise-x/apps-sd
 | Connector | Domain | Key methods |
 | --- | --- | --- |
 | `flows` | flow discovery (read-only) | `list` (**work flows only**), `get`, `findTask`/`findTaskIn`, `getConfig`, `getLayout`, `flattenLayoutFields` |
-| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `aggregate` (SDK >= 0.21.0), `listRelated`, `getAudit`, `getMyAccess` |
-| `assets` | typed records ("entities"/"things") | `types` (**asset-type flows**), `get`, `search`, `aggregate` (SDK >= 0.21.0), `quickSearch`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
+| `work` | work items (read + write) | `start`, `get`, `getData`, `patchData`, `submit`, `delete`, `list`/`iterate`, `search`, `aggregate` (SDK >= 0.22.0), `listRelated`, `getAudit`, `getMyAccess` |
+| `assets` | typed records ("entities"/"things") | `types` (**asset-type flows**), `get`, `search`, `aggregate` (SDK >= 0.22.0), `quickSearch`, `list`/`iterate`, `listRelated`, `create`, `startEdit`, `clone`, `delete` |
 | `agents` | configurable AI (config CRUD + streamed runs + server-persisted chats) | `list`, `get`, `create`, `update`, `delete`, `run`, `createChat`, `listChats`, `getChat`, `renameChat`, `deleteChat`, `getChatMessages` |
 | `attachments` | work-attachment blobs (SDK >= 0.12) | `getBlob`, `upload`, `delete` |
 | `offline` | connectivity, the offline queue, and downloads (SDK >= 0.12) | see `references/offline.md` |
@@ -611,7 +611,7 @@ const page = await work.search({
 // row.created / row.lastModified are ISO strings, but DATE VALUES INSIDE
 // row.data arrive as {date, ticks, offset} objects — use the .date property,
 // never new Date(row.data.x) directly.
-// Opt-in row fields (SDK >= 0.21.0): assignedRoles, acl, stepEvents,
+// Opt-in row fields (SDK >= 0.22.0): assignedRoles, acl, stepEvents,
 // attachments and relationships are on a row ONLY when `fields` names them, or
 // a sub-path such as 'stepEvents.modifiedBy'; otherwise they stay undefined.
 // For "who completed this step", read row.stepEvents — each entry's stepName,
@@ -651,7 +651,7 @@ const assetPage = await assets.search({
 // `fields` omits them; other scalars drop out once `fields` is set.
 
 // Totals, counts and group-bys over everything a filter matches belong on
-// work.aggregate / assets.aggregate (SDK >= 0.21.0): one request, computed on
+// work.aggregate / assets.aggregate (SDK >= 0.22.0): one request, computed on
 // the server over every row the user may read. Never page through search rows
 // to sum them client-side. It reads NO rows — run it beside the list search
 // with the same filter (same mandatory flowOriginId pin; the bound
